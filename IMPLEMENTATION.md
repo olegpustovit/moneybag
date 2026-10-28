@@ -19,9 +19,9 @@ The v0.4 reference is a full product specification, not a request to deploy its 
 - [x] MCP: all 64 specified typed tools, truthful annotations, scoped toolsets, separate full/read-only HTTP, stdio, eight resources and five prompts, SDK-based contract/transport/isolation tests.
 - [x] UI: faithful sidebar/dashboards/grids/editor/spec/console/history/settings, accessible, responsive, theme states, useful empty/error states, every action uses shared workflows.
 - [x] Data ingestion handoff: user will have Grokbot populate real data. Import workflows and provenance are implemented; all eight original scenario forecasts pass the private parity check. No fabricated transaction history.
-- [ ] Operations: systemd service and jobs, atomic deploy/rollback, validated health on 6459. Backups and restore drills are excluded at the owner's request.
-- [ ] Publication: public GitHub repository, accurate README, synthetic screenshots, license, checks/CI, no private data or credentials.
-- [ ] Completion audit: rendered desktop/mobile, security/integration tests, live MCP workflows, fidelity review, design documentation, production state verified.
+- [x] Operations: systemd service and jobs, atomic deploy/rollback, validated health on 6459. Backups and restore drills are excluded at the owner's request.
+- [x] Publication: public GitHub repository, accurate README, synthetic screenshots, license, checks/CI, no private data or credentials.
+- [x] Completion audit: rendered desktop/mobile, security/integration tests, live MCP workflows, fidelity review, design documentation, production state verified.
 
 Verified on 2026-10-28:
 
@@ -31,3 +31,9 @@ Verified on 2026-10-28:
 - The dependency scan reports zero reachable vulnerabilities. Its remaining non-reachable advisories are not a claim that all dependencies have no advisories.
 
 Cost lots require explicit per-unit costs on acquisitions and disposals; missing costs stay unknown. ECB is the configured automatic market-price feed. Metal/security prices can be supplied with `rate_set` without inventing an unconfigured provider. Live third-party ChatGPT and Grok account handshakes are not verified by the SDK transport suite.
+
+Production deploy and subsequent upgrade both passed their release-version health checks. The smdctl user service is active/enabled on oracle-vm and the public HTTPS health endpoint responds. Existing standalone MongoDB 8.0.16 is reused; its service/configuration was not changed. First-owner setup is ready; no owner credentials or financial records were fabricated.
+
+Finish review disposition: **ship**, scoped to the three scored accessibility fixes (mobile chart lettering, exact chart-data alternatives, and labelled keyboard scrolling); all three were resolved and recaptured. DESIGN.md and the schema-v2 design sidecar document the finished CSS. Every public screenshot has embedded capture provenance. Targeted race checks pass for previews, OAuth, dashboard rendering, audit and HTTP packages.
+
+Public repository: https://github.com/olegpustovit/moneybag. GitHub CI passed on application/deployment commit `27a6bbb6b2075b439a36c382120f6177e04604ff`: https://github.com/olegpustovit/moneybag/actions/runs/40755489538. It covers formatting, Go tests/vet/build, real standalone MongoDB 7.0 integration and Chromium browser workflows. Production uses the same tested application code in release `27a6bbb6b207-20261028193419`; the subsequent handoff commit changes only documentation and a deployment-script comment.

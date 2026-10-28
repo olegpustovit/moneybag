@@ -1,5 +1,7 @@
 # Moneybag
 
+[![Check](https://github.com/olegpustovit/moneybag/actions/workflows/check.yml/badge.svg)](https://github.com/olegpustovit/moneybag/actions/workflows/check.yml)
+
 An invite-only finance engine for people and MCP agents. A Go binary serves the ledger, imports, budgets, forecasts, dashboards, OAuth and the web UI.
 
 ![Moneybag budget dashboard with synthetic example data](docs/screenshots/dashboard-light.png)
@@ -30,7 +32,7 @@ MONEYBAG_PUBLIC_URL=http://127.0.0.1:6459 ./bin/moneybag
 
 Save the setup token privately before starting, then visit `/setup` to create the owner. Further users need invitations. Set `MONEYBAG_SECRET_KEY` to a stable base64-encoded 32-byte key before connecting feeds. PNG rendering needs `MONEYBAG_CHROMIUM_BIN` pointing to a working Chromium executable.
 
-[Configuration](docs/configuration.md) · [Deployment and operations](docs/operations.md) · [Architecture and data model](docs/architecture.md)
+[Configuration](docs/configuration.md) · [Deployment and operations](docs/operations.md) · [Architecture and data model](docs/architecture.md) · [Design system](DESIGN.md)
 
 ## Connect an agent
 

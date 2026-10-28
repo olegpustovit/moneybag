@@ -18,6 +18,7 @@ previous=$(readlink current || true)
 ln -s "releases/$2" next
 mv -Tf next current
 started=true
+# shortcut: reuse the installed unit; update its definition when smdctl.yml settings change.
 if [[ -f "$HOME/.config/systemd/user/smdctl-moneybag.service" ]]; then
  smdctl restart moneybag || started=false
 else

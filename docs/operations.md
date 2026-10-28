@@ -6,7 +6,7 @@ Production uses the existing standalone MongoDB on oracle-vm, one shared `moneyb
 
 Create `/home/snowbear/ci/moneybag/moneybag.env` with mode `0600` using `deploy/env.example`. Preserve its secret key across releases. Set `MONEYBAG_CHROMIUM_BIN` to a working Chromium installation; the VM already has `/opt/google/chrome/chrome`.
 
-Run `deploy/deploy.sh` from a committed checkout. It builds an ARM64 binary, copies a versioned release, atomically replaces `current`, installs the smdctl user service and checks the running release's health/version. A failed upgrade restores the previous symlink. Old releases remain available for manual rollback.
+Run `deploy/deploy.sh` from a committed checkout. It builds an ARM64 binary, copies a versioned release, atomically replaces `current`, installs the smdctl user service and checks the running release's health/version. A failed upgrade restores the previous symlink. Old releases remain available for manual rollback. Subsequent deploys restart the existing user service. If unit-level settings in `smdctl.yml` change, update that service definition separately; runtime settings are read from the private environment file at restart.
 
 ```sh
 ssh oracle-vm 'bash -lc "smdctl status moneybag"'
