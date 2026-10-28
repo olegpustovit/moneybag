@@ -143,6 +143,16 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if e = book.Verify(ctx, pa); e != nil {
 		t.Fatal(e)
 	}
+	if _, e = book.CreateAccount(ctx, pb, ledger.Account{ID: "assets:usd", Type: "asset", Name: "USD", Commodities: []string{"USD"}}); e != nil {
+		t.Fatal(e)
+	}
+	fee := ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}
+	if _, e = book.Transfer(ctx, pb, ledger.TransferInput{Date: "2026-10-02", FromAccount: "assets:bank", ToAccount: "assets:usd", Amount: ledger.Amount{Value: ledger.MustDecimal("10"), Commodity: "EUR"}, Received: &ledger.Amount{Value: ledger.MustDecimal("11"), Commodity: "USD"}, Fee: &fee}); e != nil {
+		t.Fatal("exchange should provision system accounts", e)
+	}
+	if conv, e := book.Account(ctx, pb, "equity:conversion"); e != nil || len(conv.Commodities) != 2 {
+		t.Fatal("conversion account", conv, e)
+	}
 	if e = book.Verify(ctx, pb); e != nil {
 		t.Fatal(e)
 	}

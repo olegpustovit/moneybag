@@ -15,7 +15,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -287,18 +286,8 @@ func (s *Service) Resolve(ctx context.Context, p principal.Principal, in Resolve
 				return e
 			}
 			if delta.Rat().Sign() != 0 {
-				adjustments, accountErr := s.ledger.Account(tx, p, "equity:adjustments")
-				if errors.Is(accountErr, principal.ErrNotFound) {
-					if _, e = s.ledger.CreateAccount(tx, p, ledger.Account{ID: "equity:adjustments", Name: "Reconciliation adjustments", Type: "equity", Commodities: []string{a.Amount.Commodity}}); e != nil {
-						return e
-					}
-				} else if accountErr != nil {
-					return accountErr
-				} else if !slices.Contains(adjustments.Commodities, a.Amount.Commodity) {
-					commodities := append(adjustments.Commodities, a.Amount.Commodity)
-					if _, e = s.ledger.UpdateAccount(tx, p, ledger.AccountUpdate{ID: adjustments.ID, Commodities: &commodities}); e != nil {
-						return e
-					}
+				if e = s.ledger.EnsureAccount(tx, p, ledger.Account{ID: "equity:adjustments", Name: "Reconciliation adjustments", Type: "equity", Commodities: []string{a.Amount.Commodity}}); e != nil {
+					return e
 				}
 				if d.AdjustmentID == "" {
 					d.AdjustmentID = ulid.Make().String()

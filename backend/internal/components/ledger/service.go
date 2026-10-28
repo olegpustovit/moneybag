@@ -62,6 +62,29 @@ type AccountResult struct {
 	Account Account `json:"account"`
 	EventID string  `json:"event_id"`
 }
+// EnsureAccount creates a system account, or adds commodities it lacks, so built-in postings work for new users.
+func (s *Service) EnsureAccount(ctx context.Context, p principal.Principal, a Account) error {
+	old, e := s.Account(ctx, p, a.ID)
+	if errors.Is(e, principal.ErrNotFound) {
+		_, e = s.CreateAccount(ctx, p, a)
+		return e
+	}
+	if e != nil {
+		return e
+	}
+	commodities := old.Commodities
+	for _, c := range a.Commodities {
+		if !slices.Contains(commodities, c) {
+			commodities = append(commodities, c)
+		}
+	}
+	if len(commodities) == len(old.Commodities) {
+		return nil
+	}
+	_, e = s.UpdateAccount(ctx, p, AccountUpdate{ID: a.ID, Commodities: &commodities})
+	return e
+}
+
 type AccountUpdate struct {
 	ID          string    `json:"id"`
 	Name        *string   `json:"name,omitempty"`
@@ -351,6 +374,16 @@ func (s *Service) Transfer(ctx context.Context, p principal.Principal, in Transf
 			return EntryResult{}, fmt.Errorf("fee cannot be negative")
 		}
 		posts = append(posts, Posting{Account: in.FromAccount, Amount: Amount{in.Fee.Value.Negate(), in.Fee.Commodity}}, Posting{Account: "expenses:fees", Amount: *in.Fee})
+	}
+	if a.Commodity != recv.Commodity {
+		if e := s.EnsureAccount(ctx, p, Account{ID: "equity:conversion", Name: "Currency conversion", Type: "equity", Commodities: []string{a.Commodity, recv.Commodity}}); e != nil {
+			return EntryResult{}, e
+		}
+	}
+	if in.Fee != nil {
+		if e := s.EnsureAccount(ctx, p, Account{ID: "expenses:fees", Name: "Fees", Type: "expense", Commodities: []string{in.Fee.Commodity}}); e != nil {
+			return EntryResult{}, e
+		}
 	}
 	return s.PostLinked(ctx, p, EntryInput{Date: in.Date, Payee: "Transfer", Postings: posts, Commit: true}, "transfer", nil, "transfer_record", "")
 }
