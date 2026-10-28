@@ -241,8 +241,12 @@ func (s *Service) Add(ctx context.Context, p principal.Principal, in AddInput) (
 				break
 			}
 		}
-		if index < 0 {
+		if index < 0 && in.Page == "" {
 			return fmt.Errorf("page not found")
+		}
+		if index < 0 {
+			spec.Pages = append(spec.Pages, Page{ID: in.Page, Title: in.Page})
+			index = len(spec.Pages) - 1
 		}
 		span := 12
 		if in.Placement != nil && in.Placement.Span != 0 {

@@ -181,6 +181,15 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		}
 	}
 	createShared("fixed", "42", map[string]dashboard.Query{})
+	if _, e = dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "fixed", Page: "details", Component: dashboard.Component{ID: "note", Type: "text", MD: "extra"}}); e != nil {
+		t.Fatal("add to a new page", e)
+	}
+	if added, e := dash.Get(ctx, pa, "fixed", "draft"); e != nil || len(added.Spec.Pages) != 2 || added.Spec.Pages[1].Layout[0].Cols[0].Component != "note" {
+		t.Fatal("new page layout", added, e)
+	}
+	if _, e = shares.Share(ctx, pa, sharing.ShareInput{DashboardID: "fixed", Grantee: "missing@example.test", Role: "viewer"}); !errors.Is(e, principal.ErrNotFound) || !strings.Contains(e.Error(), "grantee") {
+		t.Fatal("missing grantee error", e)
+	}
 	snap, e := shares.Share(ctx, pa, sharing.ShareInput{DashboardID: "fixed", Grantee: pb.UserID, Role: "viewer"})
 	if e != nil {
 		t.Fatal(e)

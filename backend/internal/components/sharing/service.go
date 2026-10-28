@@ -176,7 +176,7 @@ func (s *Service) Share(ctx context.Context, p principal.Principal, in ShareInpu
 		grantee, e = s.identity.User(ctx, in.Grantee)
 	}
 	if e != nil {
-		return ShareResult{}, e
+		return ShareResult{}, fmt.Errorf("grantee: %w", e)
 	}
 	if grantee.ID == p.UserID {
 		return ShareResult{}, fmt.Errorf("dashboard is already yours")

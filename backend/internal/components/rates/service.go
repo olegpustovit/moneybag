@@ -158,6 +158,7 @@ func (s *Service) Convert(ctx context.Context, p principal.Principal, a ledger.A
 	d, e := ledger.ParseDecimal(v.FloatString(2))
 	return ledger.Amount{Value: d, Commodity: quote}, e
 }
+
 type ecbQuote struct{ Pair, At, Value string }
 
 // parseECB reads every day of an ECB eurofxref XML document, oldest data included.

@@ -46,7 +46,7 @@ func registerWorkflows(r registration, s Services) {
 	}) (classify.ReclassResult, error) {
 		return s.Classify.Apply(ctx, p, classify.PreviewInput{RuleID: in.RuleID, From: in.From, To: in.To}, in.Commit)
 	})
-	add(r, "import_start", "import", "import:write", "Use this when you receive a bank statement. Supply owned account, privatbank_xlsx/wise_csv/generic_csv/plaid, and exactly one public HTTPS file_url or content_b64. Statements are staged with provenance and dedupe keys; no money is posted.", false, false, s.Imports.Start)
+	add(r, "import_start", "import", "import:write", "Use this when you receive a bank statement. Supply owned account, privatbank_xlsx/wise_csv/generic_csv/plaid, and exactly one public HTTPS file_url or content_b64. generic_csv mapping names columns; date_format is iso, dmy or mdy. Statements are staged with provenance and dedupe keys; no money is posted.", false, false, s.Imports.Start)
 	add(r, "import_preview", "import", "ledger:read", "Use this to inspect staged proposals and duplicate candidates. Pages contain at most 100 rows; pass next_cursor until omitted.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		BatchID string `json:"batch_id"`
 		Cursor  int    `json:"cursor,omitempty"`

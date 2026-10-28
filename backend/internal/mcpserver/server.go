@@ -200,22 +200,30 @@ func New(s Services, opts Options) *mcp.Server {
 		}{q}, e
 	})
 	add(r, "rate_set", "rates", "ledger:write", "Use this when recording a manual FX, metal or security quote. Positive decimal value, BASE/QUOTE pair, RFC3339 at and source are required.", false, false, s.Rates.Set)
-	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Backfills ECB daily reference rates for the last 90 days and returns new or changed quotes; manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	type refreshed struct {
+		Written int           `json:"written"`
+		Latest  []rates.Quote `json:"latest"`
+	}
+	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Backfills ECB daily reference rates for the last 90 days; returns how many quotes were new or changed and the newest day among them. Manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		Sources []string `json:"sources,omitempty"`
-	}) (struct {
-		Updated []rates.Quote `json:"updated"`
-	}, error) {
+	}) (refreshed, error) {
 		for _, source := range in.Sources {
 			if source != "ecb" {
-				return struct {
-					Updated []rates.Quote `json:"updated"`
-				}{}, fmt.Errorf("feed %q is not configured; use rate_set for manual quotes", source)
+				return refreshed{}, fmt.Errorf("feed %q is not configured; use rate_set for manual quotes", source)
 			}
 		}
 		q, e := s.Rates.RefreshECB(ctx, p)
-		return struct {
-			Updated []rates.Quote `json:"updated"`
-		}{q}, e
+		out := refreshed{Written: len(q), Latest: []rates.Quote{}}
+		newest := ""
+		for _, x := range q {
+			newest = max(newest, x.At)
+		}
+		for _, x := range q {
+			if x.At == newest {
+				out.Latest = append(out.Latest, x)
+			}
+		}
+		return out, e
 	})
 	add(r, "budget_get", "budget", "ledger:read", "Use this when comparing EUR spending with your budget for YYYY-MM. Includes current actuals and the previous six complete calendar months' average.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		Month string `json:"month,omitempty"`
@@ -276,7 +284,7 @@ func New(s Services, opts Options) *mcp.Server {
 		return access.Dashboard.Get(ctx, access.Principal, access.ID, v)
 	})
 	add(r, "dashboard_create", "dashboard", "dash:write", "Use this when creating a dashboard draft. Optional from_template is budget-vs-actual or forecast. It belongs to your authenticated user.", false, false, s.Dashboard.Create)
-	add(r, "dashboard_add_component", "dashboard", "dash:write", "Use this when adding a KPI, table, chart, budget_bars, scenario_compare or text note. New components append a layout row by default. Spans are 1..12.", false, false, func(ctx context.Context, p principal.Principal, in dashboard.AddInput) (dashboard.EditResult, error) {
+	add(r, "dashboard_add_component", "dashboard", "dash:write", "Use this when adding a KPI, table, chart, budget_bars, scenario_compare or text note. New components append a layout row by default; a missing named page is added. Spans are 1..12.", false, false, func(ctx context.Context, p principal.Principal, in dashboard.AddInput) (dashboard.EditResult, error) {
 		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
 		if e != nil {
 			return dashboard.EditResult{}, e
