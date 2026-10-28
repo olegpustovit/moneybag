@@ -46,9 +46,24 @@ func TestAllChartMarksAndTextEscape(t *testing.T) {
 	for _, mark := range []string{"bar", "line", "area", "stack", "donut"} {
 		spec := Spec{Data: map[string]Query{"rows": {From: "journal"}}, Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{12, "chart"}}}}}}, Components: []Component{{ID: "chart", Type: "chart", Mark: mark, Rows: "rows", Encoding: &Encoding{X: Axis{Field: "name"}, Y: Axis{Field: "amount"}}}}}
 		out, e := engine.Execute(context.Background(), principal.Principal{}, spec)
-		if e != nil || !out.Validation.OK || !strings.Contains(out.HTML, "<svg") {
+		if e != nil || !out.Validation.OK || !strings.Contains(out.HTML, "<svg") || !strings.Contains(out.HTML, "View chart data") || !strings.Contains(out.HTML, `tabindex="0" role="region"`) {
 			b, _ := json.Marshal(out.Validation)
 			t.Fatalf("%s: %s %v", mark, b, e)
+		}
+	}
+}
+
+func TestChartDataExposesExactValuesAndReference(t *testing.T) {
+	expr, _ := expressions.New()
+	engine := Engine{Expr: expr, Reader: fixtureReader{}}
+	spec := Spec{Data: map[string]Query{"rows": {From: "journal"}}, Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{12, "chart"}}}}}}, Components: []Component{{ID: "chart", Type: "chart", Title: "Monthly values", Mark: "bar", Rows: "rows", Encoding: &Encoding{X: Axis{Field: "name"}, Y: Axis{Field: "amount"}, Color: &Axis{Field: "group"}}, Rule: &Rule{Y: "25.5", Label: "'Budget'"}}}}
+	result, err := engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || !result.Validation.OK {
+		t.Fatal(result.Validation, err)
+	}
+	for _, want := range []string{`<th scope="row">A</th>`, `<td class="r">20</td>`, `Reference: Budget`, `25.5`, `&lt;script&gt;bad&lt;/script&gt;`} {
+		if !strings.Contains(result.HTML, want) {
+			t.Fatalf("missing accessible chart data %q", want)
 		}
 	}
 }

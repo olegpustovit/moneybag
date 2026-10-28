@@ -148,7 +148,7 @@ func (x *execution) render(c Component) (string, any, error) {
 			return "", nil, fmt.Errorf("table needs 1..30 columns")
 		}
 		var b strings.Builder
-		b.WriteString(`<div class="tbl"><table><thead><tr>`)
+		b.WriteString(`<div class="tbl" tabindex="0" role="region" aria-label="` + escape(c.Title+" table") + `"><table><thead><tr>`)
 		for _, col := range c.Columns {
 			b.WriteString(`<th>` + escape(col.Label) + `</th>`)
 		}
@@ -309,7 +309,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 		colorIndex[s] = i
 	}
 	var b strings.Builder
-	b.WriteString(`<div class="chart"><svg viewBox="0 0 560 250" role="img" aria-label="` + escape(c.Title) + `"><title>` + escape(c.Title) + `</title>`)
+	b.WriteString(`<div class="chart" tabindex="0" role="region" aria-label="` + escape(c.Title+" chart; scroll to see all values") + `"><svg viewBox="0 0 560 250" role="img" aria-label="` + escape(c.Title) + `"><title>` + escape(c.Title) + `</title>`)
 	if c.Mark == "donut" {
 		total := 0.0
 		for _, p := range points {
@@ -331,6 +331,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 			offset += fraction
 		}
 		b.WriteString(`</svg></div>`)
+		b.WriteString(chartData(c.Title, points, nil, ""))
 		return b.String(), points, nil
 	}
 	low, high := 0.0, 1.0
@@ -455,5 +456,28 @@ func (x *execution) chart(c Component) (string, any, error) {
 		b.WriteString(`</div>`)
 	}
 	b.WriteString(`</div>`)
+	var reference *float64
+	if hasRule {
+		reference = &rule
+	}
+	b.WriteString(chartData(c.Title, points, reference, ruleLabel))
 	return b.String(), points, nil
+}
+
+func chartData(title string, points []chartPoint, reference *float64, label string) string {
+	var b strings.Builder
+	b.WriteString(`<details class="chart-data"><summary>View chart data</summary><div class="tbl" tabindex="0" role="region" aria-label="` + escape(title+" chart data") + `"><table><caption>` + escape(title) + `</caption><thead><tr><th scope="col">Series</th><th scope="col">Category</th><th scope="col">Value</th></tr></thead><tbody>`)
+	for _, p := range points {
+		series := p.Series
+		if series == "" {
+			series = "Value"
+		}
+		b.WriteString(`<tr><th scope="row">` + escape(series) + `</th><td>` + escape(p.X) + `</td><td class="r">` + escape(strconv.FormatFloat(p.Y, 'f', -1, 64)) + `</td></tr>`)
+	}
+	b.WriteString(`</tbody>`)
+	if reference != nil {
+		b.WriteString(`<tfoot><tr><th colspan="2" scope="row">Reference: ` + escape(label) + `</th><td class="r">` + escape(strconv.FormatFloat(*reference, 'f', -1, 64)) + `</td></tr></tfoot>`)
+	}
+	b.WriteString(`</table></div></details>`)
+	return b.String()
 }

@@ -131,7 +131,12 @@ input.in:focus,textarea.in:focus{border-color:var(--focus)}
 .bbar .tr i.over{background:var(--neg)}
 .bbar .tr b{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink)}
 .bbar .v{text-align:right;font-variant-numeric:tabular-nums;color:var(--text2)}
+.chart{overflow-x:auto}
 .chart svg{display:block;width:100%;height:auto}
+.chart-data{margin-top:12px;font-size:12px}
+.chart-data summary{cursor:pointer;color:var(--text2);padding:4px 0}
+.chart-data caption{text-align:left;padding:8px 12px;color:var(--text2)}
+@media(max-width:620px){.chart svg{min-width:560px}}
 .chart text{font:11px var(--mono);fill:var(--text3)}
 .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px;color:var(--text2);margin-bottom:6px}
 .legend i{display:inline-block;width:10px;height:10px;margin-right:6px;vertical-align:-1px}
