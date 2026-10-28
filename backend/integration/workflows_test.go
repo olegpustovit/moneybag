@@ -25,6 +25,9 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -109,6 +112,39 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	after, e := book.Entries(ctx, pa, ledger.EntriesInput{Limit: 500})
 	if e != nil || len(before.Items) != len(after.Items) {
 		t.Fatal("import retry duplicated journal entries", e)
+	}
+	feedServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer synthetic-feed-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_, _ = w.Write([]byte("Date,Payee,Amount,Currency\n2026-09-30,Old feed row,-1.00,EUR\n2026-10-05,Feed cafe,-4.20,EUR\n2026-10-06,Feed market,-8.00,EUR\n"))
+	}))
+	t.Cleanup(feedServer.Close)
+	feedClient := feedServer.Client()
+	// The certificate covers example.com; dial the local listener so the public-URL checks still apply.
+	feedClient.Transport.(*http.Transport).DialContext = func(ctx context.Context, network, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, network, feedServer.Listener.Addr().String())
+	}
+	imp.SetHTTPClient(feedClient)
+	imp.SetSecretKey([]byte("0123456789abcdef0123456789abcdef"))
+	feed := imports.FeedInput{ID: "finance_connector", URL: "https://example.com/statement.csv", Account: "assets:bank", Format: "generic_csv", Token: "synthetic-feed-token"}
+	if _, e = imp.ConfigureFeed(ctx, pa, feed); e != nil {
+		t.Fatal(e)
+	}
+	synced, e := imp.Sync(ctx, pa, "finance_connector", "2026-10-01")
+	if e != nil || synced.RowsParsed != 2 || synced.Period.From != "2026-10-05" {
+		t.Fatal("feed sync", synced, e)
+	}
+	if _, e = imp.Sync(ctx, pb, "finance_connector", ""); e == nil {
+		t.Fatal("feed configured for another user synced")
+	}
+	feed.Token = "wrong-token"
+	if _, e = imp.ConfigureFeed(ctx, pa, feed); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = imp.Sync(ctx, pa, "finance_connector", ""); e == nil {
+		t.Fatal("rejected credential synced")
 	}
 	rule, e := classes.Upsert(ctx, pa, classify.RuleInput{Priority: 1, Match: "row.payee == 'Store'", Set: classify.RuleSet{Account: "expenses:food", Tags: []string{"food"}}, Note: "Synthetic category correction"})
 	if e != nil {

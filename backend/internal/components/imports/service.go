@@ -18,6 +18,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -98,11 +99,12 @@ type Service struct {
 	reconcile *reconcile.Service
 	audit     *audit.Service
 	secret    []byte
+	http      *http.Client
 }
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
 func NewService(r *MongoRepository, l *ledger.Service, c *classify.Service, rec *reconcile.Service, a *audit.Service) *Service {
-	return &Service{repo: r, ledger: l, classify: c, reconcile: rec, audit: a}
+	return &Service{repo: r, ledger: l, classify: c, reconcile: rec, audit: a, http: safefetch.Client()}
 }
 func importWriter(p principal.Principal) principal.Principal {
 	p.Scopes = append(append([]string{}, p.Scopes...), "ledger:read", "ledger:write")
@@ -136,7 +138,7 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 	var content []byte
 	var e error
 	if in.FileURL != "" {
-		content, _, e = safefetch.Read(ctx, safefetch.Client(), in.FileURL, 8*1024*1024)
+		content, _, e = safefetch.Read(ctx, s.http, in.FileURL, 8*1024*1024)
 	} else {
 		content, e = base64.StdEncoding.DecodeString(in.ContentB64)
 	}

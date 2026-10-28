@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -37,6 +38,9 @@ type FeedInput struct {
 }
 
 func (s *Service) SetSecretKey(key []byte) { s.secret = append([]byte{}, key...) }
+
+// SetHTTPClient replaces the public-only statement client; tests use it to serve statements over local TLS.
+func (s *Service) SetHTTPClient(c *http.Client) { s.http = c }
 func (s *Service) seal(owner, id, raw string) (string, error) {
 	if len(s.secret) != 32 {
 		return "", fmt.Errorf("configure MONEYBAG_SECRET_KEY before connecting a feed")
@@ -144,7 +148,7 @@ func (s *Service) Sync(ctx context.Context, p principal.Principal, id, since str
 	if e != nil {
 		return StartResult{}, e
 	}
-	content, _, e := safefetch.ReadBearer(ctx, safefetch.Client(), feed.URL, 8*1024*1024, token)
+	content, _, e := safefetch.ReadBearer(ctx, s.http, feed.URL, 8*1024*1024, token)
 	if e != nil {
 		return StartResult{}, fmt.Errorf("feed download failed; check its URL and credential in Settings")
 	}
