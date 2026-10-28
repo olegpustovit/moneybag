@@ -39,7 +39,13 @@ func (s *Service) RestorePublication(ctx context.Context, p principal.Principal,
 		if _, e := s.Publish(ctx, p, id, old.PublishedVersion, reason); e != nil {
 			return e
 		}
-		return nil
+		// Publishing the draft cleared its pointer; give the undone draft back so edits continue from it.
+		h, e := s.head(ctx, p, id)
+		if e != nil || h.DraftVersion != 0 || old.DraftVersion == 0 {
+			return e
+		}
+		_, e = s.repo.db.Collection("dashboards").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"draft_version": old.DraftVersion}})
+		return e
 	}
 	h, e := s.head(ctx, p, id)
 	if e != nil {

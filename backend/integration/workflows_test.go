@@ -241,6 +241,24 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("revoked grant still works", e)
 	}
 	hist := &history.Service{Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Reconcile: rec}
+	createShared("undo-publish", "1", map[string]dashboard.Query{})
+	edited, e := dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-publish", Component: dashboard.Component{ID: "note", Type: "text", MD: "v2"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = dash.Publish(ctx, pa, "undo-publish", edited.DraftVersion, "Publish edit"); e != nil {
+		t.Fatal(e)
+	}
+	published, e := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_publish", Target: "undo-publish", Limit: 1})
+	if e != nil || len(published.Events) != 1 {
+		t.Fatal("publish event", published, e)
+	}
+	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: published.Events[0].ID, Reason: "Undo publish"}); e != nil {
+		t.Fatal(e)
+	}
+	if draft, e := dash.Get(ctx, pa, "undo-publish", "draft"); e != nil || draft.Version != edited.DraftVersion || draft.Status != "draft" {
+		t.Fatal("undoing a publish should restore its draft", draft.Version, draft.Status, e)
+	}
 	ro := pa
 	ro.Scopes = []string{"ledger:read"}
 	if _, e = hist.Undo(ctx, ro, history.UndoInput{EventID: update.EventID, Reason: "Scope test"}); !errors.Is(e, principal.ErrForbidden) {
