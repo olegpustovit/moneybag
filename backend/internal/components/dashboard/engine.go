@@ -362,7 +362,11 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			issue(fmt.Sprintf("/pages/%d/id", pi), fmt.Errorf("unique page id required"))
 		}
 		pageIDs[pg.ID] = true
-		output.WriteString(`<section class="dashboard-page"><h2>` + escape(pg.Title) + `</h2><div class="dash">`)
+		output.WriteString(`<section class="dashboard-page">`)
+		if len(spec.Pages) > 1 {
+			output.WriteString(`<h2>` + escape(pg.Title) + `</h2>`)
+		}
+		output.WriteString(`<div class="dash">`)
 		for ri, r := range pg.Layout {
 			span := 0
 			for _, col := range r.Cols {

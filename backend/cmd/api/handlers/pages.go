@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
@@ -13,6 +14,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"html/template"
 	"net/http"
 	"strconv"
@@ -175,7 +177,7 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request) {
 			if v.Status == "draft" {
 				data.DraftVersion = v.Version
 			}
-			data.Author = v.Author.Kind + ":" + v.Author.ID
+			data.Author = h.authorLabel(r.Context(), p, v.Author)
 			b, _ := json.MarshalIndent(v.Spec, "", "  ")
 			data.SpecJSON = string(b)
 			rendered, err := access.Dashboard.Preview(r.Context(), access.Principal, access.ID, r.URL.Query().Get("version"), nil)
@@ -205,7 +207,7 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request) {
 		data.Title = v.Spec.Title
 		data.CurrentVersion = v.Version
 		data.DashboardStatus = v.Status
-		data.Author = v.Author.Kind + ":" + v.Author.ID
+		data.Author = h.authorLabel(r.Context(), p, v.Author)
 		data.Note = v.Note
 		b, _ := json.MarshalIndent(v.Spec, "", "  ")
 		data.SpecJSON = string(b)
@@ -406,4 +408,25 @@ func mapRows(rows []map[string]any, columns []column) []gridRow {
 		out = append(out, row)
 	}
 	return out
+}
+
+// authorLabel names who wrote a dashboard version without exposing raw user or client IDs.
+func (h *Handler) authorLabel(ctx context.Context, p principal.Principal, a principal.Actor) string {
+	switch a.Kind {
+	case "human":
+		if a.ID == p.UserID {
+			return "by you"
+		}
+		return "by a collaborator"
+	case "agent":
+		if grants, e := h.oauth.Grants(ctx, p); e == nil {
+			for _, g := range grants {
+				if g.ClientID == a.ID {
+					return "by " + g.ClientName
+				}
+			}
+		}
+		return "by a connected agent"
+	}
+	return "by " + a.Kind
 }

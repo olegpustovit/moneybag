@@ -159,7 +159,7 @@ components:
 
 The Moneybag workspace is square, quiet and dense: a practical finance interface for repeated reading, editing and comparison. Its visual authority is the supplied Moneybag artifact and the durable brand commitments in PRODUCT.md. The implementation uses flat paper and recessed surfaces, fine shared borders, compact controls and restrained semantic color.
 
-The same workspace survives light, dark and system themes. Responsive layouts preserve task access with a scrolling workspace navigation, single-column panels and locally scrolling data. System sans serves interface text; system monospace distinguishes operational labels, identifiers and code. There is no separate display-type role or decorative image layer.
+The workspace follows the system light or dark preference. Responsive layouts preserve task access with a scrolling workspace navigation, single-column panels and locally scrolling data. System sans serves interface text; system monospace distinguishes operational labels, identifiers and code. There is no separate display-type role or decorative image layer.
 
 **Key Characteristics:**
 
@@ -173,7 +173,7 @@ Evidence: `backend/cmd/api/handlers/web/style.css`, `app.html`, `workflows.html`
 
 ## Colors
 
-Neutral paper and recessed surfaces carry most of the interface; color identifies data, financial meaning and interaction state. Frontmatter names retain the source custom-property names without their leading `--`; `-dark` identifies the corresponding dark-theme value. Explicit light/dark selection overrides the system preference, and the selected mode persists locally.
+Neutral paper and recessed surfaces carry most of the interface; color identifies data, financial meaning and interaction state. Frontmatter names retain the source custom-property names without their leading `--`; `-dark` identifies the corresponding dark-theme value. The theme follows the operating system preference; there is no in-app switcher.
 
 ### Primary
 
@@ -217,13 +217,13 @@ Neutral paper and recessed surfaces carry most of the interface; color identifie
 - **Label:** panel headers (`11px`, weight `600`, tracking `0.06em`, uppercase). Table headers use `0.05em`; sidebar group labels use `10.5px` and `0.07em`. These name operational groups and data panels.
 - **Identifier:** breadcrumbs (`12px` monospace), reduced to `10px` on mobile; component IDs (`9px`) are supplementary and hidden below the tablet breakpoint.
 - **Data:** KPI values (`26px`, weight `600`, tracking `-0.015em`), with `12px` supporting detail.
-- **Controls:** buttons (`13px`, weight `500`), inputs (`13px`, normal weight), and theme buttons (`12px` monospace, weight `500`).
+- **Controls:** buttons (`13px`, weight `500`), inputs (`13px`, normal weight).
 
 **The Data Before Decoration Rule.** Keep operational labels and identifiers compact and monospace; keep financial figures tabular and preserve a visible title-to-value hierarchy.
 
 ## Layout
 
-The centered application frame caps at `1480px`, with outer padding of `24px 28px 40px`. The header separates from the workspace with a single rule. The desktop shell uses a `230px` sidebar and a flexible main column; main padding is `22px 26px`. The dashboard has twelve columns with `12px` gaps and component-defined spans. Toolbar actions wrap, with `8px` gaps.
+The application shell fills the viewport with no header: a sticky full-height `248px` sidebar carries the workspace mark, navigation with glyph icons and the version footer, beside a flexible main column (padding `28px 40px 56px`, content capped at `1440px`). The dashboard has twelve columns with `12px` gaps and component-defined spans. Toolbar actions wrap, with `8px` gaps.
 
 The brand establishes a 4px spacing rhythm. The shipped controls also use compact optical insets (`7px 14px` buttons, `7px 10px` fields, `9px 14px` table cells); do not round these measured values into a fabricated uniform scale. Panels use `14px 16px` padding, reducing to `12px` at `1100px`.
 

@@ -117,3 +117,11 @@ func TestForecastTemplateWithEmptyNewUser(t *testing.T) {
 		t.Fatal(result.Validation, err)
 	}
 }
+
+func TestNiceStep(t *testing.T) {
+	for raw, want := range map[float64]float64{537.5: 1000, 450: 500, 120: 200, 0.3: 0.5, 1: 1, 7: 10} {
+		if got := niceStep(raw); got != want {
+			t.Errorf("niceStep(%v) = %v, want %v", raw, got, want)
+		}
+	}
+}

@@ -44,9 +44,9 @@ try{
  assert.equal(await page.locator('main .error:visible').count(),0,await page.locator('main').innerText());
  await page.getByRole('button',{name:'Spec',exact:true}).click();await page.locator('#spec-input').waitFor({state:'visible'});await page.getByRole('button',{name:'Validate',exact:true}).click();await page.getByText('Validation passed.',{exact:true}).waitFor();await page.getByRole('button',{name:'Close',exact:true}).click();
  await page.locator('#status').evaluate(el=>el.hidden=true);await mkdir('../docs/screenshots',{recursive:true});
- await page.getByRole('button',{name:'Light theme',exact:true}).click();await page.screenshot({path:'../docs/screenshots/dashboard-light.png',fullPage:true});
- await page.getByRole('button',{name:'Dark theme',exact:true}).click();await page.screenshot({path:'../docs/screenshots/dashboard-dark.png',fullPage:true});
- await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Light theme',exact:true}).click();await page.screenshot({path:'../docs/screenshots/dashboard-mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile page overflows');
+ await page.emulateMedia({colorScheme:'light'});await page.screenshot({path:'../docs/screenshots/dashboard-light.png',fullPage:true});
+ await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'../docs/screenshots/dashboard-dark.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'light'});await page.screenshot({path:'../docs/screenshots/dashboard-mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile page overflows');
  const axis=await page.locator('[data-component="monthly"] svg text').first().boundingBox();assert.ok(axis&&axis.height>=10,'Mobile chart labels are too small');
  const scrollTable=page.locator('[data-component="tbl"] .tbl');await scrollTable.focus();assert.equal(await scrollTable.evaluate(el=>document.activeElement===el),true);await scrollTable.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('[data-component="tbl"] .tbl').scrollLeft>0);
  await page.getByText('View chart data',{exact:true}).click();await page.getByRole('cell',{name:'2026-05',exact:true}).waitFor();assert.ok(await page.getByRole('rowheader',{name:'Reference: budget',exact:true}).count());

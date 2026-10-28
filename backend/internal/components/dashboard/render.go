@@ -149,8 +149,12 @@ func (x *execution) render(c Component) (string, any, error) {
 		}
 		var b strings.Builder
 		b.WriteString(`<div class="tbl" tabindex="0" role="region" aria-label="` + escape(c.Title+" table") + `"><table><thead><tr>`)
-		for _, col := range c.Columns {
-			b.WriteString(`<th>` + escape(col.Label) + `</th>`)
+		for i, col := range c.Columns {
+			if i > 0 {
+				b.WriteString(`<th class="r">` + escape(col.Label) + `</th>`)
+			} else {
+				b.WriteString(`<th>` + escape(col.Label) + `</th>`)
+			}
 		}
 		b.WriteString(`</tr></thead><tbody>`)
 		values := []map[string]any{}
@@ -368,19 +372,18 @@ func (x *execution) chart(c Component) (string, any, error) {
 			ruleLabel = fmt.Sprint(v)
 		}
 	}
-	pad := (high - low) * 0.08
-	high += pad
-	if low < 0 {
-		low -= pad
+	if high == low {
+		high = low + 1
 	}
+	step := niceStep((high - low) / 4)
+	low, high = math.Floor(low/step)*step, math.Ceil(high/step)*step
 	sy := func(v float64) float64 { return 12 + (high-v)/(high-low)*208 }
 	width := 492.0 / float64(len(categories))
 	catIndex := map[string]int{}
 	for i, c := range categories {
 		catIndex[c] = i
 	}
-	for i := 0; i <= 4; i++ {
-		v := low + (high-low)*float64(i)/4
+	for v := low; v <= high+step/2; v += step {
 		y := sy(v)
 		fmt.Fprintf(&b, `<line x1="56" x2="548" y1="%.3f" y2="%.3f" class="chart-grid"/><text x="48" y="%.3f" text-anchor="end">%s</text>`, y, y, y+4, escape(format(v, "int")))
 	}
@@ -480,4 +483,15 @@ func chartData(title string, points []chartPoint, reference *float64, label stri
 	}
 	b.WriteString(`</table></div></details>`)
 	return b.String()
+}
+
+// niceStep rounds a raw axis interval up to 1, 2 or 5 times a power of ten so ticks read as round numbers.
+func niceStep(raw float64) float64 {
+	magnitude := math.Pow(10, math.Floor(math.Log10(raw)))
+	for _, f := range []float64{1, 2, 5} {
+		if raw <= f*magnitude {
+			return f * magnitude
+		}
+	}
+	return 10 * magnitude
 }

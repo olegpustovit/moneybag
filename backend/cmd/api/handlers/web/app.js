@@ -1,15 +1,6 @@
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
-  const root = document.documentElement;
-  function theme(value) {
-    if (value === 'auto') root.removeAttribute('data-theme'); else root.dataset.theme = value;
-    document.querySelectorAll('[data-t]').forEach(b => { b.classList.toggle('on', b.dataset.t === value); b.setAttribute('aria-pressed', String(b.dataset.t === value)); });
-    try { localStorage.setItem('moneybag-theme', value); } catch {}
-  }
-  let saved = 'auto'; try { saved = localStorage.getItem('moneybag-theme') || 'auto'; } catch {}
-  theme(['auto', 'light', 'dark'].includes(saved) ? saved : 'auto');
-  document.querySelectorAll('[data-t]').forEach(b => b.addEventListener('click', () => theme(b.dataset.t)));
   if (!$('meta[name="csrf-token"]')) return;
   const csrf = $('meta[name="csrf-token"]').content;
   let requestID = 0, ready, protocol = '2026-07-28';
