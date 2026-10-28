@@ -150,6 +150,7 @@ func AllowedRedirect(raw string) bool {
 	}
 	return false
 }
+
 // RedirectMatches ignores the port on loopback redirects, as RFC 8252 §7.3 requires for native clients.
 func RedirectMatches(registered []string, raw string) bool {
 	if slices.Contains(registered, raw) {
