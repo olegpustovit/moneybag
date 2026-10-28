@@ -17,12 +17,19 @@ chmod 755 run "releases/$2/moneybag"
 previous=$(readlink current || true)
 ln -s "releases/$2" next
 mv -Tf next current
-smdctl run -f smdctl.yml
+started=true
+if [[ -f "$HOME/.config/systemd/user/smdctl-moneybag.service" ]]; then
+ smdctl restart moneybag || started=false
+else
+ smdctl run -f smdctl.yml || started=false
+fi
 healthy=false
-for attempt in {1..15}; do
- if curl --fail --silent http://127.0.0.1:6459/healthz | python3 -c 'import json,sys; sys.exit(json.load(sys.stdin).get("version") != sys.argv[1])' "$2"; then healthy=true; break; fi
- sleep 1
-done
+if "$started"; then
+ for attempt in {1..15}; do
+  if curl --fail --silent http://127.0.0.1:6459/healthz | python3 -c 'import json,sys; data=sys.stdin.read(); sys.exit(not data or json.loads(data).get("version") != sys.argv[1])' "$2"; then healthy=true; break; fi
+  sleep 1
+ done
+fi
 if ! "$healthy"; then
  if [[ -n "$previous" ]]; then ln -s "$previous" next; mv -Tf next current; smdctl restart moneybag; fi
  echo 'Deployment failed health check; restored previous release when available.' >&2
