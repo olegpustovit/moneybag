@@ -200,7 +200,7 @@ func New(s Services, opts Options) *mcp.Server {
 		}{q}, e
 	})
 	add(r, "rate_set", "rates", "ledger:write", "Use this when recording a manual FX, metal or security quote. Positive decimal value, BASE/QUOTE pair, RFC3339 at and source are required.", false, false, s.Rates.Set)
-	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Fetches ECB daily reference rates; manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Backfills ECB daily reference rates for the last 90 days and returns new or changed quotes; manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		Sources []string `json:"sources,omitempty"`
 	}) (struct {
 		Updated []rates.Quote `json:"updated"`

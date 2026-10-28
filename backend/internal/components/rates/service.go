@@ -158,17 +158,13 @@ func (s *Service) Convert(ctx context.Context, p principal.Principal, a ledger.A
 	d, e := ledger.ParseDecimal(v.FloatString(2))
 	return ledger.Amount{Value: d, Commodity: quote}, e
 }
-func (s *Service) RefreshECB(ctx context.Context, p principal.Principal) ([]Quote, error) {
-	if e := p.Require("ledger:write"); e != nil {
-		return nil, e
-	}
-	b, _, e := safefetch.Read(ctx, safefetch.Client(), "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml", 256*1024)
-	if e != nil {
-		return nil, e
-	}
+type ecbQuote struct{ Pair, At, Value string }
+
+// parseECB reads every day of an ECB eurofxref XML document, oldest data included.
+func parseECB(b []byte) ([]ecbQuote, error) {
 	var doc struct {
 		Cube struct {
-			Day struct {
+			Days []struct {
 				Time  string `xml:"time,attr"`
 				Rates []struct {
 					Currency string `xml:"currency,attr"`
@@ -177,21 +173,63 @@ func (s *Service) RefreshECB(ctx context.Context, p principal.Principal) ([]Quot
 			} `xml:"Cube"`
 		} `xml:"Cube"`
 	}
-	if e = xml.Unmarshal(b, &doc); e != nil {
+	if e := xml.Unmarshal(b, &doc); e != nil {
 		return nil, fmt.Errorf("parse ECB quotes: %w", e)
 	}
-	if len(doc.Cube.Day.Rates) == 0 {
+	out := []ecbQuote{}
+	for _, d := range doc.Cube.Days {
+		for _, r := range d.Rates {
+			out = append(out, ecbQuote{"EUR/" + r.Currency, d.Time + "T16:00:00Z", r.Rate})
+		}
+	}
+	if len(out) == 0 {
 		return nil, fmt.Errorf("ECB returned no quotes")
 	}
-	at := doc.Cube.Day.Time + "T16:00:00Z"
+	return out, nil
+}
+
+// RefreshECB backfills the last 90 days so budgets and valuations of recent months have quotes.
+// shortcut: older entries still need rate_set quotes; load eurofxref-hist.xml once if long histories are imported.
+func (s *Service) RefreshECB(ctx context.Context, p principal.Principal) ([]Quote, error) {
+	if e := p.Require("ledger:write"); e != nil {
+		return nil, e
+	}
+	b, _, e := safefetch.Read(ctx, safefetch.Client(), "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml", 1024*1024)
+	if e != nil {
+		return nil, e
+	}
+	quotes, e := parseECB(b)
+	if e != nil {
+		return nil, e
+	}
+	const source = "ECB daily reference"
+	oldest := quotes[0].At
+	for _, q := range quotes {
+		oldest = min(oldest, q.At)
+	}
+	cur, e := s.repo.db.Collection("prices").Find(ctx, bson.M{"user_id": p.UserID, "source": source, "at": bson.M{"$gte": oldest}})
+	if e != nil {
+		return nil, e
+	}
+	var stored []Quote
+	if e = cur.All(ctx, &stored); e != nil {
+		return nil, e
+	}
+	have := map[string]string{}
+	for _, q := range stored {
+		have[q.Pair+"@"+q.At] = q.Value.String()
+	}
 	out := []Quote{}
 	e = s.audit.Workflow(ctx, func(tx context.Context) error {
-		for _, q := range doc.Cube.Day.Rates {
-			v, e := ledger.ParseDecimal(q.Rate)
+		for _, q := range quotes {
+			v, e := ledger.ParseDecimal(q.Value)
 			if e != nil {
 				return e
 			}
-			r, e := s.Set(tx, p, SetInput{Pair: "EUR/" + q.Currency, Value: v, At: at, Source: "ECB daily reference"})
+			if old, ok := have[q.Pair+"@"+q.At]; ok && old == v.String() {
+				continue
+			}
+			r, e := s.Set(tx, p, SetInput{Pair: q.Pair, Value: v, At: q.At, Source: source})
 			if e != nil {
 				return e
 			}

@@ -34,6 +34,9 @@ func (s *Service) UpdateDraft(ctx context.Context, p principal.Principal, in Ent
 		entry.Date = in.Date
 		entry.Payee = in.Payee
 		entry.Postings = in.Postings
+		if in.Tags == nil {
+			in.Tags = []string{}
+		}
 		entry.Tags = in.Tags
 		if old.Kind == "normal" || old.Kind == "transfer" {
 			entry.Kind = inferKind(in.Postings)

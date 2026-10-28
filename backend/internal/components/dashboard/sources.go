@@ -165,7 +165,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			out = append(out, map[string]any{"id": proj.Scenario, "name": proj.Name, "spendUsd": proj.SpendUSD, "endNetUsd": proj.EndNetUSD, "runway": proj.Runway})
 		}
 	default:
-		return nil, fmt.Errorf("unknown source %q", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, scenarios, scenario:<id> or table:<id>", source)
 	}
 	return out, nil
 }

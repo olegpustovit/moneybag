@@ -62,6 +62,7 @@ type AccountResult struct {
 	Account Account `json:"account"`
 	EventID string  `json:"event_id"`
 }
+
 // EnsureAccount creates a system account, or adds commodities it lacks, so built-in postings work for new users.
 func (s *Service) EnsureAccount(ctx context.Context, p principal.Principal, a Account) error {
 	old, e := s.Account(ctx, p, a.ID)
