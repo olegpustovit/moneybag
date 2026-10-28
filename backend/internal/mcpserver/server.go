@@ -201,10 +201,10 @@ func New(s Services, opts Options) *mcp.Server {
 	})
 	add(r, "rate_set", "rates", "ledger:write", "Use this when recording a manual FX, metal or security quote. Positive decimal value, BASE/QUOTE pair, RFC3339 at and source are required.", false, false, s.Rates.Set)
 	type refreshed struct {
-		Written int           `json:"written"`
-		Latest  []rates.Quote `json:"latest"`
+		Updated []rates.Quote `json:"updated"`
 	}
-	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Backfills ECB daily reference rates for the last 90 days; returns how many quotes were new or changed and the newest day among them. Manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	// The response keeps its original schema; a 90-day backfill would otherwise return thousands of quotes.
+	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Backfills ECB daily reference rates for the last 90 days and returns the newest new or changed day of quotes. Manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		Sources []string `json:"sources,omitempty"`
 	}) (refreshed, error) {
 		for _, source := range in.Sources {
@@ -213,14 +213,14 @@ func New(s Services, opts Options) *mcp.Server {
 			}
 		}
 		q, e := s.Rates.RefreshECB(ctx, p)
-		out := refreshed{Written: len(q), Latest: []rates.Quote{}}
+		out := refreshed{Updated: []rates.Quote{}}
 		newest := ""
 		for _, x := range q {
 			newest = max(newest, x.At)
 		}
 		for _, x := range q {
 			if x.At == newest {
-				out.Latest = append(out.Latest, x)
+				out.Updated = append(out.Updated, x)
 			}
 		}
 		return out, e
