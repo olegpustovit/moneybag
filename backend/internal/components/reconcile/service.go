@@ -147,6 +147,13 @@ func (s *Service) Status(ctx context.Context, p principal.Principal, account str
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
+	// Backdated entries, reversals and import undos change past balances; recheck so status is current.
+	// shortcut: read-only callers see the last nightly verification, upgrade if that matters to them.
+	if p.Require("ledger:write") == nil {
+		if e := s.verify(ctx, p, account); e != nil {
+			return nil, e
+		}
+	}
 	f := bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}
 	if account != "" {
 		f["account"] = account
@@ -405,10 +412,17 @@ func (s *Service) Duplicates(ctx context.Context, p principal.Principal, in ledg
 }
 
 func (s *Service) Verify(ctx context.Context, p principal.Principal) error {
+	return s.verify(ctx, p, "")
+}
+func (s *Service) verify(ctx context.Context, p principal.Principal, account string) error {
 	if e := p.Require("ledger:write"); e != nil {
 		return e
 	}
-	cur, e := s.repo.db.Collection("balance_assertions").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetBatchSize(100))
+	f := bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}
+	if account != "" {
+		f["account"] = account
+	}
+	cur, e := s.repo.db.Collection("balance_assertions").Find(ctx, f, options.Find().SetBatchSize(100))
 	if e != nil {
 		return e
 	}

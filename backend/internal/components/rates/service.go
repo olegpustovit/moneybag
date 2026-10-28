@@ -113,31 +113,50 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, pairs []string
 		if e != nil {
 			return nil, e
 		}
-		var q Quote
-		e = s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "pair": a + "/" + b, "at": bson.M{"$lte": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: -1}})).Decode(&q)
+		q, e := s.quote(ctx, p, a, b, at)
 		if errors.Is(e, mongo.ErrNoDocuments) {
-			return nil, fmt.Errorf("no quote for %s at or before %s", pair, at)
-		}
-		if e != nil {
+			inv, ie := s.quote(ctx, p, b, a, at)
+			if ie != nil {
+				return nil, fmt.Errorf("no quote for %s at or before %s", pair, at)
+			}
+			v, ie := ledger.ParseDecimal(strings.TrimRight(strings.TrimRight(new(big.Rat).Inv(inv.Value.Rat()).FloatString(10), "0"), "."))
+			if ie != nil {
+				return nil, ie
+			}
+			q = Quote{ID: inv.ID, Pair: a + "/" + b, Base: a, Quote: b, At: inv.At, Value: v, Source: "inverse of " + inv.Pair + " (" + inv.Source + ")"}
+		} else if e != nil {
 			return nil, e
 		}
 		out = append(out, q)
 	}
 	return out, nil
 }
+func (s *Service) quote(ctx context.Context, p principal.Principal, base, quote, at string) (Quote, error) {
+	var q Quote
+	e := s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "pair": base + "/" + quote, "at": bson.M{"$lte": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: -1}})).Decode(&q)
+	return q, e
+}
+
+// rate uses the exact inverse of an opposite quote, unlike the rounded inverse Get reports.
 func (s *Service) rate(ctx context.Context, p principal.Principal, base, quote, at string) (*big.Rat, error) {
 	if base == quote {
 		return big.NewRat(1, 1), nil
 	}
-	q, e := s.Get(ctx, p, []string{base + "/" + quote}, at)
+	q, e := s.quote(ctx, p, base, quote, at)
 	if e == nil {
-		return q[0].Value.Rat(), nil
+		return q.Value.Rat(), nil
 	}
-	q, inv := s.Get(ctx, p, []string{quote + "/" + base}, at)
-	if inv == nil {
-		return new(big.Rat).Inv(q[0].Value.Rat()), nil
+	if !errors.Is(e, mongo.ErrNoDocuments) {
+		return nil, e
 	}
-	return nil, e
+	q, e = s.quote(ctx, p, quote, base, at)
+	if e == nil {
+		return new(big.Rat).Inv(q.Value.Rat()), nil
+	}
+	if !errors.Is(e, mongo.ErrNoDocuments) {
+		return nil, e
+	}
+	return nil, fmt.Errorf("no quote for %s/%s at or before %s", base, quote, at)
 }
 func (s *Service) Convert(ctx context.Context, p principal.Principal, a ledger.Amount, quote, at string) (ledger.Amount, error) {
 	r, e := s.rate(ctx, p, a.Commodity, quote, at)

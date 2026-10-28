@@ -53,7 +53,7 @@ func (h *Handler) settingsFeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload and retry", 403)
 		return
 	}
-	_, e = h.services.Imports.ConfigureFeed(r.Context(), p, imports.FeedInput{ID: r.FormValue("id"), URL: r.FormValue("url"), Account: r.FormValue("account"), Format: r.FormValue("format"), Token: r.FormValue("token")})
+	_, e = h.services.Imports.ConfigureFeed(r.Context(), p, imports.FeedInput{ID: r.FormValue("id"), URL: r.FormValue("url"), Account: r.FormValue("account"), Format: r.FormValue("format"), DateFormat: r.FormValue("date_format"), Token: r.FormValue("token")})
 	if e != nil {
 		http.Error(w, e.Error(), 400)
 		return

@@ -118,7 +118,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		_, _ = w.Write([]byte("Date,Payee,Amount,Currency\n2026-09-30,Old feed row,-1.00,EUR\n2026-10-05,Feed cafe,-4.20,EUR\n2026-10-06,Feed market,-8.00,EUR\n"))
+		_, _ = w.Write([]byte("Date,Payee,Amount,Currency\n30/09/2026,Old feed row,-1.00,EUR\n05/10/2026,Feed cafe,-4.20,EUR\n06/10/2026,Feed market,-8.00,EUR\n"))
 	}))
 	t.Cleanup(feedServer.Close)
 	feedClient := feedServer.Client()
@@ -128,7 +128,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 	imp.SetHTTPClient(feedClient)
 	imp.SetSecretKey([]byte("0123456789abcdef0123456789abcdef"))
-	feed := imports.FeedInput{ID: "finance_connector", URL: "https://example.com/statement.csv", Account: "assets:bank", Format: "generic_csv", Token: "synthetic-feed-token"}
+	feed := imports.FeedInput{ID: "finance_connector", URL: "https://example.com/statement.csv", Account: "assets:bank", Format: "generic_csv", DateFormat: "dmy", Token: "synthetic-feed-token"}
 	if _, e = imp.ConfigureFeed(ctx, pa, feed); e != nil {
 		t.Fatal(e)
 	}
@@ -350,6 +350,9 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if _, e = imp.Undo(ctx, pa, start.BatchID, "Retry import undo"); e != nil {
 		t.Fatal("import undo retry", e)
 	}
+	if undone, e := rec.Status(ctx, pa, "assets:bank"); e != nil || len(undone) == 0 || len(undone[0].Discrepancies) == 0 {
+		t.Fatal("status after import undo should show the broken closing balance", undone, e)
+	}
 	if _, e = imp.Redo(ctx, pa, start.BatchID, "Restore import"); e != nil {
 		t.Fatal("import redo", e)
 	}
@@ -440,6 +443,9 @@ func testCostLots(t *testing.T, ctx context.Context, pa, pb principal.Principal,
 	}
 	if _, e := prices.Set(ctx, pa, rates.SetInput{Pair: "XAU_g/USD", Value: ledger.MustDecimal("100"), At: "2026-10-01T00:00:00Z", Source: "Synthetic quote"}); e != nil {
 		t.Fatal(e)
+	}
+	if inv, e := prices.Get(ctx, pa, []string{"USD/XAU_g"}, "2026-10-02T00:00:00Z"); e != nil || inv[0].Value.String() != "0.01" || inv[0].Pair != "USD/XAU_g" {
+		t.Fatal("inverse quote", inv, e)
 	}
 	cost := ledger.Amount{Value: ledger.MustDecimal("60"), Commodity: "USD"}
 	entry, e := book.Post(ctx, pa, ledger.EntryInput{Date: "2026-10-01", Commit: true, Postings: []ledger.Posting{{Account: "assets:gold", Amount: ledger.Amount{Value: ledger.MustDecimal("10"), Commodity: "XAU_g"}, Cost: &cost}, {Account: "equity:gold", Amount: ledger.Amount{Value: ledger.MustDecimal("-10"), Commodity: "XAU_g"}}}})

@@ -27,14 +27,16 @@ type Feed struct {
 	URL            string `json:"-" bson:"url"`
 	Account        string `json:"account" bson:"account"`
 	Format         string `json:"format" bson:"format"`
+	DateFormat     string `json:"date_format,omitempty" bson:"date_format,omitempty"`
 	TokenEncrypted string `json:"-" bson:"token_encrypted"`
 }
 type FeedInput struct {
-	ID      string
-	URL     string
-	Account string
-	Format  string
-	Token   string
+	ID         string
+	URL        string
+	Account    string
+	Format     string
+	DateFormat string
+	Token      string
 }
 
 func (s *Service) SetSecretKey(key []byte) { s.secret = append([]byte{}, key...) }
@@ -95,6 +97,9 @@ func (s *Service) ConfigureFeed(ctx context.Context, p principal.Principal, in F
 	if in.Format != "wise_csv" && in.Format != "generic_csv" && in.Format != "plaid" {
 		return Feed{}, fmt.Errorf("feed format must be wise_csv, generic_csv or plaid")
 	}
+	if in.DateFormat != "" && in.DateFormat != "iso" && in.DateFormat != "dmy" && in.DateFormat != "mdy" {
+		return Feed{}, fmt.Errorf("feed date format must be iso, dmy or mdy")
+	}
 	if len(in.Token) > 8192 || strings.ContainsAny(in.Token, "\r\n") {
 		return Feed{}, fmt.Errorf("invalid feed credential")
 	}
@@ -113,7 +118,7 @@ func (s *Service) ConfigureFeed(ctx context.Context, p principal.Principal, in F
 			return Feed{}, e
 		}
 	}
-	feed := Feed{Key: p.UserID + ":" + in.ID, UserID: p.UserID, ID: in.ID, URL: in.URL, Account: in.Account, Format: in.Format, TokenEncrypted: encrypted}
+	feed := Feed{Key: p.UserID + ":" + in.ID, UserID: p.UserID, ID: in.ID, URL: in.URL, Account: in.Account, Format: in.Format, DateFormat: in.DateFormat, TokenEncrypted: encrypted}
 	_, e = s.audit.Write(ctx, p, "feed_configure", audit.Target{Collection: "feeds", ID: in.ID}, "", old, feed, func(tx context.Context) error {
 		_, e := s.repo.db.Collection("feeds").ReplaceOne(tx, bson.M{"_id": feed.Key, "user_id": p.UserID}, feed, options.Replace().SetUpsert(true))
 		return e
@@ -152,7 +157,7 @@ func (s *Service) Sync(ctx context.Context, p principal.Principal, id, since str
 	if e != nil {
 		return StartResult{}, fmt.Errorf("feed download failed; check its URL and credential in Settings")
 	}
-	return s.start(ctx, p, StartInput{Account: feed.Account, Format: feed.Format, ContentB64: base64.StdEncoding.EncodeToString(content)}, since)
+	return s.start(ctx, p, StartInput{Account: feed.Account, Format: feed.Format, Mapping: Mapping{DateFormat: feed.DateFormat}, ContentB64: base64.StdEncoding.EncodeToString(content)}, since)
 }
 
 func (s *Service) Feeds(ctx context.Context, p principal.Principal) ([]Feed, error) {
