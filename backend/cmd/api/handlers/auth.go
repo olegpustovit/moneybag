@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"crypto/subtle"
+	"encoding/json"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -137,29 +140,36 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) registerClient(w http.ResponseWriter, r *http.Request) {
 	var in oauth.RegisterInput
-	if decode(r, &in) != nil {
-		respond(w, 400, map[string]string{"error": "invalid_client_metadata"})
+	// RFC 7591 §2: unknown client metadata (scope, logo_uri, software_id, ...) must be ignored, not rejected.
+	if e := json.NewDecoder(io.LimitReader(r.Body, 64*1024)).Decode(&in); e != nil {
+		respond(w, 400, map[string]string{"error": "invalid_client_metadata", "error_description": "body must be a JSON client metadata object"})
 		return
 	}
 	v, e := h.oauth.Register(r.Context(), in)
 	if e != nil {
-		respond(w, 400, map[string]string{"error": "invalid_client_metadata"})
+		slog.Warn("oauth registration rejected", "client_name", in.Name, "redirect_uris", in.RedirectURIs, "error", e)
+		respond(w, 400, map[string]string{"error": "invalid_client_metadata", "error_description": e.Error()})
 		return
 	}
 	respond(w, 201, v)
 }
-func authorization(r *http.Request) oauth.Authorization {
+func (h *Handler) authorization(r *http.Request) oauth.Authorization {
 	q := r.URL.Query()
 	if r.Method == "POST" {
 		_ = r.ParseForm()
 		q = r.PostForm
 	}
-	return oauth.Authorization{ClientID: q.Get("client_id"), RedirectURI: q.Get("redirect_uri"), ResponseType: q.Get("response_type"), Scope: q.Get("scope"), State: q.Get("state"), Challenge: q.Get("code_challenge"), ChallengeMethod: q.Get("code_challenge_method"), Resource: q.Get("resource")}
+	in := oauth.Authorization{ClientID: q.Get("client_id"), RedirectURI: q.Get("redirect_uri"), ResponseType: q.Get("response_type"), Scope: q.Get("scope"), State: q.Get("state"), Challenge: q.Get("code_challenge"), ChallengeMethod: q.Get("code_challenge_method"), Resource: q.Get("resource")}
+	if in.Resource == "" {
+		in.Resource = h.cfg.PublicURL + "/mcp" // resource is optional in RFC 8707; default to the full MCP endpoint
+	}
+	return in
 }
 func (h *Handler) authorizePage(w http.ResponseWriter, r *http.Request) {
-	in := authorization(r)
+	in := h.authorization(r)
 	client, scopes, e := h.oauth.Validate(r.Context(), in)
 	if e != nil {
+		slog.Warn("oauth authorize rejected", "client_id", in.ClientID, "redirect_uri", in.RedirectURI, "error", e)
 		http.Error(w, "Invalid authorization request. Start again from your connector.", 400)
 		return
 	}
@@ -180,7 +190,7 @@ func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload and retry", 403)
 		return
 	}
-	in := authorization(r)
+	in := h.authorization(r)
 	if _, _, e = h.oauth.Validate(r.Context(), in); e != nil {
 		http.Error(w, "invalid authorization request", 400)
 		return
@@ -223,6 +233,7 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 	}
 	c, e := h.oauthClient(r)
 	if e != nil {
+		slog.Warn("oauth token client rejected", "client_id", r.FormValue("client_id"), "error", e)
 		respond(w, 401, map[string]string{"error": "invalid_client"})
 		return
 	}
@@ -242,6 +253,7 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		} else if e == oauth.ErrInvalidScope {
 			code = "invalid_scope"
 		}
+		slog.Warn("oauth token rejected", "client_id", c.ID, "grant_type", r.FormValue("grant_type"), "error", e)
 		respond(w, 400, map[string]string{"error": code})
 		return
 	}

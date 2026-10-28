@@ -193,6 +193,17 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if e != nil || ap.UserID != a.ID || ap.Actor.Kind != "agent" {
 		t.Fatal("agent principal", e)
 	}
+	code2, e := oa.Authorize(ctx, auth, pa)
+	if e != nil {
+		t.Fatal(e)
+	}
+	implicit, e := oa.Exchange(ctx, reg.Client, code2, auth.RedirectURI, verifier, "")
+	if e != nil {
+		t.Fatal("exchange without resource", e)
+	}
+	if _, e = oa.Bearer(ctx, implicit.AccessToken, auth.Resource); e != nil {
+		t.Fatal("token from resource-less exchange keeps the code's audience", e)
+	}
 	if _, e = oa.Bearer(ctx, tokens.AccessToken, auth.Resource+"/readonly"); e == nil {
 		t.Fatal("wrong audience accepted")
 	}

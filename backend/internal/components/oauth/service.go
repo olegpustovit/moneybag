@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -175,29 +176,30 @@ func RedirectMatches(registered []string, raw string) bool {
 	return false
 }
 func (s *Service) Register(ctx context.Context, in RegisterInput) (Registration, error) {
-	if len(in.RedirectURIs) < 1 || len(in.RedirectURIs) > 10 || len(in.Name) > 100 {
-		return Registration{}, ErrInvalidRequest
+	if len(in.RedirectURIs) < 1 || len(in.RedirectURIs) > 10 {
+		return Registration{}, fmt.Errorf("%w: 1..10 redirect_uris required", ErrInvalidRequest)
+	}
+	if r := []rune(in.Name); len(r) > 100 {
+		in.Name = string(r[:100])
 	}
 	for _, r := range in.RedirectURIs {
 		if !AllowedRedirect(r) {
-			return Registration{}, ErrInvalidRequest
+			return Registration{}, fmt.Errorf("%w: redirect_uri %q must be https, loopback http or a native app scheme", ErrInvalidRequest, r)
 		}
 	}
-	for _, g := range in.GrantTypes {
-		if g != "authorization_code" && g != "refresh_token" {
-			return Registration{}, ErrInvalidRequest
-		}
+	if len(in.GrantTypes) > 0 && !slices.Contains(in.GrantTypes, "authorization_code") {
+		return Registration{}, fmt.Errorf("%w: grant_types must include authorization_code", ErrInvalidRequest)
 	}
 	for _, r := range in.ResponseTypes {
 		if r != "code" {
-			return Registration{}, ErrInvalidRequest
+			return Registration{}, fmt.Errorf("%w: only the code response type is supported", ErrInvalidRequest)
 		}
 	}
 	if in.AuthMethod == "" {
 		in.AuthMethod = "client_secret_basic"
 	}
 	if !slices.Contains([]string{"none", "client_secret_basic", "client_secret_post"}, in.AuthMethod) {
-		return Registration{}, ErrInvalidClient
+		return Registration{}, fmt.Errorf("%w: token_endpoint_auth_method must be none, client_secret_basic or client_secret_post", ErrInvalidClient)
 	}
 	if in.Name == "" {
 		in.Name = "MCP agent"
@@ -297,8 +299,10 @@ func Challenge(v string) string {
 	h := sha256.Sum256([]byte(v))
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
+
+// Exchange and Refresh treat an omitted resource (optional in RFC 8707) as the one the grant was issued for.
 func (s *Service) Exchange(ctx context.Context, c Client, raw, redirect, verifier, resource string) (TokenResponse, error) {
-	if !s.resource(resource) {
+	if resource != "" && !s.resource(resource) {
 		return TokenResponse{}, ErrInvalidTarget
 	}
 	if !verifierPattern.MatchString(verifier) {
@@ -307,14 +311,18 @@ func (s *Service) Exchange(ctx context.Context, c Client, raw, redirect, verifie
 	var result TokenResponse
 	e := mongodb.Workflow(ctx, func(tx context.Context) error {
 		var auth code
-		e := s.repo.db.Collection("oauth_codes").FindOneAndDelete(tx, bson.M{"_id": identity.Hash(raw), "client_id": c.ID, "redirect_uri": redirect, "challenge": Challenge(verifier), "resource": resource, "expires_at": bson.M{"$gt": time.Now()}}).Decode(&auth)
+		f := bson.M{"_id": identity.Hash(raw), "client_id": c.ID, "redirect_uri": redirect, "challenge": Challenge(verifier), "expires_at": bson.M{"$gt": time.Now()}}
+		if resource != "" {
+			f["resource"] = resource
+		}
+		e := s.repo.db.Collection("oauth_codes").FindOneAndDelete(tx, f).Decode(&auth)
 		if errors.Is(e, mongo.ErrNoDocuments) {
 			return ErrInvalidGrant
 		}
 		if e != nil {
 			return e
 		}
-		g := Grant{ID: identity.Random(), UserID: auth.UserID, ClientID: c.ID, ClientName: c.Name, Resource: resource, Scopes: auth.Scopes, CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(RefreshTTL)}
+		g := Grant{ID: identity.Random(), UserID: auth.UserID, ClientID: c.ID, ClientName: c.Name, Resource: auth.Resource, Scopes: auth.Scopes, CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(RefreshTTL)}
 		if _, e = s.repo.db.Collection("oauth_grants").InsertOne(tx, g); e != nil {
 			return e
 		}
@@ -329,7 +337,7 @@ func (s *Service) issue(ctx context.Context, g Grant) (TokenResponse, error) {
 	return TokenResponse{access, "Bearer", int64(AccessTTL.Seconds()), refresh, strings.Join(g.Scopes, " ")}, e
 }
 func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope string) (TokenResponse, error) {
-	if !s.resource(resource) {
+	if resource != "" && !s.resource(resource) {
 		return TokenResponse{}, ErrInvalidTarget
 	}
 	var result TokenResponse
@@ -344,7 +352,7 @@ func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope st
 			return e
 		}
 		g, e := s.grant(tx, tok.GrantID)
-		if e != nil || g.ClientID != c.ID || g.Resource != resource {
+		if e != nil || g.ClientID != c.ID || resource != "" && g.Resource != resource {
 			return ErrInvalidGrant
 		}
 		if tok.Used {

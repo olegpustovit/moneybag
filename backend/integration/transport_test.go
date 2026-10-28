@@ -72,6 +72,25 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 			t.Fatal("well-known", path, r.StatusCode, r.Header.Get("Content-Type"))
 		}
 	}
+	// Shape sent by hosted connectors such as Grok: extra RFC 7591 metadata and an extra grant type.
+	dcr, e := http.Post(endpoint+"/oauth/register", "application/json", strings.NewReader(`{"client_name":"Grok Bot","redirect_uris":["https://grok.com/oauth/callback"],"token_endpoint_auth_method":"none","grant_types":["authorization_code","refresh_token","client_credentials"],"response_types":["code"],"scope":"ledger:read","client_uri":"https://grok.com","logo_uri":"https://grok.com/logo.png","software_id":"grok"}`))
+	if e != nil {
+		t.Fatal(e)
+	}
+	dcr.Body.Close()
+	if dcr.StatusCode != 201 {
+		t.Fatal("registration with extra metadata", dcr.StatusCode)
+	}
+	bad, e := http.Post(endpoint+"/oauth/register", "application/json", strings.NewReader(`{"redirect_uris":["javascript:alert(1)"]}`))
+	if e != nil {
+		t.Fatal(e)
+	}
+	var reason map[string]string
+	_ = json.NewDecoder(bad.Body).Decode(&reason)
+	bad.Body.Close()
+	if bad.StatusCode != 400 || !strings.Contains(reason["error_description"], "redirect_uri") {
+		t.Fatal("rejected registration should explain itself", bad.StatusCode, reason)
+	}
 	reg, e := oa.Register(ctx, oauth.RegisterInput{Name: "Transport test", RedirectURIs: []string{"http://127.0.0.1:8484/callback"}, AuthMethod: "none"})
 	if e != nil {
 		t.Fatal(e)
