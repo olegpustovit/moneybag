@@ -150,6 +150,27 @@ func AllowedRedirect(raw string) bool {
 	}
 	return false
 }
+// RedirectMatches ignores the port on loopback redirects, as RFC 8252 §7.3 requires for native clients.
+func RedirectMatches(registered []string, raw string) bool {
+	if slices.Contains(registered, raw) {
+		return true
+	}
+	got, e := url.Parse(raw)
+	if e != nil || got.Scheme != "http" {
+		return false
+	}
+	host := strings.ToLower(got.Hostname())
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		return false
+	}
+	for _, r := range registered {
+		u, e := url.Parse(r)
+		if e == nil && u.Scheme == "http" && strings.ToLower(u.Hostname()) == host && u.Path == got.Path && u.RawQuery == got.RawQuery {
+			return true
+		}
+	}
+	return false
+}
 func (s *Service) Register(ctx context.Context, in RegisterInput) (Registration, error) {
 	if len(in.RedirectURIs) < 1 || len(in.RedirectURIs) > 10 || len(in.Name) > 100 {
 		return Registration{}, ErrInvalidRequest
@@ -230,7 +251,7 @@ func (s *Service) Validate(ctx context.Context, in Authorization) (Client, []str
 	if e != nil {
 		return c, nil, e
 	}
-	if !slices.Contains(c.RedirectURIs, in.RedirectURI) || in.ResponseType != "code" || in.ChallengeMethod != "S256" || !challengePattern.MatchString(in.Challenge) || len(in.State) > 2048 {
+	if !RedirectMatches(c.RedirectURIs, in.RedirectURI) || in.ResponseType != "code" || in.ChallengeMethod != "S256" || !challengePattern.MatchString(in.Challenge) || len(in.State) > 2048 {
 		return c, nil, ErrInvalidRequest
 	}
 	if !s.resource(in.Resource) {

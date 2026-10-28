@@ -19,3 +19,19 @@ func TestRedirectAllowlistAndPKCE(t *testing.T) {
 		t.Fatal("RFC7636 vector failed")
 	}
 }
+
+func TestRedirectMatchesLoopbackAnyPort(t *testing.T) {
+	reg := []string{"http://localhost/callback", "http://127.0.0.1/callback"}
+	for raw, want := range map[string]bool{
+		"http://localhost:60873/callback": true,
+		"http://127.0.0.1:5000/callback":  true,
+		"http://localhost/callback":       true,
+		"http://localhost:1/other":        false,
+		"https://localhost:1/callback":    false,
+		"http://evil.com:1/callback":      false,
+	} {
+		if RedirectMatches(reg, raw) != want {
+			t.Errorf("%s: want %v", raw, want)
+		}
+	}
+}
