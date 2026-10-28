@@ -1,0 +1,12 @@
+reference/
+private/
+.env
+*.env
+backend/bin/
+node_modules/
+test-results/
+.impeccable/review/
+*.dump
+*.archive*
+*.key
+core

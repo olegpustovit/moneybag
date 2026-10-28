@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd /home/snowbear/ci/moneybag
+set -a
+source ./moneybag.env
+set +a
+exec ./current/moneybag "$@"

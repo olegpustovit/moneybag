@@ -1,0 +1,9 @@
+name: moneybag
+command: /home/snowbear/ci/moneybag/run
+workdir: /home/snowbear/ci/moneybag
+restart: always
+no_new_privileges: true
+private_tmp: true
+limit_nofile: 65536
+after: [network-online.target]
+wants: [network-online.target]
