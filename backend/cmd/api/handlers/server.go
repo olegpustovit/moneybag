@@ -127,7 +127,14 @@ func (h *Handler) Handler() http.Handler {
 		}
 		_, _ = w.Write(b)
 	})
-	mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(w http.ResponseWriter, _ *http.Request) { respond(w, 200, h.oauth.Metadata()) })
+	metadata := func(w http.ResponseWriter, _ *http.Request) { respond(w, 200, h.oauth.Metadata()) }
+	// RFC 8414 and RFC 9728 clients probe both the root and the resource-suffixed forms.
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server", metadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp", metadata)
+	mux.HandleFunc("GET /.well-known/oauth-authorization-server/mcp/readonly", metadata)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", func(w http.ResponseWriter, _ *http.Request) { respond(w, 200, h.oauth.ProtectedResource("/mcp")) })
+	// Discovery clients treat a login redirect as a broken server; unknown documents are a plain JSON 404.
+	mux.HandleFunc("GET /.well-known/", func(w http.ResponseWriter, _ *http.Request) { respond(w, 404, map[string]string{"error": "not_found"}) })
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", func(w http.ResponseWriter, _ *http.Request) { respond(w, 200, h.oauth.ProtectedResource("/mcp")) })
 	mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp/readonly", func(w http.ResponseWriter, _ *http.Request) {
 		respond(w, 200, h.oauth.ProtectedResource("/mcp/readonly"))

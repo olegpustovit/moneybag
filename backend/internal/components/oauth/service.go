@@ -131,25 +131,27 @@ func (s *Service) Init(ctx context.Context) error {
 	}
 	return nil
 }
+
+// AllowedRedirect accepts any HTTPS callback, plain HTTP only on loopback, and native-app custom schemes
+// (RFC 8252 §7.1, e.g. cursor://). The consent page shows the redirect target so users can spot a spoofed client.
 func AllowedRedirect(raw string) bool {
 	u, e := url.Parse(raw)
-	if e != nil || len(raw) > 2048 || u.User != nil || u.Fragment != "" || strings.Contains(raw, "#") {
+	if e != nil || len(raw) > 2048 || u.User != nil || u.Fragment != "" || strings.Contains(raw, "#") || !redirectScheme.MatchString(u.Scheme) {
 		return false
 	}
 	host := strings.ToLower(u.Hostname())
-	if (host == "127.0.0.1" || host == "localhost" || host == "::1") && (u.Scheme == "http" || u.Scheme == "https") {
-		return true
-	}
-	if u.Scheme != "https" || (u.Port() != "" && u.Port() != "443") {
+	switch u.Scheme {
+	case "https":
+		return host != ""
+	case "http":
+		return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	case "javascript", "data", "file", "vbscript", "blob", "about", "ftp", "ws", "wss":
 		return false
 	}
-	for _, base := range []string{"chatgpt.com", "openai.com", "grok.com", "x.ai", "claude.ai", "claude.com"} {
-		if host == base || strings.HasSuffix(host, "."+base) {
-			return true
-		}
-	}
-	return false
+	return u.Opaque == "" && (host != "" || u.Path != "")
 }
+
+var redirectScheme = regexp.MustCompile(`^[a-z][a-z0-9+.-]{1,63}$`)
 
 // RedirectMatches ignores the port on loopback redirects, as RFC 8252 §7.3 requires for native clients.
 func RedirectMatches(registered []string, raw string) bool {

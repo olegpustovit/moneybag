@@ -5,12 +5,12 @@ import (
 )
 
 func TestRedirectAllowlistAndPKCE(t *testing.T) {
-	for _, s := range []string{"https://evil.com/cb", "https://chatgpt.com.evil.com/cb", "https://chatgpt.com@evil.com/cb", "https://chatgpt.com/cb#fragment", "http://chatgpt.com/cb", "https://chatgpt.com:8443/cb", "//chatgpt.com/cb"} {
+	for _, s := range []string{"https://chatgpt.com@evil.com/cb", "https://chatgpt.com/cb#fragment", "http://chatgpt.com/cb", "//chatgpt.com/cb", "javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "https:///nohost", "ws://localhost/cb"} {
 		if AllowedRedirect(s) {
 			t.Errorf("accepted %s", s)
 		}
 	}
-	for _, s := range []string{"https://chatgpt.com/oauth/callback", "https://grok.com/cb", "http://127.0.0.1:8484/cb"} {
+	for _, s := range []string{"https://chatgpt.com/connector_platform_oauth_redirect", "https://claude.ai/api/mcp/auth_callback", "https://grok.com/cb", "https://agents.example.com:8443/oauth/callback", "http://127.0.0.1:8484/cb", "http://[::1]:9/cb", "cursor://anysphere.cursor-mcp/oauth/callback", "com.example.app:/oauth2redirect"} {
 		if !AllowedRedirect(s) {
 			t.Errorf("rejected %s", s)
 		}
