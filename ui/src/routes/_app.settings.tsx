@@ -4,6 +4,7 @@ import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { Button } from '../components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
+import { FormulaInput } from '../components/formula/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
 import { invokeTool, listTools, settingsPost, tool, type Session, type ToolInfo } from '../lib/api'
@@ -90,6 +91,7 @@ function ToolConsole({ session }: { session: Session }) {
   const catalog = useQuery({ queryKey: ['tool-catalog', session.user.id], queryFn: () => listTools(session) })
   const [name, setName] = useState('')
   const [parseError, setParseError] = useState('')
+  const [expression, setExpression] = useState('')
   const run = useMutation({ mutationFn: (args: Record<string, unknown>) => invokeTool(session, name, args) })
   const selected: ToolInfo | undefined = catalog.data?.find((item) => item.name === name)
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -98,14 +100,15 @@ function ToolConsole({ session }: { session: Session }) {
     const args: Record<string, unknown> = {}
     try {
       for (const [key, schema] of Object.entries(selected?.inputSchema.properties ?? {})) {
-        const value = data.get(key)
+        const value = name === 'expr_eval' && key === 'expr' ? expression : data.get(key)
         if (value === null || value === '') continue
         if (schema.type === 'string') args[key] = value
         else args[key] = JSON.parse(String(value)) as unknown
       }
+      if (name === 'expr_eval' && !expression.trim()) { setParseError('Enter an expression.'); return }
       setParseError('')
       run.mutate(args)
     } catch { setParseError('Enter valid JSON for non-text values.') }
   }
-  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={`tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel><Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={schema.type === 'string' ? undefined : 'JSON value'} /><p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
+  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setExpression(''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={name === 'expr_eval' && key === 'expr' ? undefined : `tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel>{name === 'expr_eval' && key === 'expr' ? <FormulaInput session={session} label="expr" role="value" value={expression} onChange={setExpression}/> : <Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={schema.type === 'string' ? undefined : 'JSON value'} />}<p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
 }
