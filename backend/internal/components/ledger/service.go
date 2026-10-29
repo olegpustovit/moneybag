@@ -192,11 +192,18 @@ func (s *Service) Entries(ctx context.Context, p principal.Principal, in Entries
 	if in.Limit < 0 || in.Limit > 500 || len(in.Text) > 200 {
 		return EntriesPage{}, fmt.Errorf("limit at most 500 and text at most 200 characters")
 	}
-	if in.Sort != "" && in.Sort != "date" && in.Sort != "-date" {
-		return EntriesPage{}, fmt.Errorf("sort must be date or -date")
+	if in.Sort != "" && in.Sort != "date" && in.Sort != "-date" && in.Sort != "amount" && in.Sort != "-amount" {
+		return EntriesPage{}, fmt.Errorf("sort must be date, -date, amount or -amount")
 	}
-	if (in.Sort != "" && ((in.Cursor > 0) != (in.CursorDate != ""))) || (in.Sort == "" && in.CursorDate != "") || in.Cursor < 0 {
-		return EntriesPage{}, fmt.Errorf("date sort cursor needs both cursor and cursor_date")
+	dateSort := in.Sort == "date" || in.Sort == "-date"
+	amountSort := in.Sort == "amount" || in.Sort == "-amount"
+	if in.Cursor < 0 || (dateSort && ((in.Cursor > 0) != (in.CursorDate != ""))) || (!dateSort && in.CursorDate != "") || (amountSort && ((in.Cursor > 0) != (in.CursorAmount != ""))) || (!amountSort && in.CursorAmount != "") {
+		return EntriesPage{}, fmt.Errorf("sort cursor needs its corresponding cursor value")
+	}
+	if in.CursorAmount != "" && in.CursorAmount != "null" {
+		if _, err := ParseDecimal(in.CursorAmount); err != nil {
+			return EntriesPage{}, fmt.Errorf("invalid amount cursor: %w", err)
+		}
 	}
 	for _, d := range []string{in.From, in.To, in.CursorDate} {
 		if d != "" {

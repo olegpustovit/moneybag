@@ -1819,6 +1819,10 @@ export interface EntriesListInput {
   account?: string;
   cursor?: number;
   /**
+   * amount returned with next_cursor when sorting by amount
+   */
+  cursor_amount?: string;
+  /**
    * date returned with next_cursor when sorting by date
    */
   cursor_date?: string;
@@ -1827,7 +1831,7 @@ export interface EntriesListInput {
   kind?: string;
   limit?: number;
   /**
-   * date or -date; omitted sorts by descending sequence
+   * date, -date, amount or -amount; omitted sorts by descending sequence
    */
   sort?: string;
   status?: string;
@@ -1884,6 +1888,7 @@ export interface EntriesListOutput {
         [k: string]: unknown;
       }[];
   next_cursor?: number;
+  next_cursor_amount?: string;
   next_cursor_date?: string;
   [k: string]: unknown;
 }

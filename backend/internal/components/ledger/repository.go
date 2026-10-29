@@ -99,7 +99,7 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	if in.Cursor > 0 && in.Sort == "" {
 		f["seq"] = bson.M{"$lt": in.Cursor}
 	}
-	if in.Cursor > 0 && in.Sort != "" {
+	if in.Cursor > 0 && (in.Sort == "date" || in.Sort == "-date") {
 		op := "$gt"
 		if in.Sort == "-date" {
 			op = "$lt"
@@ -134,22 +134,43 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	}
 	overlay := bson.A{bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}}, bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"}}
 	sort := bson.D{{Key: "seq", Value: -1}}
-	if in.Sort != "" {
+	if in.Sort == "date" || in.Sort == "-date" {
 		direction := 1
 		if in.Sort == "-date" {
 			direction = -1
 		}
 		sort = bson.D{{Key: "date", Value: direction}, {Key: "seq", Value: direction}}
 	}
-	page := bson.A{bson.M{"$sort": sort}, bson.M{"$limit": int64(limit + 1)}}
 	pipeline := bson.A{bson.M{"$match": f}}
+	amountSort := in.Sort == "amount" || in.Sort == "-amount"
+	if amountSort {
+		postings := any("$postings")
+		if in.Account != "" {
+			postings = bson.M{"$filter": bson.M{"input": "$postings", "as": "posting", "cond": bson.M{"$eq": bson.A{"$$posting.account", in.Account}}}}
+		}
+		pipeline = append(pipeline, bson.M{"$set": bson.M{"_sort_posting": bson.M{"$arrayElemAt": bson.A{postings, 0}}}}, bson.M{"$set": bson.M{"_sort_amount": bson.M{"$ifNull": bson.A{"$_sort_posting.amount.v", nil}}}})
+		direction, op := 1, "$gt"
+		if in.Sort == "-amount" {
+			direction, op = -1, "$lt"
+		}
+		sort = bson.D{{Key: "_sort_amount", Value: direction}, {Key: "seq", Value: direction}}
+		if in.Cursor > 0 {
+			var amount any
+			if in.CursorAmount != "null" {
+				value, _ := ParseDecimal(in.CursorAmount)
+				amount = value.Decimal128
+			}
+			pipeline = append(pipeline, bson.M{"$match": bson.M{"$expr": bson.M{"$or": bson.A{bson.M{op: bson.A{"$_sort_amount", amount}}, bson.M{"$and": bson.A{bson.M{"$eq": bson.A{"$_sort_amount", amount}}, bson.M{op: bson.A{"$seq", in.Cursor}}}}}}}})
+		}
+	}
+	page := bson.A{bson.M{"$sort": sort}, bson.M{"$limit": int64(limit + 1)}}
 	if in.Tag != "" {
 		// The tag filter needs the overlay first; otherwise page first so only one page is joined.
 		pipeline = append(append(append(pipeline, overlay...), bson.M{"$match": bson.M{"tags": in.Tag}}), page...)
 	} else {
 		pipeline = append(append(pipeline, page...), overlay...)
 	}
-	cur, e := db.Collection("journal").Aggregate(ctx, pipeline)
+	cur, e := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(amountSort))
 	if e != nil {
 		return EntriesPage{}, e
 	}
@@ -159,8 +180,17 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	if len(out.Items) > limit {
 		out.Items = out.Items[:limit]
 		out.NextCursor = out.Items[limit-1].Seq
-		if in.Sort != "" {
+		if in.Sort == "date" || in.Sort == "-date" {
 			out.NextCursorDate = out.Items[limit-1].Date
+		}
+		if amountSort {
+			out.NextCursorAmount = "null"
+			for _, posting := range out.Items[limit-1].Postings {
+				if in.Account == "" || posting.Account == in.Account {
+					out.NextCursorAmount = posting.Amount.Value.String()
+					break
+				}
+			}
 		}
 	}
 	return out, e
