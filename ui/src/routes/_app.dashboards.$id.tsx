@@ -3,7 +3,7 @@ import { keepPreviousData, useQuery, useSuspenseQuery } from '@tanstack/react-qu
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
 import { DashboardActions } from '../features/dashboard/actions'
 import { DashboardEditor } from '../features/dashboard/editor'
 import { componentValue } from '../features/dashboard/values'
@@ -64,6 +64,6 @@ function Dashboard() {
       if (!component || !parsed.success) return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${placement.span}` }}><h2>{component?.title || placement.component}</h2><p className="muted">This component could not be displayed.</p></section>
       return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${placement.span}` }}><h2>{parsed.data.title || component.title || component.id}</h2><Component value={parsed.data} /><Button size="xs" variant="ghost" onClick={() => {setSelected(component.id);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit {component.title || component.id}</Button></section>
     }))}</div>}
-    <Dialog open={search.edit==='1'} onOpenChange={(open) => {if(!open && (!dirty || window.confirm('Discard unsaved dashboard changes?'))) {setDirty(false);void navigate({search:(old) => ({...old,edit:undefined})})}}}><DialogContent className="dashboard-editor-dialog"><DialogHeader><DialogTitle>Edit dashboard</DialogTitle><DialogDescription>Save creates a new draft. The published dashboard stays unchanged.</DialogDescription></DialogHeader>{search.edit==='1' && <DashboardEditor key={`${id}-${dashboard.version}-${selected ?? ''}`} session={session} id={id} spec={dashboard.spec} initialComponent={selected} onDirty={setDirty} done={(saved) => {if(!saved && dirty && !window.confirm('Discard unsaved dashboard changes?')) return;setDirty(false);void navigate({search:(old) => ({...old,edit:undefined,version:saved ? 'draft' : old.version})});if(saved) void router.invalidate()}}/>}</DialogContent></Dialog>
+    <Sheet open={search.edit==='1'} onOpenChange={(open) => {if(!open && (!dirty || window.confirm('Discard unsaved dashboard changes?'))) {setDirty(false);void navigate({search:(old) => ({...old,edit:undefined})})}}}><SheetContent className="dashboard-editor-sheet"><SheetHeader><SheetTitle>Edit dashboard</SheetTitle><SheetDescription>Save creates a new draft. The published dashboard stays unchanged.</SheetDescription></SheetHeader>{search.edit==='1' && <DashboardEditor key={`${id}-${dashboard.version}-${selected ?? ''}`} session={session} id={id} spec={dashboard.spec} initialComponent={selected} onDirty={setDirty} done={(saved) => {if(!saved && dirty && !window.confirm('Discard unsaved dashboard changes?')) return;setDirty(false);void navigate({search:(old) => ({...old,edit:undefined,version:saved ? 'draft' : old.version})});if(saved) void router.invalidate()}}/>}</SheetContent></Sheet>
   </>
 }
