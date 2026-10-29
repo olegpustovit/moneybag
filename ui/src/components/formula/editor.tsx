@@ -7,15 +7,13 @@ import { autocompletion, completionKeymap, snippetCompletion, type Completion, t
 import { StreamLanguage, defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { setDiagnostics } from '@codemirror/lint'
 import { json as jsonLanguage } from '@codemirror/lang-json'
-import { ApiError } from '../../lib/api'
+import { catalogQuery, type FormulaCatalog } from './catalog'
 import type { FormulaProps } from './input'
 
-type Catalog={revision:number;variables:string[];sources:{name:string;label:string;fields:Record<string,string>}[];functions:Fn[];aggregates:Fn[]}
-type Fn={name:string;signature:string;description:string;member:boolean}
 type Check={ok:boolean;type:string;issues:{msg:string;start:number;end:number}[]}
 type Props=FormulaProps | {label:string;value:string;onChange:(value:string) => void;json:true}
 const cel=StreamLanguage.define({token(stream) {if(stream.eatSpace())return null;if(stream.match(/\/\/.*$/))return 'comment';if(stream.match(/(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/))return 'string';if(stream.match(/\d+(?:\.\d+)?/))return 'number';if(stream.match(/(?:true|false|null|in|has)\b/))return 'keyword';if(stream.match(/[A-Za-z_][\w]*/))return 'variableName';stream.next();return 'operator'}})
-function completions(context:CompletionContext,catalog:Catalog|undefined,props:FormulaProps):CompletionResult | null {
+function completions(context:CompletionContext,catalog:FormulaCatalog|undefined,props:FormulaProps):CompletionResult | null {
  const word=context.matchBefore(/[\w]*/),prefix=context.state.sliceDoc(0,word?.from ?? context.pos),member=/(row|data|computed|params)\.$/.exec(prefix)?.[1],options:Completion[]=[]
  if(member==='row') {const fields=catalog?.sources.find(source => source.name===props.from)?.fields ?? {};for(const [name,type] of Object.entries(fields))options.push({label:name,type:'property',detail:type});for(const name of props.derived ?? [])if(!fields[name])options.push({label:name,type:'property',detail:'derived'})}
  else if(member) {const values=member==='data' ? props.data : member==='computed' ? props.computed : props.params;for(const name of values ?? [])options.push({label:name,type:'property'})}
@@ -27,7 +25,7 @@ export default function Editor(props:Props) {
  const host=useRef<HTMLDivElement>(null),view=useRef<EditorView>(null),latest=useRef(props),[check,setCheck]=useState<Check|null>(null),[error,setError]=useState(''),[signature,setSignature]=useState('')
  latest.current=props
  const formula='json' in props ? undefined : props
- const catalog=useQuery({queryKey:['expression-catalog',formula?.session.user.id],enabled:!!formula,staleTime:30_000,queryFn:async ({signal}):Promise<Catalog> => {const response=await fetch('/api/expr/catalog',{credentials:'same-origin',signal});if(!response.ok)throw new ApiError('Could not load formula suggestions.',response.status);return response.json() as Promise<Catalog>}})
+ const catalog=useQuery({...catalogQuery(formula?.session,formula?.sharedId),enabled:!!formula})
  const catalogRef=useRef(catalog.data);catalogRef.current=catalog.data
  useEffect(() => {if(!host.current)return
   const isJSON='json' in latest.current

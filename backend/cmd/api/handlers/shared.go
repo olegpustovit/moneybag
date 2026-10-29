@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
 func (h *Handler) apiShared(w http.ResponseWriter, r *http.Request) {
@@ -137,4 +139,148 @@ func projectList(value any, keys ...string) []any {
 		out = append(out, fields(object(item), keys...))
 	}
 	return out
+}
+
+func (h *Handler) sharedEditor(w http.ResponseWriter, r *http.Request) (sharing.Access, bool) {
+	p, err := principal.From(r.Context())
+	if err != nil {
+		p, _, err = h.session(r)
+	}
+	if err != nil {
+		respond(w, http.StatusUnauthorized, map[string]string{"error": "sign in to continue"})
+		return sharing.Access{}, false
+	}
+	access, err := h.services.Sharing.EditorAccess(r.Context(), p, r.PathValue("id"))
+	if err != nil {
+		respond(w, http.StatusNotFound, map[string]string{"error": "shared dashboard unavailable"})
+		return sharing.Access{}, false
+	}
+	return access, true
+}
+func (h *Handler) recheckSharedEditor(w http.ResponseWriter, r *http.Request, access sharing.Access) bool {
+	p, err := principal.From(r.Context())
+	if err != nil {
+		p, _, err = h.session(r)
+	}
+	if err == nil {
+		err = h.services.Sharing.RecordEditorRead(r.Context(), p, access)
+	}
+	if err != nil {
+		respond(w, http.StatusNotFound, map[string]string{"error": "shared dashboard unavailable"})
+		return false
+	}
+	return true
+}
+func (h *Handler) apiSharedDraft(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	result, err := access.Dashboard.Get(r.Context(), access.Principal, access.ID, "draft")
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !h.recheckSharedEditor(w, r, access) {
+		return
+	}
+	respond(w, http.StatusOK, result)
+}
+
+// shortcut: a concurrent revoke can race an in-flight write; serialize grant changes and edits when strict cancellation is required.
+func (h *Handler) apiSharedPatch(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Ops json.RawMessage `json:"ops"`
+	}
+	if err := decode(r, &in); err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid patch"})
+		return
+	}
+	if !h.recheckSharedEditor(w, r, access) {
+		return
+	}
+	result, err := access.Dashboard.Patch(r.Context(), access.Principal, access.ID, in.Ops)
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	respond(w, http.StatusOK, result)
+}
+func (h *Handler) apiSharedPublish(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Version int    `json:"version"`
+		Note    string `json:"note"`
+	}
+	if err := decode(r, &in); err != nil || in.Version < 1 {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid version"})
+		return
+	}
+	if !h.recheckSharedEditor(w, r, access) {
+		return
+	}
+	result, err := access.Dashboard.PublishDraft(r.Context(), access.Principal, access.ID, in.Version, in.Note)
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err = h.services.Sharing.RefreshDashboard(r.Context(), access.Principal, access.ID); err != nil {
+		result.Warnings = append(result.Warnings, "Published successfully; some shared snapshots could not refresh. Maintenance will retry.")
+	}
+	result.URL = "/shared/" + access.Grant.ID
+	respond(w, http.StatusOK, result)
+}
+func (h *Handler) apiSharedEvaluate(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Expr   string                     `json:"expr"`
+		Data   map[string]dashboard.Query `json:"data"`
+		Params map[string]any             `json:"params"`
+	}
+	if err := decode(r, &in); err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid expression request"})
+		return
+	}
+	result, err := access.Dashboard.Evaluate(r.Context(), access.Principal, in.Expr, in.Data, in.Params)
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if !h.recheckSharedEditor(w, r, access) {
+		return
+	}
+	respond(w, http.StatusOK, result)
+}
+
+func (h *Handler) apiSharedCatalog(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	catalog, err := access.Dashboard.Catalog(r.Context(), access.Principal, h.services.Tables)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load formula catalog"})
+		return
+	}
+	sources := catalog.Sources[:0]
+	for _, source := range catalog.Sources {
+		if slices.Contains(access.Grant.Sources, source.Name) {
+			sources = append(sources, source)
+		}
+	}
+	catalog.Sources = sources
+	if !h.recheckSharedEditor(w, r, access) {
+		return
+	}
+	respond(w, http.StatusOK, catalog)
 }

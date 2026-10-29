@@ -76,6 +76,13 @@ type GetResult struct {
 
 func (s *Service) UseSnapshots(cache *Snapshots) { s.snapshots = cache }
 
+func (s *Service) Evaluate(ctx context.Context, p principal.Principal, expr string, data map[string]Query, params map[string]any) (expressions.Result, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return expressions.Result{}, err
+	}
+	return s.engine.Evaluate(ctx, p, expr, data, params)
+}
+
 func (s *Service) Get(ctx context.Context, p principal.Principal, id, ref string) (GetResult, error) {
 	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
 		return s.get(ctx, p, id, ref)
@@ -464,6 +471,12 @@ type PublishResult struct {
 }
 
 func (s *Service) Publish(ctx context.Context, p principal.Principal, id string, version int, note string) (PublishResult, error) {
+	return s.publish(ctx, p, id, version, note, false)
+}
+func (s *Service) PublishDraft(ctx context.Context, p principal.Principal, id string, version int, note string) (PublishResult, error) {
+	return s.publish(ctx, p, id, version, note, true)
+}
+func (s *Service) publish(ctx context.Context, p principal.Principal, id string, version int, note string, draftOnly bool) (PublishResult, error) {
 	if e := p.Require("dash:write"); e != nil {
 		return PublishResult{}, e
 	}
@@ -475,6 +488,9 @@ func (s *Service) Publish(ctx context.Context, p principal.Principal, id string,
 		}
 		if version == 0 {
 			version = h.DraftVersion
+		}
+		if draftOnly && (version == 0 || version != h.DraftVersion) {
+			return principal.ErrConflict
 		}
 		if version == 0 {
 			return fmt.Errorf("no draft to publish")

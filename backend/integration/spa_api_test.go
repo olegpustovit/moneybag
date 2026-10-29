@@ -8,7 +8,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -73,7 +75,7 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		if err != nil {
 			t.Fatal(err)
 		}
-		viewerRaw, _, err := services.Identity.StartSession(ctx, viewer)
+		viewerRaw, viewerSession, err := services.Identity.StartSession(ctx, viewer)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,11 +134,144 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		if len(values) != 1 || values["visible"].(map[string]any)["value"] != nil || len(body["pages"].([]any)) != 1 {
 			t.Fatal("snapshot projection", body)
 		}
+
+		editorRequest := func(method, suffix string, payload any, csrf bool) (int, map[string]any) {
+			var text string
+			if payload != nil {
+				raw, e := json.Marshal(payload)
+				if e != nil {
+					t.Fatal(e)
+				}
+				text = string(raw)
+			}
+			req, e := http.NewRequestWithContext(ctx, method, endpoint+path+suffix, strings.NewReader(text))
+			if e != nil {
+				t.Fatal(e)
+			}
+			req.AddCookie(&http.Cookie{Name: "moneybag_session", Value: viewerRaw})
+			req.Header.Set("Content-Type", "application/json")
+			if csrf {
+				req.Header.Set("X-CSRF-Token", viewerSession.CSRF)
+			}
+			res, e := client.Do(req)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer res.Body.Close()
+			var body map[string]any
+			if e = json.NewDecoder(res.Body).Decode(&body); e != nil {
+				t.Fatal(e)
+			}
+			return res.StatusCode, body
+		}
+		if code, _ := editorRequest("GET", "/draft", nil, false); code != 404 {
+			t.Fatal("viewer draft access", code)
+		}
+		if code, _ := editorRequest("GET", "/catalog", nil, false); code != 404 {
+			t.Fatal("viewer catalog access", code)
+		}
+		if code, _ := editorRequest("POST", "/patch", map[string]any{"ops": []any{}}, false); code != 403 {
+			t.Fatal("missing csrf", code)
+		}
+		if code, _ := editorRequest("POST", "/evaluate", map[string]any{"expr": "1", "data": map[string]any{}, "params": map[string]any{}}, true); code != 404 {
+			t.Fatal("viewer evaluate", code)
+		}
+		for _, name := range []string{"shared-allowed", "shared-blocked"} {
+			if _, err = services.Tables.CreateNamed(ctx, p, name, tables.CreateInput{Name: name, Columns: []tables.Column{{ID: "amount", Type: "number"}}}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err = services.Tables.Update(ctx, p, tables.UpdateInput{DB: "shared-allowed", Updates: []tables.CellUpdate{{RowID: "one", Column: "amount", Value: 1.0}, {RowID: "two", Column: "amount", Value: 2.0}}}); err != nil {
+			t.Fatal(err)
+		}
+		editorGrant, err := services.Sharing.Share(ctx, p, sharing.ShareInput{DashboardID: "spa-shared", Grantee: viewer.ID, Role: "editor", Mode: "live", Sources: []string{"table:shared-allowed"}, RowFilter: "row.amount >= 2.0"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if editorGrant.ShareID != grant.ShareID {
+			t.Fatal("share identity changed")
+		}
+		viewerPrincipal := identity.Principal(viewer)
+		if _, err = services.Dashboard.Create(ctx, viewerPrincipal, dashboard.CreateInput{ID: grant.ShareID, Title: "Own collision"}); err != nil {
+			t.Fatal(err)
+		}
+
+		code, catalog := editorRequest("GET", "/catalog", nil, false)
+		if code != 200 {
+			t.Fatal("editor catalog", code, catalog)
+		}
+		sources := catalog["sources"].([]any)
+		if len(sources) != 1 || sources[0].(map[string]any)["name"] != "table:shared-allowed" {
+			t.Fatal("catalog leaked sources", sources)
+		}
+		code, editDraft := editorRequest("GET", "/draft", nil, false)
+		if code != 200 || editDraft["spec"].(map[string]any)["id"] != "spa-shared" {
+			t.Fatal("grant collision", code, editDraft)
+		}
+		evaluate := func(source string) (int, map[string]any) {
+			return editorRequest("POST", "/evaluate", map[string]any{"expr": "data.rows", "data": map[string]any{"rows": map[string]any{"from": source}}, "params": map[string]any{}}, true)
+		}
+		code, evaluated := evaluate("table:shared-allowed")
+		if code != 200 {
+			t.Fatal("shared evaluate", code, evaluated)
+		}
+		rows := evaluated["value"].([]any)
+		if len(rows) != 1 || rows[0].(map[string]any)["amount"] != float64(2) {
+			t.Fatal("row filter", rows)
+		}
+		if code, _ = evaluate("table:shared-blocked"); code != 400 {
+			t.Fatal("restricted source", code)
+		}
+		version := editDraft["version"].(float64)
+		patch := map[string]any{"ops": []any{map[string]any{"op": "test", "path": "/version", "value": version}, map[string]any{"op": "replace", "path": "/title", "value": "Editor changed"}}}
+		code, patched := editorRequest("POST", "/patch", patch, true)
+		if code != 200 {
+			t.Fatal("editor patch", code, patched)
+		}
+		if code, _ = editorRequest("POST", "/patch", patch, true); code != 400 {
+			t.Fatal("stale editor patch", code)
+		}
+		newVersion := patched["draft_version"].(float64)
+		if code, _ = editorRequest("POST", "/publish", map[string]any{"version": version, "note": "stale"}, true); code != 400 {
+			t.Fatal("stale publish", code)
+		}
+		code, published := editorRequest("POST", "/publish", map[string]any{"version": newVersion, "note": "Editor publish"}, true)
+		if code != 200 {
+			t.Fatal("editor publish", code, published)
+		}
+		own, err := services.Dashboard.Get(ctx, viewerPrincipal, grant.ShareID, "")
+		if err != nil || own.Spec.Title != "Own collision" {
+			t.Fatal("edited wrong dashboard", own, err)
+		}
+		owner, err := services.Dashboard.Get(ctx, p, "spa-shared", "published")
+		if err != nil || owner.Spec.Title != "Editor changed" {
+			t.Fatal("owner publish", owner, err)
+		}
+
+		events, err := services.Audit.List(ctx, p, audit.ListInput{Tool: "dashboard_shared_read", Target: grant.ShareID, Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		foundEditor := false
+		for _, event := range events.Events {
+			if event.Actor.ID == viewer.ID && strings.Contains(string(event.After), `"mode":"editor"`) {
+				foundEditor = true
+			}
+		}
+		if !foundEditor {
+			t.Fatal("shared editor read was not audited")
+		}
 		if err = services.Sharing.Unshare(ctx, p, grant.ShareID); err != nil {
 			t.Fatal(err)
 		}
 		if status, _ = fetchShared(); status != 404 {
 			t.Fatal("revoked share", status)
+		}
+		if code, _ := editorRequest("GET", "/draft", nil, false); code != 404 {
+			t.Fatal("revoked editor draft", code)
+		}
+		if code, _ := evaluate("table:shared-allowed"); code != 404 {
+			t.Fatal("revoked editor evaluate", code)
 		}
 	}
 	for _, path := range []string{"/api/session", "/api/imports", "/api/settings", "/api/expr/catalog"} {

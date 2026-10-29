@@ -266,6 +266,35 @@ func (s *Service) Access(ctx context.Context, p principal.Principal, id string, 
 	}
 	return Access{s.scoped(g), ownerPrincipal(g, p.Actor), g.DashboardID, &g}, nil
 }
+
+// EditorAccess resolves a grant directly, even when its ID matches an owned dashboard.
+func (s *Service) EditorAccess(ctx context.Context, p principal.Principal, id string) (Access, error) {
+	if err := p.Require("dash:write"); err != nil {
+		return Access{}, err
+	}
+	g, err := s.Resolve(ctx, p, id)
+	if err != nil {
+		return Access{}, err
+	}
+	if g.Role != "editor" {
+		return Access{}, principal.ErrForbidden
+	}
+	return Access{s.scoped(g), ownerPrincipal(g, p.Actor), g.DashboardID, &g}, nil
+}
+
+func (s *Service) RecordEditorRead(ctx context.Context, p principal.Principal, original Access) error {
+	current, err := s.EditorAccess(ctx, p, original.Grant.ID)
+	if err != nil {
+		return err
+	}
+	if PermissionHash(*current.Grant) != PermissionHash(*original.Grant) {
+		return principal.ErrForbidden
+	}
+	_, err = s.audit.Write(ctx, current.Principal, "dashboard_shared_read", audit.Target{Collection: "shares", ID: current.Grant.ID}, "", nil, struct {
+		Mode string `json:"mode"`
+	}{Mode: "editor"}, func(context.Context) error { return nil })
+	return err
+}
 func (s *Service) View(ctx context.Context, p principal.Principal, id string) (SharedView, error) {
 	g, e := s.Resolve(ctx, p, id)
 	if e != nil {
