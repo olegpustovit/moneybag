@@ -143,3 +143,29 @@ th { color:var(--text2); font-weight:600; }
 .settings-console { max-width: 40rem; }
 .console-result { overflow: auto; max-height: 30rem; background: var(--muted); padding: 1rem; border-radius: .5rem; }
 @media (max-width: 600px) { .setting-inline, .endpoint { align-items: flex-start; flex-direction: column; } .settings-form { align-items: stretch; flex-direction: column; } }
+
+.journal-filters { display:flex; flex-wrap:wrap; gap:.75rem; align-items:end; margin-bottom:1.5rem; }
+.journal-filters label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }
+.journal-filters input, .journal-filters select { min-width:8rem; }
+.journal-filters .journal-check { flex-direction:row; align-items:center; min-height:2rem; }
+.journal-filters .journal-check input { min-width:0; }
+.journal-scroll { height:min(65vh, 720px); overflow:auto; border:1px solid var(--border); }
+.journal-table { width:100%; min-width:760px; border-collapse:collapse; table-layout:fixed; }
+.journal-table thead { position:sticky; top:0; z-index:1; background:var(--background); }
+.journal-table th, .journal-table td { height:32px; padding:0 .5rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.journal-table tbody tr { cursor:pointer; }
+.journal-table tbody tr:hover { background:var(--muted); }
+.journal-entry-link { text-decoration:underline; text-underline-offset:3px; }
+.journal-sheet { overflow:auto; width:min(100%, 36rem); max-width:36rem; }
+.journal-detail { padding:0 1rem 1rem; }
+.journal-detail h2 { font-size:1.2rem; font-weight:600; }
+.journal-detail h3 { font-weight:600; margin-top:1.25rem; }
+.journal-detail p { margin:.4rem 0; }
+.journal-detail ul { padding:0; list-style:none; }
+.journal-detail li { display:flex; justify-content:space-between; gap:1rem; padding:.5rem 0; border-bottom:1px solid var(--border); }
+.journal-detail form { margin-top:1rem; }
+.journal-detail .setting-actions { margin-top:.75rem; }
+.entry-form { display:flex; flex-direction:column; gap:.75rem; }
+.entry-form label { display:flex; flex-direction:column; gap:.25rem; }
+.entry-form fieldset { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; border:1px solid var(--border); padding:.75rem; }
+.entry-form .journal-check { flex-direction:row; align-items:center; }
