@@ -159,9 +159,9 @@ func New(s Services, opts Options) *mcp.Server {
 		}{u, p.Scopes, p.Actor}, e
 	})
 	add(r, "accounts_list", "ledger", "ledger:read", "Use this when you need the chart of accounts or pots. Page with next_cursor; limit is 1..500.", true, false, s.Ledger.Accounts)
-	add(r, "account_create", "ledger", "ledger:write", "Use this when a new bank account, cash pot or expense category is needed. IDs use assets:, liabilities:, expenses:, income: or equity: prefixes. Money amounts use declared commodities.", false, false, s.Ledger.CreateAccount)
-	add(r, "account_update", "ledger", "ledger:write", "Use this when renaming, regrouping or closing an account. Omitted fields remain unchanged; empty pot or location clears them. History is retained.", false, false, s.Ledger.UpdateAccount)
-	add(r, "entries_list", "ledger", "ledger:read", "Use this when you need transactions matching filters. Results are scoped to your user, newest sequence first, with next_cursor; limit 1..500.", true, false, s.Ledger.Entries)
+	add(r, "account_create", "ledger", "ledger:write", "Use this when a new bank account, cash pot or expense category is needed. Optional class (bank, cash, metal_holding, receivable, liability, equity, income, expense) and groups (dimension to value, e.g. type, category, source). IDs use assets:, liabilities:, expenses:, income: or equity: prefixes. Money amounts use declared commodities.", false, false, s.Ledger.CreateAccount)
+	add(r, "account_update", "ledger", "ledger:write", "Use this when renaming, regrouping (class, groups) or closing an account. Omitted fields remain unchanged; empty pot or location clears them. History is retained.", false, false, s.Ledger.UpdateAccount)
+	add(r, "entries_list", "ledger", "ledger:read", "Use this when you need transactions matching filters; effective=true hides reversed originals and their reversals. Results are scoped to your user, newest sequence first, with next_cursor; limit 1..500.", true, false, s.Ledger.Entries)
 	add(r, "entry_get", "ledger", "ledger:read", "Use this when you need one entry with provenance links and audit history. Obtain its id from entries_list.", true, false, func(ctx context.Context, p principal.Principal, in IDInput) (struct {
 		Entry ledger.Entry  `json:"entry"`
 		Links []ledger.Link `json:"links"`
@@ -225,12 +225,16 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return out, e
 	})
-	add(r, "budget_get", "budget", "ledger:read", "Use this when comparing EUR spending with your budget for YYYY-MM. Includes current actuals and the previous six complete calendar months' average.", true, false, func(ctx context.Context, p principal.Principal, in struct {
-		Month string `json:"month,omitempty"`
+	add(r, "budget_get", "budget", "ledger:read", "Use this when comparing EUR spending with your budget for YYYY-MM. Includes current actuals and the average over a window (default: the previous six complete months; window {months, include_current} changes it and the window used is returned with a label like May–Oct). Lists unmapped expense accounts.", true, false, func(ctx context.Context, p principal.Principal, in struct {
+		Month  string `json:"month,omitempty"`
+		Window struct {
+			Months         int  `json:"months,omitempty"`
+			IncludeCurrent bool `json:"include_current,omitempty"`
+		} `json:"window,omitempty"`
 	}) (budget.Status, error) {
-		return s.Budget.Get(ctx, p, in.Month)
+		return s.Budget.GetWindow(ctx, p, in.Month, budget.Window{Months: in.Window.Months, IncludeCurrent: in.Window.IncludeCurrent})
 	})
-	add(r, "budget_set_line", "budget", "ledger:write", "Use this when changing an EUR budget limit, label or expense-account mapping. Omitted fields remain unchanged; empty accounts clears mapping.", false, false, s.Budget.Set)
+	add(r, "budget_set_line", "budget", "ledger:write", "Use this when changing an EUR budget limit, label or expense-account mapping, either a literal accounts list or a group_ref {dimension, value} resolved through account groups. Omitted fields remain unchanged; empty accounts clears mapping.", false, false, s.Budget.Set)
 	add(r, "db_list", "tables", "ledger:read", "Use this when you need your user databases and column schemas. These logical tables all live in the single shared database.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (struct {
 		Items []tables.Table `json:"items"`
 	}, error) {

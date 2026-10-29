@@ -7,6 +7,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"math/big"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -114,15 +115,17 @@ type Amount struct {
 	Commodity string  `json:"c" bson:"c"`
 }
 type Account struct {
-	UserID      string     `json:"-" bson:"user_id"`
-	Key         string     `json:"-" bson:"_id"`
-	ID          string     `json:"id" bson:"id"`
-	Type        string     `json:"type" bson:"type"`
-	Name        string     `json:"name" bson:"name"`
-	Pot         string     `json:"pot,omitempty" bson:"pot,omitempty"`
-	Commodities []string   `json:"commodities" bson:"commodities"`
-	Location    string     `json:"location,omitempty" bson:"location,omitempty"`
-	ClosedAt    *time.Time `json:"closed_at,omitempty" bson:"closed_at,omitempty"`
+	UserID      string            `json:"-" bson:"user_id"`
+	Key         string            `json:"-" bson:"_id"`
+	ID          string            `json:"id" bson:"id"`
+	Type        string            `json:"type" bson:"type"`
+	Name        string            `json:"name" bson:"name"`
+	Pot         string            `json:"pot,omitempty" bson:"pot,omitempty"`
+	Commodities []string          `json:"commodities" bson:"commodities"`
+	Location    string            `json:"location,omitempty" bson:"location,omitempty"`
+	Class       string            `json:"class,omitempty" bson:"class,omitempty"`
+	Groups      map[string]string `json:"groups,omitempty" bson:"groups,omitempty"`
+	ClosedAt    *time.Time        `json:"closed_at,omitempty" bson:"closed_at,omitempty"`
 }
 type Posting struct {
 	Account string  `json:"account" bson:"account"`
@@ -170,8 +173,10 @@ type EntriesInput struct {
 	Tag     string `json:"tag,omitempty"`
 	Text    string `json:"text,omitempty"`
 	Status  string `json:"status,omitempty"`
-	Cursor  int64  `json:"cursor,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
+	// Effective hides reversed originals and their reversals, leaving the latest replacement of each chain.
+	Effective bool  `json:"effective,omitempty"`
+	Cursor    int64 `json:"cursor,omitempty"`
+	Limit     int   `json:"limit,omitempty"`
 }
 type EntriesPage struct {
 	Items      []Entry `json:"items"`
@@ -189,6 +194,26 @@ type AccountsPage struct {
 	NextCursor string    `json:"next_cursor,omitempty"`
 }
 
+var accountClasses = []string{"bank", "cash", "metal_holding", "receivable", "liability", "equity", "income", "expense"}
+var groupKey = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
+
+// ValidateGroupKey checks a group dimension name; it is also used as a Mongo field name.
+func ValidateGroupKey(k string) bool { return groupKey.MatchString(k) }
+
+func validateClassGroups(class string, groups map[string]string) error {
+	if class != "" && !slices.Contains(accountClasses, class) {
+		return fmt.Errorf("class must be one of %s", strings.Join(accountClasses, ", "))
+	}
+	if len(groups) > 20 {
+		return fmt.Errorf("at most 20 groups")
+	}
+	for k, v := range groups {
+		if !groupKey.MatchString(k) || strings.TrimSpace(v) == "" || len(v) > 100 {
+			return fmt.Errorf("group dimensions are 1..40 letters, digits, _ or -, with values of 1..100 characters")
+		}
+	}
+	return nil
+}
 func Validate(in EntryInput) error {
 	if _, err := time.Parse("2006-01-02", in.Date); err != nil {
 		return fmt.Errorf("date must be YYYY-MM-DD")

@@ -77,6 +77,7 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	book.Expr = expr
 	prices := rates.NewService(rates.NewMongoRepository(db), a)
 	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)

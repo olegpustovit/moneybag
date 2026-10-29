@@ -5,6 +5,7 @@ import (
 	"cel.dev/cel-go/common/types"
 	"cel.dev/cel-go/common/types/ref"
 	"cel.dev/cel-go/common/types/traits"
+	"cel.dev/cel-go/ext"
 	"context"
 	"fmt"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -13,6 +14,7 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	_ "time/tzdata"
 )
 
 type Engine struct {
@@ -125,6 +127,47 @@ func New() (*Engine, error) {
 		}
 		return types.String(s[:7])
 	}))))
+	zagreb, e := time.LoadLocation("Europe/Zagreb")
+	if e != nil {
+		return nil, e
+	}
+	date := func(v ref.Val, name string) (time.Time, ref.Val) {
+		s, _ := v.(types.String)
+		t, e := time.Parse("2006-01-02", string(s))
+		if e != nil {
+			return t, types.NewErr("%s needs a YYYY-MM-DD date", name)
+		}
+		return t, nil
+	}
+	opts = append(opts, ext.Strings(), ext.Lists(), ext.Sets(),
+		cel.Function("today", cel.Overload("mb_today", nil, cel.StringType, cel.FunctionBinding(func(...ref.Val) ref.Val {
+			return types.String(time.Now().In(zagreb).Format("2006-01-02"))
+		}))),
+		cel.Function("now", cel.Overload("mb_now", nil, cel.TimestampType, cel.FunctionBinding(func(...ref.Val) ref.Val {
+			return types.Timestamp{Time: time.Now().In(zagreb)}
+		}))),
+		cel.Function("month_of", cel.Overload("mb_month_of", []*cel.Type{cel.StringType}, cel.StringType, cel.UnaryBinding(func(v ref.Val) ref.Val {
+			t, bad := date(v, "month_of")
+			if bad != nil {
+				return bad
+			}
+			return types.String(t.Format("2006-01"))
+		}))),
+		cel.Function("day_of_month", cel.Overload("mb_day_of_month", []*cel.Type{cel.StringType}, cel.IntType, cel.UnaryBinding(func(v ref.Val) ref.Val {
+			t, bad := date(v, "day_of_month")
+			if bad != nil {
+				return bad
+			}
+			return types.Int(t.Day())
+		}))),
+		cel.Function("days_in_month", cel.Overload("mb_days_in_month", []*cel.Type{cel.StringType}, cel.IntType, cel.UnaryBinding(func(v ref.Val) ref.Val {
+			s, _ := v.(types.String)
+			t, e := time.Parse("2006-01", string(s))
+			if e != nil {
+				return types.NewErr("days_in_month needs YYYY-MM")
+			}
+			return types.Int(t.AddDate(0, 1, -1).Day())
+		}))))
 	env, e := cel.NewEnv(opts...)
 	if e != nil {
 		return nil, e

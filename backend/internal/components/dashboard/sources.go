@@ -10,6 +10,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"math/big"
 	"strings"
 	"time"
 )
@@ -28,8 +29,15 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	month, _ := params["month"].(string)
 	out := []map[string]any{}
 	switch {
-	case source == "journal":
-		in := ledger.EntriesInput{Status: "posted", Limit: 100}
+	case source == "journal" || source == "effective_entries" || source == "postings":
+		in := ledger.EntriesInput{Status: "posted", Limit: 100, Effective: source != "journal"}
+		var accounts map[string]ledger.Account
+		if source == "postings" {
+			var e error
+			if accounts, e = s.accountMap(ctx, p); e != nil {
+				return nil, e
+			}
+		}
 		bytes := 0
 		for {
 			page, e := s.Ledger.Entries(ctx, p, in)
@@ -44,6 +52,14 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 				bytes += len(encoded)
 				if bytes > 8*1024*1024 {
 					return nil, fmt.Errorf("journal source exceeds 8 MiB")
+				}
+				if source == "postings" {
+					rows, e := s.postingRows(ctx, p, entry, accounts)
+					if e != nil {
+						return nil, e
+					}
+					out = append(out, rows...)
+					continue
 				}
 				r, e := native(entry)
 				if e != nil {
@@ -64,20 +80,9 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		if e != nil {
 			return nil, e
 		}
-		accounts := map[string]ledger.Account{}
-		in := ledger.AccountsInput{IncludeClosed: true, Limit: 500}
-		for {
-			page, e := s.Ledger.Accounts(ctx, p, in)
-			if e != nil {
-				return nil, e
-			}
-			for _, a := range page.Items {
-				accounts[a.ID] = a
-			}
-			if page.NextCursor == "" {
-				break
-			}
-			in.Cursor = page.NextCursor
+		accounts, e := s.accountMap(ctx, p)
+		if e != nil {
+			return nil, e
 		}
 		for _, r := range balances.Rows {
 			a := accounts[r.Key]
@@ -89,16 +94,21 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 				if e != nil {
 					return nil, e
 				}
-				out = append(out, map[string]any{"account": a.ID, "pot": a.Pot, "name": a.Name, "kind": a.Type, "commodity": v.Commodity, "amount": v.Value.Float(), "usd": value.Value.Float()})
+				out = append(out, map[string]any{"account": a.ID, "pot": a.Pot, "name": a.Name, "kind": a.Type, "class": a.Class, "groups": groupsAny(a.Groups), "commodity": v.Commodity, "amount": v.Value.Float(), "usd": value.Value.Float()})
 			}
 		}
 	case source == "budget_lines":
-		status, e := s.Budget.Get(ctx, p, month)
+		window := budget.Window{}
+		if n, ok := params["window_months"].(float64); ok {
+			window.Months = int(n)
+		}
+		window.IncludeCurrent, _ = params["include_current"].(bool)
+		status, e := s.Budget.GetWindow(ctx, p, month, window)
 		if e != nil {
 			return nil, e
 		}
 		for _, l := range status.Lines {
-			out = append(out, map[string]any{"id": l.ID, "name": l.Name, "limit": l.Limit, "avg": l.Avg6, "avg6": l.Avg6, "oct": l.Actual, "actual": l.Actual, "status": l.Status})
+			out = append(out, map[string]any{"window_label": status.Window.Label, "window_from": status.Window.From, "window_to": status.Window.To, "window_months": status.Window.Months, "id": l.ID, "name": l.Name, "limit": l.Limit, "avg": l.Avg6, "avg6": l.Avg6, "oct": l.Actual, "actual": l.Actual, "status": l.Status})
 		}
 	case source == "months":
 		now := time.Now()
@@ -218,7 +228,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			out = append(out, map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
 		}
 	default:
-		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id> or table:<id>", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, effective_entries, postings, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id> or table:<id>", source)
 	}
 	return out, nil
 }
@@ -228,4 +238,71 @@ func (s *Service) WithReader(reader Reader) *Service {
 	engine.Reader = reader
 	copy.engine = &engine
 	return &copy
+}
+
+func (s *Sources) accountMap(ctx context.Context, p principal.Principal) (map[string]ledger.Account, error) {
+	accounts := map[string]ledger.Account{}
+	in := ledger.AccountsInput{IncludeClosed: true, Limit: 500}
+	for {
+		page, e := s.Ledger.Accounts(ctx, p, in)
+		if e != nil {
+			return nil, e
+		}
+		for _, a := range page.Items {
+			accounts[a.ID] = a
+		}
+		if page.NextCursor == "" {
+			return accounts, nil
+		}
+		in.Cursor = page.NextCursor
+	}
+}
+func groupsAny(g map[string]string) map[string]any {
+	out := make(map[string]any, len(g))
+	for k, v := range g {
+		out[k] = v
+	}
+	return out
+}
+
+// postingRows flattens one entry into a row per posting, valued at the entry date like the months source.
+func (s *Sources) postingRows(ctx context.Context, p principal.Principal, entry ledger.Entry, accounts map[string]ledger.Account) ([]map[string]any, error) {
+	rows := []map[string]any{}
+	for _, post := range entry.Postings {
+		eur, e := s.valueAt(ctx, p, post, "EUR", entry.Date)
+		if e != nil {
+			return nil, e
+		}
+		usd, e := s.valueAt(ctx, p, post, "USD", entry.Date)
+		if e != nil {
+			return nil, e
+		}
+		a := accounts[post.Account]
+		tags := make([]any, len(entry.Tags))
+		for i, t := range entry.Tags {
+			tags[i] = t
+		}
+		rows = append(rows, map[string]any{"date": entry.Date, "entry": entry.ID, "seq": float64(entry.Seq), "kind": entry.Kind, "payee": entry.Payee, "tags": tags, "account": post.Account, "class": a.Class, "groups": groupsAny(a.Groups), "commodity": post.Amount.Commodity, "amount": post.Amount.Value.Float(), "value_eur": eur.Float(), "value_usd": usd.Float()})
+	}
+	return rows, nil
+}
+
+// valueAt mirrors the budget conversion: a posting price in EUR wins, otherwise the rate at end of the entry date.
+func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledger.Posting, target, date string) (ledger.Decimal, error) {
+	amount := post.Amount
+	if amount.Commodity == target {
+		return amount.Value, nil
+	}
+	if post.Price != nil && post.Price.Commodity == "EUR" {
+		v, e := ledger.DecimalFromRat(new(big.Rat).Mul(amount.Value.Rat(), post.Price.Value.Rat()))
+		if e != nil {
+			return ledger.Decimal{}, e
+		}
+		amount = ledger.Amount{Value: v, Commodity: "EUR"}
+		if target == "EUR" {
+			return v, nil
+		}
+	}
+	v, e := s.Valuer.Convert(ctx, p, amount, target, date+"T23:59:59Z")
+	return v.Value, e
 }
