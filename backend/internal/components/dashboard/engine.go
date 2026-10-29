@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"cel.dev/cel-go/cel"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,6 +41,7 @@ type execution struct {
 	source     map[string][]map[string]any // rows already read from each source in this execution
 	memo       *sourceMemo
 	dataBudget *byteBudget // all query results of this execution share 8 MiB
+	programs   map[string]cel.Program
 }
 
 func (x *execution) eval(expr string, row map[string]any) (any, error) {
@@ -57,7 +59,19 @@ func (x *execution) eval(expr string, row map[string]any) (any, error) {
 	if row != nil {
 		vars["row"] = row
 	}
-	r, e := x.engine.Expr.Eval(x.ctx, expr, vars)
+	if x.programs == nil {
+		x.programs = map[string]cel.Program{}
+	}
+	program := x.programs[expr]
+	if program == nil {
+		var err error
+		program, err = x.engine.Expr.Compile(expr)
+		if err != nil {
+			return nil, err
+		}
+		x.programs[expr] = program
+	}
+	r, e := expressions.EvalProgram(x.ctx, expr, program, vars)
 	x.cost += r.Cost
 	if x.cost > 100000000 {
 		return nil, fmt.Errorf("page evaluation exceeds 100 million operations")

@@ -203,6 +203,11 @@ func (e *Engine) Eval(ctx context.Context, src string, vars map[string]any) (Res
 	if err != nil {
 		return Result{}, err
 	}
+	return EvalProgram(ctx, src, p, vars)
+}
+
+func EvalProgram(ctx context.Context, src string, p cel.Program, vars map[string]any) (Result, error) {
+	markVolatile(ctx, src)
 	env := map[string]any{"row": map[string]any{}, "data": map[string]any{}, "params": map[string]any{}, "computed": map[string]any{}, "rates": map[string]any{}}
 	for k, v := range vars {
 		env[k] = v

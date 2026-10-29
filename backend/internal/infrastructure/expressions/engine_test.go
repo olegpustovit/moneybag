@@ -68,3 +68,23 @@ func TestVolatilityTracksNowAcrossChildContexts(t *testing.T) {
 		t.Fatalf("now: %v, volatile=%v", err, Volatile(ctx))
 	}
 }
+
+func TestPreparedEvaluationMatchesEvaluation(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expr := range []string{`row.amount + 1`, `now() > timestamp('2020-01-01T00:00:00Z')`, `row.missing`} {
+		program, err := e.Compile(expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		vars := map[string]any{"row": map[string]any{"amount": 2.0}}
+		first, second := WithVolatility(context.Background()), WithVolatility(context.Background())
+		want, wantErr := e.Eval(first, expr, vars)
+		got, gotErr := EvalProgram(second, expr, program, vars)
+		if got != want || (gotErr == nil) != (wantErr == nil) || Volatile(first) != Volatile(second) {
+			t.Fatalf("%s: got %+v, %v; want %+v, %v", expr, got, gotErr, want, wantErr)
+		}
+	}
+}
