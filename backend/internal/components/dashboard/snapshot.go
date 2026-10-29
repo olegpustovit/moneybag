@@ -69,6 +69,16 @@ func (s *Snapshots) Changed(user string, finished bool) {
 	s.users[user] = state
 }
 
+func (s *Snapshots) memoEpoch(user string) (uint64, bool) {
+	if s == nil {
+		return 0, true
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	state := s.users[user]
+	return state.generation, state.writes == 0
+}
+
 func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name string, params any, build func() (any, error), cacheable func(any) bool) (any, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

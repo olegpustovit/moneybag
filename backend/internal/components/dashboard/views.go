@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -98,11 +100,16 @@ func (s *Service) UpsertView(ctx context.Context, p principal.Principal, in View
 
 // viewRows runs a saved view; the context carries the chain so a cycle (or runaway nesting) fails instead of recursing.
 func (s *Sources) viewRows(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error) {
-	stack, _ := ctx.Value(viewStackKey{}).([]string)
-	v, e := s.Views.View(ctx, p, id)
+	v, _, _, e := s.viewDefinition(ctx, p, id)
 	if e != nil {
 		return nil, e
 	}
+	return s.evaluateView(ctx, p, v)
+}
+
+func (s *Sources) evaluateView(ctx context.Context, p principal.Principal, v View) ([]map[string]any, error) {
+	stack, _ := ctx.Value(viewStackKey{}).([]string)
+	id := v.ID
 	ctx = context.WithValue(ctx, viewStackKey{}, append(append([]string(nil), stack...), id))
 	params, _ := ctx.Value(paramsKey{}).(map[string]any)
 	if params == nil {
@@ -118,4 +125,28 @@ func (s *Sources) viewRows(ctx context.Context, p principal.Principal, id string
 		return nil, fmt.Errorf("view %s must return rows, not as: map", id)
 	}
 	return rows, nil
+}
+
+func (s *Sources) viewDefinition(ctx context.Context, p principal.Principal, id string) (View, uint64, bool, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return View{}, 0, false, err
+	}
+	epoch, stable := s.Snapshots.memoEpoch(p.UserID)
+	if !stable {
+		v, err := s.Views.View(ctx, p, id)
+		return v, epoch, false, err
+	}
+	v, err := reqcache.Do(ctx, fmt.Sprintf("view-definition|%s|%d|%s", p.UserID, epoch, id), func() (View, error) { return s.Views.View(ctx, p, id) })
+	return v, epoch, true, err
+}
+
+func memoizableLeaf(v View) bool {
+	if v.Query.From != "postings" && v.Query.From != "journal" && v.Query.From != "effective_entries" {
+		return false
+	}
+	volatile := false
+	walkExpressions(Spec{Data: map[string]Query{v.ID: v.Query}}, func(_ string, expr string) {
+		volatile = volatile || expressions.MayUseNow(expr)
+	})
+	return !volatile
 }

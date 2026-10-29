@@ -60,9 +60,18 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	}
 	var rows []map[string]any
 	var err error
-	// shortcut: nested views bypass shared memoization to prevent cross-root cycle deadlocks; replace with cycle-aware scheduling to cache them.
 	if len(stack) > 0 && strings.HasPrefix(source, "view:") {
-		rows, err = read()
+		v, epoch, stable, e := s.viewDefinition(ctx, p, strings.TrimPrefix(source, "view:"))
+		if e != nil {
+			return nil, e
+		}
+		current, currentStable := s.Snapshots.memoEpoch(p.UserID)
+		if stable && currentStable && current == epoch && memoizableLeaf(v) {
+			rows, err = cachedLeaf(ctx, p, epoch, source, string(params), func() ([]map[string]any, error) { return s.evaluateView(ctx, p, v) })
+		} else {
+			// shortcut: nested non-leaf views bypass memoization to avoid cross-root cycles; cache after cycle-aware scheduling exists.
+			rows, err = read()
+		}
 	} else {
 		rows, err = reqcache.Do(ctx, "rows|"+p.UserID+"|"+source+"|"+string(params), read)
 	}
@@ -74,6 +83,24 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		out[i] = cloneSourceValue(row).(map[string]any)
 	}
 	return out, nil
+}
+
+type leafResult struct {
+	rows     []map[string]any
+	volatile bool
+	expires  time.Time
+}
+
+func cachedLeaf(ctx context.Context, p principal.Principal, epoch uint64, source, params string, read func() ([]map[string]any, error)) ([]map[string]any, error) {
+	result, err := reqcache.Do(ctx, fmt.Sprintf("view-leaf|%s|%d|%s|%s", p.UserID, epoch, source, params), func() (leafResult, error) {
+		rows, err := read()
+		return leafResult{rows, expressions.Volatile(ctx), expressions.Expiry(ctx)}, err
+	})
+	if result.volatile {
+		expressions.MarkVolatile(ctx)
+	}
+	expressions.ExpireAt(ctx, result.expires)
+	return result.rows, err
 }
 
 func cloneSourceValue(v any) any {

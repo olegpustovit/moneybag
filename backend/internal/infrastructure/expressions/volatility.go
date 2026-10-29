@@ -54,7 +54,10 @@ func Expiry(ctx context.Context) time.Time {
 	return time.Time{}
 }
 func markVolatile(ctx context.Context, src string) {
-	if strings.Contains(src, "now") && nowCall.MatchString(src) {
+	if MayUseNow(src) {
 		MarkVolatile(ctx)
 	}
 }
+
+// MayUseNow conservatively identifies expressions that prevent cross-request caching.
+func MayUseNow(src string) bool { return strings.Contains(src, "now") && nowCall.MatchString(src) }

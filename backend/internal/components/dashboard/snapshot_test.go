@@ -9,6 +9,7 @@ import (
 
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 )
 
 func testSnapshots() *Snapshots {
@@ -161,5 +162,108 @@ func TestSourceCloneIsolatesNestedValues(t *testing.T) {
 	copy["tags"].([]any)[0] = "b"
 	if original["groups"].(map[string]any)["name"] != "original" || original["tags"].([]any)[0] != "a" {
 		t.Fatal("nested source values shared")
+	}
+}
+
+func TestNestedLeafMemoizationAndVolatility(t *testing.T) {
+	for _, tc := range []struct {
+		query Query
+		want  bool
+	}{
+		{Query{From: "postings", Where: `row.account == 'assets:cash'`}, true},
+		{Query{From: "journal", Derive: map[string]string{"x": "now()"}}, false},
+		{Query{From: "effective_entries", Where: `row.name == 'now'`}, false},
+		{Query{From: "view:other"}, false}, {Query{From: "scenarios"}, false},
+	} {
+		if got := memoizableLeaf(View{ID: "test", Query: tc.query}); got != tc.want {
+			t.Fatalf("%+v: got %t", tc.query, got)
+		}
+	}
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	base := reqcache.With(context.Background())
+	first := expressions.WithVolatility(base)
+	second := expressions.WithVolatility(base)
+	expires := time.Now().Add(time.Hour).Truncate(time.Second)
+	var calls atomic.Int64
+	read := func() ([]map[string]any, error) {
+		calls.Add(1)
+		expressions.ExpireAt(first, expires)
+		expressions.MarkVolatile(first)
+		return []map[string]any{{"n": 1}}, nil
+	}
+	a, err := cachedLeaf(first, p, 0, "view:leaf", "{}", read)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := cachedLeaf(second, p, 0, "view:leaf", "{}", read)
+	if err != nil || calls.Load() != 1 || len(a) != 1 || len(b) != 1 || !expressions.Volatile(second) || !expressions.Expiry(second).Equal(expires) {
+		t.Fatalf("cache/metadata: calls=%d, expiry=%v, err=%v", calls.Load(), expressions.Expiry(second), err)
+	}
+	_, err = cachedLeaf(second, p, 0, "view:leaf", `{"from":"2025-01-01"}`, read)
+	if err != nil || calls.Load() != 2 {
+		t.Fatalf("params isolation: calls=%d, err=%v", calls.Load(), err)
+	}
+	other := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAW")
+	_, err = cachedLeaf(second, other, 0, "view:leaf", "{}", read)
+	if err != nil || calls.Load() != 3 {
+		t.Fatalf("owner isolation: calls=%d, err=%v", calls.Load(), err)
+	}
+}
+
+func TestNestedLeafCoalescesConcurrentReads(t *testing.T) {
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	ctx := reqcache.With(context.Background())
+	var calls atomic.Int64
+	started, release := make(chan struct{}), make(chan struct{})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := cachedLeaf(expressions.WithVolatility(ctx), p, 0, "view:leaf", "{}", func() ([]map[string]any, error) {
+				if calls.Add(1) == 1 {
+					close(started)
+				}
+				<-release
+				return []map[string]any{{"n": 1}}, nil
+			})
+			if err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	<-started
+	close(release)
+	wg.Wait()
+	if calls.Load() != 1 {
+		t.Fatalf("built %d times", calls.Load())
+	}
+}
+
+func TestLeafMemoEpochChangesAcrossWrites(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	ctx := reqcache.With(context.Background())
+	var calls int
+	read := func() ([]map[string]any, error) { calls++; return []map[string]any{{"n": calls}}, nil }
+	epoch, stable := cache.memoEpoch(p.UserID)
+	if !stable {
+		t.Fatal("unexpected active write")
+	}
+	if _, err := cachedLeaf(ctx, p, epoch, "view:leaf", "{}", read); err != nil {
+		t.Fatal(err)
+	}
+	cache.Changed(p.UserID, false)
+	if _, stable = cache.memoEpoch(p.UserID); stable {
+		t.Fatal("active write must bypass request memo")
+	}
+	cache.Changed(p.UserID, true)
+	next, stable := cache.memoEpoch(p.UserID)
+	if !stable || next == epoch {
+		t.Fatal("epoch did not advance")
+	}
+	rows, err := cachedLeaf(ctx, p, next, "view:leaf", "{}", read)
+	if err != nil || calls != 2 || rows[0]["n"] != 2 {
+		t.Fatalf("stale leaf reused: %v, %v, %d", rows, err, calls)
 	}
 }
