@@ -308,3 +308,10 @@ th { color:var(--text2); font-weight:600; }
 .dashboard-editor-tabs { display: flex; gap: .5rem; }
 .dashboard-editor-tabs button { padding: .4rem .6rem; border-bottom: 2px solid transparent; }
 .dashboard-editor-tabs button[aria-pressed="true"] { border-color: currentColor; }
+.code-editor { border: 1px solid var(--border); background: var(--background); border-radius: .375rem; overflow: hidden; }
+.code-editor .cm-editor { font-family: var(--font-mono); font-size: .8rem; }
+.code-editor .cm-content { padding: .45rem; min-height: 2.2rem; }
+.code-editor .cm-scroller { overflow: auto; }
+.json-editor .cm-scroller { min-height: 24rem; max-height: 55vh; }
+.formula-feedback, .formula-signature { padding: 0 .5rem; font-size: .75rem; color: var(--muted-foreground); }
+.formula-tooltip { padding: .4rem; max-width: 24rem; }
