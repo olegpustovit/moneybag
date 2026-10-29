@@ -330,8 +330,8 @@ func (x *execution) chart(c Component) (string, any, error) {
 	if e != nil {
 		return "", nil, e
 	}
-	if len(rows) > 600 {
-		return "", nil, fmt.Errorf("chart exceeds 600 points")
+	if len(rows) > 5000 {
+		return "", nil, fmt.Errorf("chart exceeds 5000 points")
 	}
 	if len(rows) == 0 {
 		return `<p class="cap">No data for this chart.</p>`, []chartPoint{}, nil

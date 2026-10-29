@@ -20,7 +20,7 @@ import (
 
 type paramsKey struct{}
 
-// evalBudget bounds all queries of one dashboard; journal queries page through the ledger, so 1s fit only one.
+// evalBudget bounds all queries of one dashboard.
 const evalBudget = 10 * time.Second
 
 type Reader interface {
@@ -42,9 +42,12 @@ type execution struct {
 }
 
 func (x *execution) eval(expr string, row map[string]any) (any, error) {
+	if err := x.ctx.Err(); err != nil {
+		return nil, err
+	}
 	x.count++
-	if x.count > 20000 {
-		return nil, fmt.Errorf("page evaluation exceeds 20000 calls")
+	if x.count > 5000000 {
+		return nil, fmt.Errorf("page evaluation exceeds 5000000 calls")
 	}
 	vars := map[string]any{}
 	for k, v := range x.vars {
@@ -55,8 +58,8 @@ func (x *execution) eval(expr string, row map[string]any) (any, error) {
 	}
 	r, e := x.engine.Expr.Eval(x.ctx, expr, vars)
 	x.cost += r.Cost
-	if x.cost > 1000000 {
-		return nil, fmt.Errorf("page evaluation exceeds one million operations")
+	if x.cost > 100000000 {
+		return nil, fmt.Errorf("page evaluation exceeds 100 million operations")
 	}
 	return r.Value, e
 }
@@ -83,6 +86,9 @@ func numeric(v any) (float64, error) {
 	return 0, fmt.Errorf("expected finite number")
 }
 func (x *execution) query(q Query) (any, error) {
+	if err := x.ctx.Err(); err != nil {
+		return nil, err
+	}
 	var rows []map[string]any
 	var e error
 	data := x.vars["data"].(map[string]any)
@@ -123,6 +129,9 @@ func (x *execution) query(q Query) (any, error) {
 		// Queries derive in place, so each gets its own copy of the shared rows.
 		rows = make([]map[string]any, len(cached))
 		for i, r := range cached {
+			if i%1000 == 0 && x.ctx.Err() != nil {
+				return nil, x.ctx.Err()
+			}
 			rows[i] = maps.Clone(r)
 		}
 	}
@@ -130,7 +139,10 @@ func (x *execution) query(q Query) (any, error) {
 		return nil, fmt.Errorf("source exceeds 250000 rows")
 	}
 	out := []map[string]any{}
-	for _, r := range rows {
+	for i, r := range rows {
+		if i%1000 == 0 && x.ctx.Err() != nil {
+			return nil, x.ctx.Err()
+		}
 		if q.Where != "" {
 			v, e := x.eval(q.Where, r)
 			if e != nil {
@@ -179,7 +191,10 @@ func (x *execution) query(q Query) (any, error) {
 	if len(q.Group) > 0 || len(q.Agg) > 0 {
 		groups := map[string][]map[string]any{}
 		keys := []string{}
-		for _, r := range out {
+		for i, r := range out {
+			if i%1000 == 0 && x.ctx.Err() != nil {
+				return nil, x.ctx.Err()
+			}
 			values := []any{}
 			for _, k := range q.Group {
 				values = append(values, r[k])
@@ -683,6 +698,10 @@ func (x *execution) load(data map[string]Query, computedExprs map[string]string,
 		progress := false
 		errs := map[string]error{}
 		for k, q := range pending {
+			if err := x.ctx.Err(); err != nil {
+				issue("/data/"+k, err)
+				return
+			}
 			v, err := x.query(q)
 			if err != nil {
 				errs[k] = err
@@ -714,6 +733,10 @@ func (x *execution) load(data map[string]Query, computedExprs map[string]string,
 		progress := false
 		errs := map[string]error{}
 		for k, expr := range computed {
+			if err := x.ctx.Err(); err != nil {
+				issue("/computed/"+k, err)
+				return
+			}
 			v, err := x.eval(expr, nil)
 			if err != nil {
 				errs[k] = err

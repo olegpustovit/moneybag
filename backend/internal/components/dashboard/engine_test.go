@@ -3,11 +3,13 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fixtureReader struct{}
@@ -190,5 +192,58 @@ func TestLargeSourceCanBeAggregatedWithinResultBudget(t *testing.T) {
 	}, nil)
 	if err != nil || result.Value != float64(6000) {
 		t.Fatalf("aggregate: %+v, %v", result, err)
+	}
+}
+
+type manyRowsReader struct{ n int }
+
+func (r manyRowsReader) Rows(context.Context, principal.Principal, string) ([]map[string]any, error) {
+	rows := make([]map[string]any, r.n)
+	for i := range rows {
+		rows[i] = map[string]any{"value": float64(i)}
+	}
+	return rows, nil
+}
+
+func TestEvaluationAndChartSupportLargerSources(t *testing.T) {
+	expr, _ := expressions.New()
+	engine := Engine{Expr: expr, Reader: manyRowsReader{n: 20001}}
+	result, err := engine.Evaluate(context.Background(), principal.Principal{}, "data.summary[0].count", map[string]Query{
+		"summary": {From: "postings", Where: "row.value >= 0.0", Agg: map[string]string{"count": "count()"}},
+	}, nil)
+	if err != nil || result.Value != float64(20001) {
+		t.Fatalf("large source: %+v, %v", result, err)
+	}
+	engine.Reader = manyRowsReader{n: 601}
+	spec := Spec{Data: map[string]Query{"rows": {From: "journal"}}, Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{12, "chart"}}}}}}, Components: []Component{{ID: "chart", Type: "chart", Mark: "line", Rows: "rows", Encoding: &Encoding{X: Axis{Field: "value"}, Y: Axis{Field: "value"}}}}}
+	out, err := engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || !out.Validation.OK {
+		t.Fatalf("large chart: %+v, %v", out.Validation, err)
+	}
+}
+
+type waitingReader struct{ done chan struct{} }
+
+func (r waitingReader) Rows(ctx context.Context, _ principal.Principal, _ string) ([]map[string]any, error) {
+	defer close(r.done)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestEvaluationStopsWhenRequestExpires(t *testing.T) {
+	expr, _ := expressions.New()
+	done := make(chan struct{})
+	engine := Engine{Expr: expr, Reader: waitingReader{done: done}}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := engine.Evaluate(ctx, principal.Principal{}, "1", map[string]Query{"slow": {From: "journal"}}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second {
+		t.Fatalf("deadline: %v after %v", err, time.Since(start))
+	}
+	select {
+	case <-done:
+	default:
+		t.Fatal("source did not stop")
 	}
 }
