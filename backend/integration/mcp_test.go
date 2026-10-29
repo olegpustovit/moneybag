@@ -84,7 +84,7 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(tools.Tools) != 74 {
+	if len(tools.Tools) != 76 {
 		t.Fatal("MCP tool catalog", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
@@ -149,7 +149,7 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 	}
 	raw, _ := json.Marshal(result.StructuredContent)
 	var report consistency.Result
-	if json.Unmarshal(raw, &report) != nil || len(report.Checks) != 11 || report.Checks[0].ID != "trial_balance" || !report.Checks[0].OK {
+	if json.Unmarshal(raw, &report) != nil || len(report.Checks) != 12 || report.Checks[0].ID != "trial_balance" || !report.Checks[0].OK {
 		t.Fatal("trial balance must balance on the fixture", string(raw))
 	}
 	result, e = own.CallTool(ctx, &mcp.CallToolParams{Name: "dashboard_get", Arguments: map[string]any{"id": "fixed"}})

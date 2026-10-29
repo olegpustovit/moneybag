@@ -201,27 +201,54 @@ func New(s Services, opts Options) *mcp.Server {
 			Quotes []rates.Quote `json:"quotes"`
 		}{q}, e
 	})
-	add(r, "rate_set", "rates", "ledger:write", "Use this when recording a manual FX, metal or security quote. Positive decimal value, BASE/QUOTE pair, RFC3339 at and source are required.", false, false, s.Rates.Set)
+	add(r, "rate_set", "rates", "ledger:write", "Use this when recording a manual FX, metal or security quote, or correcting a bad readout: a quote for the same pair and at is overwritten with the new value. Positive decimal value, BASE/QUOTE pair, RFC3339 at and source are required; add reason when correcting. Corrected quotes are never overwritten by the daily sync. Undoable.", false, false, s.Rates.Set)
+	add(r, "rate_archive", "rates", "ledger:write", "Use this when a stored quote is wrong and should be ignored: hides the quote by id (from rates_get or rate_set) from valuation. The sync never restores an archived quote. Undoable with undo.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+		ID     string `json:"id"`
+		Reason string `json:"reason"`
+	}) (struct {
+		Archived string `json:"archived"`
+	}, error) {
+		return struct {
+			Archived string `json:"archived"`
+		}{in.ID}, s.Rates.Archive(ctx, p, in.ID, true, in.Reason)
+	})
+	add(r, "rates_sync_status", "rates", "ledger:read", "Use this when checking whether rates are current. Returns per provider (ecb, gold-api, swissquote) the last attempt and success, status (ok, error, skipped, never), error, consecutive failures and the newest quote written.", true, false, func(ctx context.Context, p principal.Principal, in struct{}) (struct {
+		Providers []rates.ProviderState `json:"providers"`
+	}, error) {
+		st, e := s.Rates.SyncStatus(ctx, p)
+		return struct {
+			Providers []rates.ProviderState `json:"providers"`
+		}{st}, e
+	})
 	type refreshed struct {
-		Updated []rates.Quote `json:"updated"`
+		Updated   []rates.Quote         `json:"updated"`
+		Providers []rates.ProviderState `json:"providers"`
 	}
-	// The response keeps its original schema; a 90-day backfill would otherwise return thousands of quotes.
-	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX quotes are stale. Backfills ECB daily reference rates for the last 90 days and returns the newest new or changed day of quotes. Manual metal/security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	// updated keeps its original shape (newest ECB day); gold quotes written are included in full.
+	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX or gold quotes are stale. Runs the daily sync now: backfills ECB daily reference rates for the last 90 days and fetches spot gold (gold-api.com, else Swissquote) as XAU/USD and XAU_g/USD. Returns the newest ECB day plus gold quotes written, and per-provider status. Corrected or archived quotes are never overwritten. sources may limit it to ecb and/or gold. Manual security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		Sources []string `json:"sources,omitempty"`
 	}) (refreshed, error) {
+		ecb, gold := len(in.Sources) == 0, len(in.Sources) == 0
 		for _, source := range in.Sources {
-			if source != "ecb" {
-				return refreshed{}, fmt.Errorf("feed %q is not configured; use rate_set for manual quotes", source)
+			switch source {
+			case "ecb":
+				ecb = true
+			case "gold":
+				gold = true
+			default:
+				return refreshed{}, fmt.Errorf("feed %q is not configured; use ecb or gold, or rate_set for manual quotes", source)
 			}
 		}
-		q, e := s.Rates.RefreshECB(ctx, p)
-		out := refreshed{Updated: []rates.Quote{}}
+		res, e := s.Rates.Sync(ctx, p, ecb, gold)
+		out := refreshed{Updated: []rates.Quote{}, Providers: res.Providers}
 		newest := ""
-		for _, x := range q {
-			newest = max(newest, x.At)
+		for _, x := range res.Written {
+			if x.Source == "ECB daily reference" {
+				newest = max(newest, x.At)
+			}
 		}
-		for _, x := range q {
-			if x.At == newest {
+		for _, x := range res.Written {
+			if x.Source != "ECB daily reference" || x.At == newest {
 				out.Updated = append(out.Updated, x)
 			}
 		}

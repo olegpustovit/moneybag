@@ -32,6 +32,7 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	_ "time/tzdata" // Europe/Zagreb must resolve in minimal containers
 )
 
 var version = "dev"

@@ -213,6 +213,14 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		for _, q := range quotes {
 			out = append(out, map[string]any{"pair": q.Pair, "base": q.Base, "quote": q.Quote, "at": q.At, "value": q.Value.Float(), "source": q.Source})
 		}
+	case source == "rate_sync":
+		st, e := s.Rates.SyncStatus(ctx, p)
+		if e != nil {
+			return nil, e
+		}
+		for _, x := range st {
+			out = append(out, map[string]any{"provider": x.Provider, "status": x.Status, "last_attempt": x.LastAttempt, "last_success": x.LastSuccess, "error": x.Error, "consecutive_failures": x.ConsecutiveFailures, "newest_at": x.NewestAt, "newest_value": x.NewestValue})
+		}
 	case strings.HasPrefix(source, "rate_history:"):
 		from, _ := params["from"].(string)
 		to, _ := params["to"].(string)
@@ -295,7 +303,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			out = append(out, r)
 		}
 	default:
-		return nil, fmt.Errorf("unknown source %q; use journal, effective_entries, postings, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, rate_history:<PAIR[,PAIR]>, scenarios, scenario:<id>, forecast_series:<id>, income_actuals, table:<id> or view:<id>", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, effective_entries, postings, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, rate_sync, rate_history:<PAIR[,PAIR]>, scenarios, scenario:<id>, forecast_series:<id>, income_actuals, table:<id> or view:<id>", source)
 	}
 	return out, nil
 }

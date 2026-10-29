@@ -295,7 +295,7 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 		if old.ID == "" {
 			return s.Rates.Archive(ctx, p, id, true, reason)
 		}
-		_, e = s.Rates.Set(ctx, p, rates.SetInput{Pair: old.Pair, At: old.At, Value: old.Value, Source: old.Source})
+		_, e = s.Rates.Set(ctx, p, rates.SetInput{Pair: old.Pair, At: old.At, Value: old.Value, Source: old.Source, Provider: !old.Corrected})
 		if e == nil && old.Archived {
 			e = s.Rates.Archive(ctx, p, id, true, reason)
 		}

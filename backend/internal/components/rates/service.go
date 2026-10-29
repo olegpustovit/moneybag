@@ -14,6 +14,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
@@ -30,12 +31,17 @@ type Quote struct {
 	At       string         `json:"at" bson:"at"`
 	Value    ledger.Decimal `json:"value" bson:"value"`
 	Source   string         `json:"source" bson:"source"`
+	// Corrected marks a human or agent quote; the provider sync never overwrites it.
+	Corrected bool `json:"corrected,omitempty" bson:"corrected,omitempty"`
 }
 type SetInput struct {
 	Pair   string         `json:"pair"`
 	Value  ledger.Decimal `json:"value"`
 	At     string         `json:"at"`
 	Source string         `json:"source"`
+	Reason string         `json:"reason,omitempty"`
+	// Provider is set by the sync (and by undo of a provider quote); other callers write corrected quotes.
+	Provider bool `json:"-"`
 }
 type Result struct {
 	Quote   Quote  `json:"quote"`
@@ -45,12 +51,16 @@ type MongoRepository struct{ db *mongo.Database }
 type Service struct {
 	repo  *MongoRepository
 	audit *audit.Service
+	http  *http.Client
+	urls  endpoints
 }
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository {
 	return &MongoRepository{db}
 }
-func NewService(r *MongoRepository, a *audit.Service) *Service { return &Service{r, a} }
+func NewService(r *MongoRepository, a *audit.Service) *Service {
+	return &Service{r, a, safefetch.Client(), endpoints{ecbURL, goldAPIURL, swissURL}}
+}
 
 var pairPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,19}/[A-Za-z][A-Za-z0-9_]{0,19}$`)
 
@@ -79,7 +89,7 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 	if e != nil || in.Value.Rat().Sign() <= 0 || strings.TrimSpace(in.Source) == "" || len(in.Source) > 300 {
 		return Result{}, fmt.Errorf("positive decimal quote, RFC3339 timestamp and source required")
 	}
-	q := Quote{ID: ulid.Make().String(), UserID: p.UserID, Pair: base + "/" + quote, Base: base, Quote: quote, At: at.UTC().Format(time.RFC3339), Value: in.Value, Source: in.Source}
+	q := Quote{ID: ulid.Make().String(), UserID: p.UserID, Pair: base + "/" + quote, Base: base, Quote: quote, At: at.UTC().Format(time.RFC3339), Value: in.Value, Source: in.Source, Corrected: !in.Provider}
 	f := bson.M{"user_id": p.UserID, "pair": q.Pair, "at": q.At}
 	var old Quote
 	e = s.repo.db.Collection("prices").FindOne(ctx, f).Decode(&old)
@@ -89,7 +99,7 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 	if e == nil {
 		q.ID = old.ID
 	}
-	id, e := s.audit.Write(ctx, p, "rate_set", audit.Target{Collection: "prices", ID: q.ID}, "", old, q, func(tx context.Context) error {
+	id, e := s.audit.Write(ctx, p, "rate_set", audit.Target{Collection: "prices", ID: q.ID}, in.Reason, old, q, func(tx context.Context) error {
 		_, e := s.repo.db.Collection("prices").ReplaceOne(tx, f, q, options.Replace().SetUpsert(true))
 		return e
 	})
@@ -302,56 +312,4 @@ func parseECB(b []byte) ([]ecbQuote, error) {
 		return nil, fmt.Errorf("ECB returned no quotes")
 	}
 	return out, nil
-}
-
-// RefreshECB backfills the last 90 days so budgets and valuations of recent months have quotes.
-// shortcut: older entries still need rate_set quotes; load eurofxref-hist.xml once if long histories are imported.
-func (s *Service) RefreshECB(ctx context.Context, p principal.Principal) ([]Quote, error) {
-	if e := p.Require("ledger:write"); e != nil {
-		return nil, e
-	}
-	b, _, e := safefetch.Read(ctx, safefetch.Client(), "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist-90d.xml", 1024*1024)
-	if e != nil {
-		return nil, e
-	}
-	quotes, e := parseECB(b)
-	if e != nil {
-		return nil, e
-	}
-	const source = "ECB daily reference"
-	oldest := quotes[0].At
-	for _, q := range quotes {
-		oldest = min(oldest, q.At)
-	}
-	cur, e := s.repo.db.Collection("prices").Find(ctx, bson.M{"user_id": p.UserID, "source": source, "at": bson.M{"$gte": oldest}})
-	if e != nil {
-		return nil, e
-	}
-	var stored []Quote
-	if e = cur.All(ctx, &stored); e != nil {
-		return nil, e
-	}
-	have := map[string]string{}
-	for _, q := range stored {
-		have[q.Pair+"@"+q.At] = q.Value.String()
-	}
-	out := []Quote{}
-	e = s.audit.Workflow(ctx, func(tx context.Context) error {
-		for _, q := range quotes {
-			v, e := ledger.ParseDecimal(q.Value)
-			if e != nil {
-				return e
-			}
-			if old, ok := have[q.Pair+"@"+q.At]; ok && old == v.String() {
-				continue
-			}
-			r, e := s.Set(tx, p, SetInput{Pair: q.Pair, Value: v, At: q.At, Source: source})
-			if e != nil {
-				return e
-			}
-			out = append(out, r.Quote)
-		}
-		return nil
-	})
-	return out, e
 }

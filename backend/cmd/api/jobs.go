@@ -9,20 +9,23 @@ import (
 	"time"
 )
 
-func nextDaily(now time.Time, hour int) time.Time {
-	now = now.UTC()
-	next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, time.UTC)
+func nextDaily(now time.Time, hour int, loc *time.Location) time.Time {
+	now = now.In(loc)
+	next := time.Date(now.Year(), now.Month(), now.Day(), hour, 0, 0, 0, loc)
 	if !next.After(now) {
 		next = next.AddDate(0, 0, 1)
 	}
 	return next
 }
-func daily(ctx context.Context, hour int, fn func(), wg *sync.WaitGroup) {
+func daily(ctx context.Context, hour int, loc *time.Location, onStart bool, fn func(), wg *sync.WaitGroup) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
+		if onStart && ctx.Err() == nil {
+			fn()
+		}
 		for {
-			next := nextDaily(time.Now(), hour)
+			next := nextDaily(time.Now(), hour, loc)
 			timer := time.NewTimer(time.Until(next))
 			select {
 			case <-ctx.Done():
@@ -50,7 +53,7 @@ func startJobs(parent context.Context, s mcpserver.Services, log *slog.Logger) f
 			log.Error("maintenance user scan failed", "job", name, "error", e)
 		}
 	}
-	daily(ctx, 3, func() {
+	daily(ctx, 3, time.UTC, false, func() {
 		users("invariants", func(ctx context.Context, p principal.Principal) error {
 			if e := s.Reconcile.Verify(ctx, p); e != nil {
 				return e
@@ -58,8 +61,23 @@ func startJobs(parent context.Context, s mcpserver.Services, log *slog.Logger) f
 			return s.Ledger.Verify(ctx, p)
 		})
 	}, &wg)
-	daily(ctx, 17, func() {
-		users("rates", func(ctx context.Context, p principal.Principal) error { _, e := s.Rates.RefreshECB(ctx, p); return e })
+	// The ECB publishes about 16:00 CET; sync at 17:00 Zagreb time and once at startup.
+	zagreb, e := time.LoadLocation("Europe/Zagreb")
+	if e != nil {
+		log.Error("rate sync uses UTC; Europe/Zagreb unavailable", "error", e)
+		zagreb = time.UTC
+	}
+	daily(ctx, 17, zagreb, s.Identity != nil && s.Rates != nil, func() {
+		users("rates", func(ctx context.Context, p principal.Principal) error {
+			p.Actor = principal.Actor{Kind: "system", ID: "rate-sync"}
+			res, e := s.Rates.Sync(ctx, p, true, true)
+			for _, st := range res.Providers {
+				if st.Status == "error" {
+					log.Warn("rate provider failed", "user_id", p.UserID, "provider", st.Provider, "failures", st.ConsecutiveFailures, "error", st.Error)
+				}
+			}
+			return e
+		})
 	}, &wg)
 	wg.Add(1)
 	go func() {

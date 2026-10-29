@@ -301,6 +301,13 @@ func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error
 		}
 	}
 
+	// rates_fresh
+	stale, e := s.Rates.Stale(ctx, p, time.Now())
+	if e != nil {
+		return Result{}, e
+	}
+	add("rates_fresh", list(stale), len(stale) == 0)
+
 	// 4. orphans
 	bad = nil
 	blob := ""

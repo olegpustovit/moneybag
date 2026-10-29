@@ -12,7 +12,20 @@ import (
 func TestDailyScheduleUsesUTCAndRollsOver(t *testing.T) {
 	for _, tc := range []struct{ now, want string }{{"2026-10-28T02:59:59Z", "2026-10-28T03:00:00Z"}, {"2026-10-28T03:00:00Z", "2026-10-29T03:00:00Z"}, {"2026-12-31T04:00:00Z", "2027-01-01T03:00:00Z"}, {"2026-10-28T04:30:00+02:00", "2026-10-28T03:00:00Z"}} {
 		now, _ := time.Parse(time.RFC3339, tc.now)
-		if got := nextDaily(now, 3).Format(time.RFC3339); got != tc.want {
+		if got := nextDaily(now, 3, time.UTC).Format(time.RFC3339); got != tc.want {
+			t.Fatal(tc.now, got, tc.want)
+		}
+	}
+}
+
+func TestRateSyncScheduleFollowsZagrebClock(t *testing.T) {
+	zg, e := time.LoadLocation("Europe/Zagreb")
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, tc := range []struct{ now, want string }{{"2026-10-28T15:59:00Z", "2026-10-28T16:00:00Z"}, {"2026-10-28T16:00:00Z", "2026-10-29T16:00:00Z"}, {"2026-07-01T10:00:00Z", "2026-07-01T15:00:00Z"}} {
+		now, _ := time.Parse(time.RFC3339, tc.now)
+		if got := nextDaily(now, 17, zg).UTC().Format(time.RFC3339); got != tc.want {
 			t.Fatal(tc.now, got, tc.want)
 		}
 	}
