@@ -12,6 +12,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
+	"golang.org/x/sync/errgroup"
 	"maps"
 	"math/big"
 	"sort"
@@ -300,29 +301,40 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 	case source == "balance_history":
 		// Month-end USD totals for the last 12 months (today for the current month).
 		today := time.Now()
+		history := make([]map[string]any, 12)
+		group, groupCtx := errgroup.WithContext(ctx)
+		group.SetLimit(4)
 		for i := 11; i >= 0; i-- {
 			end := time.Date(today.Year(), today.Month()-time.Month(i)+1, 0, 0, 0, 0, 0, time.UTC)
 			if i == 0 {
 				end = today
 			}
-			res, e := s.Ledger.Balances(ctx, p, ledger.BalancesInput{At: end.Format("2006-01-02"), GroupBy: "type", ValueIn: "USD"}, s.Valuer)
-			if e != nil {
-				return nil, e
-			}
-			assets, liabilities := 0.0, 0.0
-			for _, r := range res.Rows {
-				if r.Value == nil {
-					continue
+			index := 11 - i
+			group.Go(func() error {
+				res, e := s.Ledger.Balances(groupCtx, p, ledger.BalancesInput{At: end.Format("2006-01-02"), GroupBy: "type", ValueIn: "USD"}, s.Valuer)
+				if e != nil {
+					return e
 				}
-				switch r.Key {
-				case "asset":
-					assets = r.Value.Value.Float()
-				case "liability":
-					liabilities = r.Value.Value.Float()
+				assets, liabilities := 0.0, 0.0
+				for _, r := range res.Rows {
+					if r.Value == nil {
+						continue
+					}
+					switch r.Key {
+					case "asset":
+						assets = r.Value.Value.Float()
+					case "liability":
+						liabilities = r.Value.Value.Float()
+					}
 				}
-			}
-			out = append(out, map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
+				history[index] = map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities}
+				return nil
+			})
 		}
+		if e := group.Wait(); e != nil {
+			return nil, e
+		}
+		out = append(out, history...)
 	case strings.HasPrefix(source, "forecast_series:"):
 		id := strings.TrimPrefix(source, "forecast_series:")
 		state, e := s.Model.Get(ctx, p)
