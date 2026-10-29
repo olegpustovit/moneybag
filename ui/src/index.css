@@ -22,6 +22,7 @@
 * { box-sizing:border-box; }
 body { margin:0; min-width:320px; }
 ::selection { background:var(--sel); }
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] { --normal-bg:var(--paper); --normal-text:var(--text); --normal-border:var(--bd); }
 :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 .data, table, input[inputmode="decimal"] { font-feature-settings:"tnum", "ss03", "ss05", "ss09"; font-variant-numeric:tabular-nums; }
 .workspace-shell { min-height:100vh; display:grid; grid-template-columns:248px minmax(0,1fr); }

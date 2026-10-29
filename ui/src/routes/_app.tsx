@@ -2,6 +2,7 @@ import { useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, Outlet, redirect, useLocation, useRouter } from '@tanstack/react-router'
 import { Activity, BookOpen, Boxes, ChartNoAxesCombined, ChevronRight, CircleDollarSign, ClipboardCheck, Database, FileInput, LayoutDashboard, Menu, Settings, Share2, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
+import { Toaster } from 'sonner'
 import { ApiError, sessionQuery } from '../lib/api'
 import { dashboardsQuery, tablesQuery } from '../lib/queries'
 import { Button } from '../components/ui/button'
@@ -57,5 +58,5 @@ function Workspace() {
   return <><a href="#main" className="skip">Skip to content</a><div className="workspace-shell">
     <aside className="desktop-sidebar"><Navigation compact /></aside>
     <div className="workspace-content"><header className="mobile-header"><Sheet><SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Open navigation" />}><Menu /></SheetTrigger><SheetContent side="left" className="mobile-sheet"><SheetHeader><SheetTitle>Workspace navigation</SheetTitle></SheetHeader><Navigation /></SheetContent></Sheet><span className="mobile-brand"><Boxes size={17} aria-hidden="true" /> Moneybag</span><ChevronRight size={14} aria-hidden="true"/></header><main id="main" className="main-content"><Outlet /></main></div>
-  </div></>
+  </div><Toaster position="bottom-right" closeButton toastOptions={{style:{background:'var(--paper)',color:'var(--text)',border:'1px solid var(--bd)',borderRadius:0}}}/></>
 }
