@@ -254,6 +254,9 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 						proposed.Postings[1].Account = rule.Account
 					}
 					proposed.Tags = rule.Tags
+					if e = s.ledger.ValidateEntry(tx, writer, proposed); e != nil {
+						return fmt.Errorf("invalid statement proposal: %w", e)
+					}
 					imported = ImportRow{ID: ulid.Make().String(), UserID: p.UserID, BatchID: batchID, Account: in.Account, DedupeKey: row.DedupeKey, Raw: row.Raw, Proposed: proposed, ProposedID: ulid.Make().String(), Kind: rule.Kind}
 					if _, e = s.repo.db.Collection("import_rows").InsertOne(tx, imported); e != nil {
 						return e
@@ -367,6 +370,13 @@ func (s *Service) Edit(ctx context.Context, p principal.Principal, in EditInput)
 	}
 	if in.Set.Skip != nil {
 		row.Skip = *in.Set.Skip
+	}
+	if !row.Skip {
+		proposal := row.Proposed
+		proposal.Payee = statementPayee(proposal.Payee)
+		if e = s.ledger.ValidateEntry(ctx, importWriter(p), proposal); e != nil {
+			return ImportRow{}, fmt.Errorf("invalid statement proposal: %w", e)
+		}
 	}
 	_, e = s.audit.Write(ctx, p, "import_edit", audit.Target{Collection: "import_rows", ID: row.ID}, "", old, row, func(tx context.Context) error {
 		r, e := s.repo.db.Collection("import_rows").ReplaceOne(tx, bson.M{"_id": row.ID, "user_id": p.UserID, "entry_id": bson.M{"$in": bson.A{"", nil}}}, row)

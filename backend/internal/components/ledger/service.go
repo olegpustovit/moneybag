@@ -232,6 +232,18 @@ func (s *Service) checkAccounts(ctx context.Context, p principal.Principal, in E
 	}
 	return nil
 }
+
+// ValidateEntry checks a proposal without writing a draft or journal entry.
+func (s *Service) ValidateEntry(ctx context.Context, p principal.Principal, in EntryInput) error {
+	if err := p.Require("ledger:read"); err != nil {
+		return err
+	}
+	if err := Validate(in); err != nil {
+		return err
+	}
+	return s.checkAccounts(ctx, p, in, false)
+}
+
 func inferKind(posts []Posting) string {
 	for _, p := range posts {
 		if !strings.HasPrefix(p.Account, "assets:") && !strings.HasPrefix(p.Account, "liabilities:") && !strings.HasPrefix(p.Account, "equity:conversion") {

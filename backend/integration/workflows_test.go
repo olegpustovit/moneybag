@@ -109,6 +109,18 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("cross-user import access", e)
 	}
 	edit := imports.EditInput{BatchID: start.BatchID, RowID: preview.Proposed[0].ID}
+	if _, e = book.CreateAccount(ctx, pa, ledger.Account{ID: "expenses:usd_only", Type: "expense", Name: "USD only", Commodities: []string{"USD"}}); e != nil {
+		t.Fatal(e)
+	}
+	wrongCurrency := "expenses:usd_only"
+	edit.Set.Account = &wrongCurrency
+	if _, e = imp.Edit(ctx, pa, edit); e == nil {
+		t.Fatal("staged EUR row accepted a USD-only counteraccount")
+	}
+	invalidCategory := "Date,Amount,Currency,Description,ID,Category\n2026-10-03,-1.00,EUR,Store,invalid-currency,expenses:usd_only\n"
+	if _, e = imp.Start(ctx, pa, imports.StartInput{Account: "assets:bank", Format: "generic_csv", ContentB64: base64.StdEncoding.EncodeToString([]byte(invalidCategory))}); e == nil {
+		t.Fatal("CSV category accepted a USD-only counteraccount for EUR")
+	}
 	account := "expenses:food"
 	edit.Set.Account = &account
 	if _, e = imp.Edit(ctx, pa, edit); e != nil {
