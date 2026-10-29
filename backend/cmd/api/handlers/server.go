@@ -162,6 +162,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("POST /settings/feed", h.settingsFeed)
 	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	mux.Handle("POST /api/mcp", h.browser(browserTransport))
+	mux.HandleFunc("GET /api/consistency", h.consistency)
 	mux.HandleFunc("GET /", h.page)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.security(w)
@@ -221,3 +222,18 @@ func decode(r *http.Request, v any) error {
 }
 
 func Stylesheet() string { b, _ := webFS.ReadFile("web/style.css"); return string(b) }
+
+// consistency is a read-only GET for the signed-in session, so no CSRF token is needed.
+func (h *Handler) consistency(w http.ResponseWriter, r *http.Request) {
+	p, _, e := h.session(r)
+	if e != nil {
+		respond(w, 401, map[string]string{"error": "sign in to continue"})
+		return
+	}
+	res, e := h.services.Consistency.Run(r.Context(), p)
+	if e != nil {
+		respond(w, 500, map[string]string{"error": e.Error()})
+		return
+	}
+	respond(w, 200, res)
+}

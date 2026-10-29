@@ -10,6 +10,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
+	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -30,23 +31,24 @@ import (
 )
 
 type Services struct {
-	Previews  *preview.Service
-	History   *history.Service
-	Classify  *classify.Service
-	Imports   *imports.Service
-	Reconcile *reconcile.Service
-	Sharing   *sharing.Service
-	Identity  *identity.Service
-	Ledger    *ledger.Service
-	Audit     *audit.Service
-	Rates     *rates.Service
-	Budget    *budget.Service
-	Tables    *tables.Service
-	Model     *model.Service
-	Dashboard *dashboard.Service
-	Expr      *expressions.Engine
-	Sources   dashboard.Reader
-	Logger    *slog.Logger
+	Previews    *preview.Service
+	Consistency *consistency.Service
+	History     *history.Service
+	Classify    *classify.Service
+	Imports     *imports.Service
+	Reconcile   *reconcile.Service
+	Sharing     *sharing.Service
+	Identity    *identity.Service
+	Ledger      *ledger.Service
+	Audit       *audit.Service
+	Rates       *rates.Service
+	Budget      *budget.Service
+	Tables      *tables.Service
+	Model       *model.Service
+	Dashboard   *dashboard.Service
+	Expr        *expressions.Engine
+	Sources     dashboard.Reader
+	Logger      *slog.Logger
 }
 type Options struct {
 	ReadOnly bool
@@ -491,6 +493,9 @@ func New(s Services, opts Options) *mcp.Server {
 		return struct {
 			Months []model.IncomeMonth `json:"months"`
 		}{v}, e
+	})
+	add(r, "consistency_check", "audit", "ledger:read", "Use this to check that every figure has one source. Read-only: trial balance, assertions, published dashboard net worth, orphans, numeric literals, model-input duplicates, receivables, reversals, budget mapping and scenario start. Returns ok and per-check detail.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (consistency.Result, error) {
+		return s.Consistency.Run(ctx, p)
 	})
 	registerWorkflows(r, s)
 	registerReference(server, s)

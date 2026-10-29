@@ -9,6 +9,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
+	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -92,6 +93,10 @@ func run() error {
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
 	services := mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Logger: log}
 	services.Classify = classes
+	services.Consistency = &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
+	dash.Lint = func(ctx context.Context, p principal.Principal, spec dashboard.Spec) ([]string, error) {
+		return services.Consistency.SpecLint(ctx, p, spec)
+	}
 	services.Imports = imp
 	services.Reconcile = rec
 	services.Sharing = shares

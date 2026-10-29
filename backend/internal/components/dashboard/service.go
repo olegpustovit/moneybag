@@ -24,10 +24,15 @@ type Service struct {
 	repo   *MongoRepository
 	engine *Engine
 	audit  *audit.Service
+	// Lint, when set, returns report-only consistency findings that Publish attaches as warnings.
+	// It is a hook because the consistency component imports dashboard.
+	Lint func(context.Context, principal.Principal, Spec) ([]string, error)
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository              { return &MongoRepository{db} }
-func NewService(r *MongoRepository, e *Engine, a *audit.Service) *Service { return &Service{r, e, a} }
+func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
+func NewService(r *MongoRepository, e *Engine, a *audit.Service) *Service {
+	return &Service{repo: r, engine: e, audit: a}
+}
 func (s *Service) List(ctx context.Context, p principal.Principal) ([]Head, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
@@ -414,6 +419,11 @@ func (s *Service) Publish(ctx context.Context, p principal.Principal, id string,
 			return e
 		}
 		out = PublishResult{PublishedVersion: version, Gate: rendered.Validation, URL: "/dashboards/" + id}
+		if s.Lint != nil {
+			if found, e := s.Lint(tx, p, v.Spec); e == nil {
+				out.Warnings = append(out.Warnings, found...)
+			}
+		}
 		if !rendered.Validation.OK {
 			reasons := []string{}
 			for _, i := range rendered.Validation.Errors {
