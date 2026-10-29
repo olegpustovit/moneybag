@@ -19,9 +19,9 @@ export const Route = createFileRoute('/_app')({
   component: Workspace,
 })
 
-function WorkspaceError({ reset }: { reset: () => void }) {
+function WorkspaceError({ error, reset }: { error: unknown; reset: () => void }) {
   const router = useRouter()
-  return <main className="loading"><h1>Could not load your workspace</h1><p>Check your connection and try again.</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></main>
+  return <main className="loading"><h1>Could not load your workspace</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></main>
 }
 
 type NavLink = { href: string; label: string; icon: LucideIcon }
