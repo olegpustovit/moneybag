@@ -9,12 +9,13 @@ import { DashboardEditor } from '../features/dashboard/editor'
 import { DateRange } from '../features/dashboard/date-range'
 import { componentValue } from '../features/dashboard/values'
 import { Component } from '../features/dashboard/component'
+import { tableSort } from '../features/dashboard/table-sort'
 import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
 
 const validDate=(value:string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value
 const date = z.string().refine(value => value==='' || validDate(value)).optional().catch(undefined)
 function readsParam(value:unknown,key:'from'|'to'|'month'):boolean {if(typeof value==='string')return new RegExp(`\\bparams\\s*(?:\\.\\s*${key}\\b|\\[\\s*['"]${key}['"]\\s*\\])`).test(value);if(Array.isArray(value))return value.some(item => readsParam(item,key));if(value && typeof value==='object')return Object.values(value).some(item => readsParam(item,key));return false}
-const searchSchema = z.object({ version: z.enum(['draft','published']).optional().catch(undefined), edit: z.union([z.literal('1'),z.literal(1)]).transform(() => '1' as const).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, all: z.boolean().optional().catch(undefined), month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional().catch(undefined) })
+const searchSchema = z.object({ sort:tableSort, sort_table:z.string().max(200).optional().catch(undefined), version: z.enum(['draft','published']).optional().catch(undefined), edit: z.union([z.literal('1'),z.literal(1)]).transform(() => '1' as const).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, all: z.boolean().optional().catch(undefined), month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional().catch(undefined) })
 export const Route = createFileRoute('/_app/dashboards/$id')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({ version: search.version }),
@@ -50,6 +51,7 @@ function Dashboard() {
   const pages = dashboard.spec.pages ?? []
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
   const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
+  const tableCount=(page?.layout ?? []).flatMap(row => row.cols ?? []).filter(item => {const type=components.get(item.component)?.type;return type==='table' || type==='scenario_compare'}).length
   const reads={data:dashboard.spec.data,computed:dashboard.spec.computed,components:dashboard.spec.components}
   const range = readsParam(reads,'from') || readsParam(reads,'to')
   const month = readsParam(reads,'month')
@@ -64,7 +66,7 @@ function Dashboard() {
       const component = components.get(placement.component)
       const parsed = componentValue.safeParse(preview.data.values[placement.component])
       const issues=(preview.data.validation.errors ?? []).filter(issue => issue.component_id===placement.component)
-      return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${Math.max(1,Math.min(12,placement.span))}` }}><h2>{parsed.success ? parsed.data.title || component?.title || placement.component : component?.title || placement.component}</h2>{issues.length ? <div className="component-issues" role="alert">{issues.map((issue,index) => <div key={index}><p>{issue.msg}</p>{issue.expr && <pre>{issue.expr}</pre>}{issue.hint && <p>{issue.hint}</p>}</div>)}</div> : parsed.success ? <Component value={parsed.data} drilldown tableId={`dashboard:${id}:${placement.component}`}/> : <p className="muted">This component could not be displayed.</p>}{component && <Button size="xs" variant="ghost" onClick={() => {setSelected(component.id);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit {component.title || component.id}</Button>}</section>
+      return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${Math.max(1,Math.min(12,placement.span))}` }}><h2>{parsed.success ? parsed.data.title || component?.title || placement.component : component?.title || placement.component}</h2>{issues.length ? <div className="component-issues" role="alert">{issues.map((issue,index) => <div key={index}><p>{issue.msg}</p>{issue.expr && <pre>{issue.expr}</pre>}{issue.hint && <p>{issue.hint}</p>}</div>)}</div> : parsed.success ? <Component value={parsed.data} drilldown tableId={`dashboard:${id}:${placement.component}`} sort={search.sort_table===placement.component || !search.sort_table && tableCount===1 ? search.sort : undefined} onSortChange={sort => void navigate({search:old => ({...old,sort,sort_table:sort ? placement.component : undefined})})}/> : <p className="muted">This component could not be displayed.</p>}{component && <Button size="xs" variant="ghost" onClick={() => {setSelected(component.id);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit {component.title || component.id}</Button>}</section>
     }))}</div></>}
     <Sheet open={search.edit==='1'} onOpenChange={(open) => {if(!open && (!dirty || window.confirm('Discard unsaved dashboard changes?'))) {setDirty(false);void navigate({search:(old) => ({...old,edit:undefined})})}}}><SheetContent className="dashboard-editor-sheet"><SheetHeader><SheetTitle>Edit dashboard</SheetTitle><SheetDescription>Save creates a new draft. The published dashboard stays unchanged.</SheetDescription></SheetHeader>{search.edit==='1' && <DashboardEditor key={`${id}-${dashboard.version}-${selected ?? ''}`} session={session} id={id} spec={dashboard.spec} initialComponent={selected} onDirty={setDirty} done={(saved) => {if(!saved && dirty && !window.confirm('Discard unsaved dashboard changes?')) return;setDirty(false);void navigate({search:(old) => ({...old,edit:undefined,version:saved ? 'draft' : old.version})});if(saved) void router.invalidate()}}/>}</SheetContent></Sheet>
   </>

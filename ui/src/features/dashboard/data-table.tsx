@@ -8,11 +8,12 @@ const features=tableFeatures({rowSortingFeature,sortedRowModel:createSortedRowMo
 function preferences(key:string):{visibility:ColumnVisibilityState;sizing:ColumnSizingState} {
  try {const data=JSON.parse(localStorage.getItem(key) || '{}');return {visibility:data.visibility && typeof data.visibility==='object' ? data.visibility : {},sizing:data.sizing && typeof data.sizing==='object' ? data.sizing : {}}} catch {return {visibility:{},sizing:{}}}
 }
-export function DataTable({ value, storageKey }: { value:Value; storageKey:string }) {
+export function DataTable({ value, storageKey, sort, onSortChange }: { value:Value; storageKey:string; sort?:string; onSortChange?:(sort:string|undefined)=>void }) {
  const key=`moneybag:table:${storageKey}`
  const [initial]=useState(() => preferences(key))
- // shortcut: sort state is local; move it to validated URL search when table routes share a sort contract.
- const [sorting,setSorting]=useState<SortingState>([])
+ const [localSorting,setLocalSorting]=useState<SortingState>([])
+ const sorting=onSortChange ? (sort?.split(',').flatMap(item => {const desc=item.startsWith('-'),id=desc ? item.slice(1) : item;return value.columns.some(column => column.key===id) ? [{id,desc}] : []}) ?? []) : localSorting
+ const setSorting=(updater:SortingState | ((old:SortingState)=>SortingState)) => {const next=typeof updater==='function' ? updater(sorting) : updater;if(onSortChange)onSortChange(next.map(item => `${item.desc ? '-' : ''}${item.id}`).join(',') || undefined);else setLocalSorting(next);scroll.current?.scrollTo(0,0)}
  const [visibility,setVisibility]=useState<ColumnVisibilityState>(initial.visibility)
  const [sizing,setSizing]=useState<ColumnSizingState>(initial.sizing)
  const scroll=useRef<HTMLDivElement>(null)
