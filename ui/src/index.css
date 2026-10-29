@@ -315,3 +315,9 @@ th { color:var(--text2); font-weight:600; }
 .json-editor .cm-scroller { min-height: 24rem; max-height: 55vh; }
 .formula-feedback, .formula-signature { padding: 0 .5rem; font-size: .75rem; color: var(--muted-foreground); }
 .formula-tooltip { padding: .4rem; max-width: 24rem; }
+.query-editor, .query-map { display: flex; flex-direction: column; gap: .65rem; }
+.query-map { border: 1px solid var(--border); padding: .7rem; border-radius: .375rem; }
+.query-map legend { padding: 0 .25rem; font-weight: 600; }
+.query-create { display: flex; align-items: end; gap: .5rem; }
+.query-create label { flex: 1; min-width: 0; }
+.query-preview { overflow: auto; max-height: 18rem; padding: .75rem; background: var(--muted); font-size: .8rem; }
