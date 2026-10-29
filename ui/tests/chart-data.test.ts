@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { chartNumber, chartRows, previousValue } from '../src/features/dashboard/chart-data'
+import { chartNumber, chartRows, journalFilter, previousValue } from '../src/features/dashboard/chart-data'
 const rows=chartRows([{x:'a',y:1,series:'x'},{x:'b',y:3,series:'x'},{x:'a',y:2,series:'y'},{x:'a',y:4,series:'x'}],[{name:'x',color_index:0},{name:'y',color_index:1}])
 assert.deepEqual(rows,[{x:'a',s0:1,s1:2},{x:'b',s0:3},{x:'a',s0:4}])
 assert.equal(previousValue(rows,2,'s0'),3)
@@ -8,3 +8,11 @@ assert.equal(previousValue(rows,0,'s0'),undefined)
 assert.equal(chartNumber(-1234.5,'usd'),'$−1,234.50')
 assert.equal(chartNumber(12.3,'pct'),'12.3%')
 assert.equal(chartNumber(1.5,'mo'),'1.5 mo')
+assert.deepEqual(journalFilter({kind:'month',field:'month'},'2024-02'),{from:'2024-02-01',to:'2024-02-29'})
+assert.deepEqual(journalFilter({kind:'month',field:'month'},'2025-02'),{from:'2025-02-01',to:'2025-02-28'})
+assert.deepEqual(journalFilter({kind:'date',field:'date'},'2024-02-29'),{from:'2024-02-29',to:'2024-02-29'})
+assert.equal(journalFilter({kind:'date',field:'date'},'2025-02-29'),undefined)
+assert.equal(journalFilter({kind:'month',field:'month'},'2025-13'),undefined)
+assert.deepEqual(journalFilter({kind:'category',field:'account'},'expenses:food'),{account:'expenses:food'})
+assert.equal(journalFilter({kind:'category',field:'label'},'expenses:food'),undefined)
+assert.equal(journalFilter({kind:'category',field:'account'},'Food'),undefined)
