@@ -117,8 +117,8 @@ func (s *Service) StartSource(ctx context.Context, p principal.Principal) (strin
 
 func validRef(o Override) error {
 	kind, id, _ := strings.Cut(o.Ref, ":")
-	if o.Ref != "budget_lines.total" && !((kind == "budget_line" || kind == "income_stream") && id != "") {
-		return fmt.Errorf("ref must be budget_line:<id>, budget_lines.total or income_stream:<id>")
+	if o.Ref != "budget_lines.total" && !((kind == "budget_line" || kind == "income_stream" || kind == "view") && id != "") {
+		return fmt.Errorf("ref must be budget_line:<id>, budget_lines.total, income_stream:<id> or view:<id>[.<column>]")
 	}
 	if !strings.HasSuffix(o.Assumption, "_usd") && !strings.HasSuffix(o.Assumption, "_eur") {
 		return fmt.Errorf("ref overrides need an assumption ending in _usd or _eur")
@@ -134,7 +134,31 @@ func (s *Service) resolveRef(ctx context.Context, p principal.Principal, o Overr
 	v, cur := 0.0, "EUR" // budget lines are EUR
 	kind, id, _ := strings.Cut(o.Ref, ":")
 	found := false
-	if kind == "income_stream" {
+	if kind == "view" {
+		// view:<id>.<column> reads the first row; the value is taken in the assumption's own currency.
+		vid, col, ok := strings.Cut(id, ".")
+		if !ok {
+			col = "value"
+		}
+		if s.Views == nil {
+			return 0, fmt.Errorf("ref %s: views unavailable", o.Ref)
+		}
+		rows, e := s.Views(ctx, p, vid)
+		if e != nil {
+			return 0, fmt.Errorf("ref %s: %w", o.Ref, e)
+		}
+		if len(rows) == 0 {
+			return 0, fmt.Errorf("ref %s: view returned no rows", o.Ref)
+		}
+		n, ok := rows[0][col].(float64)
+		if !ok {
+			return 0, fmt.Errorf("ref %s: column %s is not a number", o.Ref, col)
+		}
+		found, v, cur = true, n, "EUR"
+		if strings.HasSuffix(o.Assumption, "_usd") {
+			cur = "USD"
+		}
+	} else if kind == "income_stream" {
 		for _, st := range streams {
 			if st.ID == id {
 				found, v, cur = true, st.Amount, st.Currency

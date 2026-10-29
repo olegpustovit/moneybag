@@ -118,6 +118,7 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 	if err != nil {
 		panic(err)
 	}
+	openObjects(outputSchema)
 	mcp.AddTool(r.server, &mcp.Tool{Name: name, Description: description, InputSchema: inputSchema, OutputSchema: outputSchema, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: readOnly, DestructiveHint: &destructive, OpenWorldHint: &open}}, func(ctx context.Context, _ *mcp.CallToolRequest, in In) (*mcp.CallToolResult, Out, error) {
 		var zero Out
 		p, e := principal.From(ctx)
@@ -145,6 +146,29 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 }
 func schema[T any]() (*jsonschema.Schema, error) {
 	return jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[ledger.Decimal](): {Type: "string", Pattern: `^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`}, reflect.TypeFor[json.RawMessage](): {}}})
+}
+
+// openObjects lets output objects carry fields a client's cached schema predates, so adding a result field never breaks a connected client.
+func openObjects(s *jsonschema.Schema) {
+	if s == nil {
+		return
+	}
+	if s.Properties != nil {
+		s.AdditionalProperties = nil
+	}
+	for _, c := range s.Properties {
+		openObjects(c)
+	}
+	for _, c := range s.Defs {
+		openObjects(c)
+	}
+	for _, list := range [][]*jsonschema.Schema{s.PrefixItems, s.AllOf, s.AnyOf, s.OneOf} {
+		for _, c := range list {
+			openObjects(c)
+		}
+	}
+	openObjects(s.Items)
+	openObjects(s.AdditionalProperties)
 }
 func New(s Services, opts Options) *mcp.Server {
 	server := mcp.NewServer(&mcp.Implementation{Name: "moneybag", Version: opts.Version}, &mcp.ServerOptions{Logger: s.Logger, Instructions: "Moneybag is your personal double-entry ledger. Use ledger tools to read and post money movements, import_* for statements, model tools for forecasts, and dashboard_* to build views. Ledger writes create drafts unless commit=true. dashboard_publish goes live immediately when validation passes. Posted entries are immutable; use reversals to correct them. One shared database scopes every record to the authenticated user. Amounts are decimal strings. Discover account IDs before posting. Review tool errors and audit history before retrying ambiguous writes."})
@@ -286,7 +310,7 @@ func New(s Services, opts Options) *mcp.Server {
 	add(r, "model_get", "model", "ledger:read", "Use this when you need assumptions, income streams and scenarios before forecasting.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (model.State, error) {
 		return s.Model.Get(ctx, p)
 	})
-	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override may instead carry ref (budget_line:<id>, budget_lines.total or income_stream:<id>) with optional factor; the assumption must end in _usd or _eur and the referenced value is converted with the live EUR/USD rate. An override named after an income stream id replaces that stream amount (0 disables it); overriding income_usd replaces all streams with that monthly total. kyiv_extra_drain_usd, yield_pct and buffer_usd are assumptions or overrides; a legacy block supplies them otherwise, and drop_legacy: true removes it. income_usd is required only when there are no income streams. Events change cash in a specified future month.", false, false, s.Model.Upsert)
+	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override may instead carry ref (budget_line:<id>, budget_lines.total, income_stream:<id> or view:<id>[.<column>], column default value, first row) with optional factor; the assumption must end in _usd or _eur. Budget and stream refs are converted with the live EUR/USD rate; a view value is taken in the assumption's currency. An override named after an income stream id replaces that stream amount (0 disables it); overriding income_usd replaces all streams with that monthly total. kyiv_extra_drain_usd, yield_pct and buffer_usd are assumptions or overrides; a legacy block supplies them otherwise, and drop_legacy: true removes it. income_usd is required only when there are no income streams. Events change cash in a specified future month.", false, false, s.Model.Upsert)
 	add(r, "forecast_run", "model", "ledger:read", "Use this when projecting scenarios. Supply 1..20 scenario IDs and horizon_months 1..600. value_in is USD or EUR; the original tracker projection engine is preserved for migrated scenarios. The starting state (net worth, wise and kyiv cash, gold grams, EUR/USD and XAU_g/USD rates) is computed from the live ledger as of as_of (default today, Europe/Zagreb); wise cash is accounts whose pot starts with wise (wise_usd, wise_eur), kyiv cash is pots containing kyiv (cash_kyiv), excluding gold; gold is the XAU_g commodity. Stored assumptions are used only when the ledger cannot be valued, and a scenario override still wins. Each series item reports start_as_of, start_source, start_net_usd, journal_seq, rates_used and resolved_inputs, plus savings_usd_mo, kyivEmptyMonth and runway_ex_gold.", true, false, func(ctx context.Context, p principal.Principal, in model.ForecastInput) (struct {
 		Series []model.Projection `json:"series"`
 	}, error) {

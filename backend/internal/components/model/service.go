@@ -125,7 +125,12 @@ type Service struct {
 	Ledger *ledger.Service
 	Rates  *rates.Service
 	Budget *budget.Service
+	// Views reads a saved view's rows; it is a func because dashboard (which owns views) imports model.
+	Views func(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error)
 }
+
+// EngineAssumptions are the names Project reads; scenarios may override them without a stored row.
+var EngineAssumptions = []string{"start_net_usd", "wise_usd", "kyiv_usd", "gold_g", "gold_usd_g", "eurusd", "income_usd", "spend_eur", "kyiv_extra_drain_usd", "yield_pct", "buffer_usd", "gold_shock_pct", "horizon"}
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
 func NewService(r *MongoRepository, t *tables.Service, a *audit.Service, e *expressions.Engine) *Service {

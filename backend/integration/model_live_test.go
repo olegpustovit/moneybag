@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -11,6 +12,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"net/url"
 	"os"
 	"strings"
@@ -125,6 +127,19 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 		return true
 	}() {
 		t.Fatal("drop_legacy kept the legacy block")
+	}
+	// A view ref reads the view's first row in the assumption's currency.
+	models.Views = func(_ context.Context, _ principal.Principal, id string) ([]map[string]any, error) {
+		if id != "card" {
+			return nil, fmt.Errorf("unknown view %s", id)
+		}
+		return []map[string]any{{"median": 20.0}}, nil
+	}
+	if _, e = models.Upsert(ctx, p, model.Scenario{ID: "viewref", Name: "View ref", Overrides: []model.Override{{Assumption: "spend_eur", Ref: "view:card.median"}}}); e != nil {
+		t.Fatal(e)
+	}
+	if vr, e := models.Forecast(ctx, p, model.ForecastInput{ScenarioIDs: []string{"viewref"}, HorizonMonths: 1, AsOf: "2026-10-31"}); e != nil || vr[0].SpendUSD != 30 { // 20 EUR * 1.5
+		t.Fatal("view ref", vr, e)
 	}
 	if _, e = models.Compare(ctx, p, model.CompareInput{ScenarioIDs: []string{"base"}, Metrics: []string{"nope"}}); e == nil || !strings.Contains(e.Error(), "runway_ex_gold") {
 		t.Fatal("unknown metric must list valid ones", e)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -324,7 +325,7 @@ func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error
 	for _, x := range state.Scenarios {
 		for _, o := range x.Overrides {
 			// Stream-id overrides and ref overrides are valid without a stored assumption.
-			if !assumptions[o.Assumption] && !streamIDs[o.Assumption] && o.Ref == "" {
+			if !assumptions[o.Assumption] && !streamIDs[o.Assumption] && !slices.Contains(model.EngineAssumptions, o.Assumption) && o.Ref == "" {
 				bad = append(bad, fmt.Sprintf("scenario %s overrides missing assumption %s", x.ID, o.Assumption))
 			}
 			blob += o.Assumption + " " + o.Expr + " " + o.Ref + " "
