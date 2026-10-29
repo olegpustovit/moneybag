@@ -589,6 +589,7 @@ export interface BudgetGetOutput {
         limit_exact?: string;
         literal_accounts: null | string[];
         name: string;
+        revision?: number;
         status: string;
         synthetic?: boolean;
         [k: string]: unknown;
@@ -608,6 +609,7 @@ export interface BudgetGetOutput {
     limit_exact?: string;
     literal_accounts: null | string[];
     name: string;
+    revision?: number;
     status: string;
     synthetic?: boolean;
     [k: string]: unknown;
@@ -625,6 +627,10 @@ export interface BudgetGetOutput {
 }
 export interface BudgetSetLineInput {
   accounts?: null | string[];
+  /**
+   * optional revision from budget_get; -1 requires a new line
+   */
+  expected_revision?: null | number;
   group_ref?: null | {
     dimension: string;
     value: string;
@@ -648,6 +654,7 @@ export interface BudgetSetLineOutput {
     limit: string;
     name: string;
     order: number;
+    revision?: number;
     [k: string]: unknown;
   };
   [k: string]: unknown;

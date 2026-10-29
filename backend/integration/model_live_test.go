@@ -62,6 +62,39 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
+	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test"}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = db.Collection("budgets").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": "revision-test"}, bson.M{"$unset": bson.M{"revision": ""}}); e != nil {
+		t.Fatal(e)
+	}
+	zeroBudget, newBudget := 0, -1
+	upgraded, e := budgets.Set(ctx, p, budget.SetInput{ID: "revision-test", ExpectedRevision: &zeroBudget})
+	if e != nil || upgraded.Line.Revision != 1 {
+		t.Fatal("upgrade old budget", upgraded, e)
+	}
+	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test", ExpectedRevision: &newBudget}); !errors.Is(e, principal.ErrConflict) {
+		t.Fatal("duplicate budget", e)
+	}
+	budgetRevision := upgraded.Line.Revision
+	budgetResults := make(chan error, 2)
+	for _, name := range []string{"First budget", "Second budget"} {
+		go func() {
+			_, err := budgets.Set(ctx, p, budget.SetInput{ID: "revision-test", Name: &name, ExpectedRevision: &budgetRevision})
+			budgetResults <- err
+		}()
+	}
+	budgetFirst, budgetSecond := <-budgetResults, <-budgetResults
+	if !((budgetFirst == nil && errors.Is(budgetSecond, principal.ErrConflict)) || (budgetSecond == nil && errors.Is(budgetFirst, principal.ErrConflict))) {
+		t.Fatal("concurrent budget edits", budgetFirst, budgetSecond)
+	}
+	if e = budgets.Archive(ctx, p, "revision-test", true, "test"); e != nil {
+		t.Fatal(e)
+	}
+	twoBudget := 2
+	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test", ExpectedRevision: &twoBudget}); !errors.Is(e, principal.ErrConflict) {
+		t.Fatal("archive did not invalidate budget revision", e)
+	}
 	if _, e = db.Collection("scenarios").InsertOne(ctx, bson.M{"_id": p.UserID + ":old", "user_id": p.UserID, "id": "old", "name": "Old", "overrides": bson.A{}}); e != nil {
 		t.Fatal(e)
 	}

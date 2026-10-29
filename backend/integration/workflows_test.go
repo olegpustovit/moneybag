@@ -543,6 +543,44 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 			t.Fatal("undo resurrected archived budget", hidden)
 		}
 	}
+	if _, e = budgets.Set(ctx, pa, budget.SetInput{ID: "undo-group"}); e != nil {
+		t.Fatal(e)
+	}
+	groupChange, e := budgets.Set(ctx, pa, budget.SetInput{ID: "undo-group", GroupRef: &budget.GroupRef{Dimension: "category", Value: "Synthetic"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: groupChange.EventID, Reason: "Restore mapping"}); e != nil {
+		t.Fatal(e)
+	}
+	lines, e := budgets.Lines(ctx, pa)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, line := range lines {
+		if line.ID == "undo-group" && line.GroupRef != nil {
+			t.Fatal("undo retained new group", line)
+		}
+	}
+	if _, e = budgets.Set(ctx, pa, budget.SetInput{ID: "undo-group", GroupRef: &budget.GroupRef{Dimension: "category", Value: "Synthetic"}}); e != nil {
+		t.Fatal(e)
+	}
+	groupChange, e = budgets.Set(ctx, pa, budget.SetInput{ID: "undo-group", GroupRef: &budget.GroupRef{}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: groupChange.EventID, Reason: "Restore group"}); e != nil {
+		t.Fatal(e)
+	}
+	lines, e = budgets.Lines(ctx, pa)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, line := range lines {
+		if line.ID == "undo-group" && (line.GroupRef == nil || line.GroupRef.Value != "Synthetic") {
+			t.Fatal("undo lost old group", line)
+		}
+	}
 	if e = book.Verify(ctx, pa); e != nil {
 		t.Fatal("final invariants", e)
 	}

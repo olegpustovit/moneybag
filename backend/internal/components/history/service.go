@@ -260,7 +260,11 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 		if old.ID == "" {
 			return s.Budget.Archive(ctx, p, id, true, reason)
 		}
-		_, e = s.Budget.Set(ctx, p, budget.SetInput{ID: id, Name: &old.Name, Limit: &old.Limit, Accounts: &old.Accounts, Order: &old.Order})
+		group := old.GroupRef
+		if group == nil {
+			group = &budget.GroupRef{}
+		}
+		_, e = s.Budget.Set(ctx, p, budget.SetInput{ID: id, Name: &old.Name, Limit: &old.Limit, Accounts: &old.Accounts, GroupRef: group, Order: &old.Order})
 		if e == nil && old.Archived {
 			e = s.Budget.Archive(ctx, p, id, true, reason)
 		}

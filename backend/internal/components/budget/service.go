@@ -26,6 +26,7 @@ type Line struct {
 	UserID          string         `json:"-" bson:"user_id"`
 	ID              string         `json:"id" bson:"id"`
 	Name            string         `json:"name" bson:"name"`
+	Revision        int            `json:"revision,omitempty" bson:"revision"`
 	Limit           ledger.Decimal `json:"limit" bson:"limit"`
 	Accounts        []string       `json:"accounts" bson:"accounts"`
 	// GroupRef maps every expense account whose groups[dimension] equals value, resolved on read.
@@ -37,10 +38,11 @@ type GroupRef struct {
 	Value     string `json:"value" bson:"value"`
 }
 type SetInput struct {
-	ID       string          `json:"id"`
-	Limit    *ledger.Decimal `json:"limit,omitempty"`
-	Name     *string         `json:"name,omitempty"`
-	Accounts *[]string       `json:"accounts,omitempty"`
+	ID               string          `json:"id"`
+	ExpectedRevision *int            `json:"expected_revision,omitempty" jsonschema:"optional revision from budget_get; -1 requires a new line"`
+	Limit            *ledger.Decimal `json:"limit,omitempty"`
+	Name             *string         `json:"name,omitempty"`
+	Accounts         *[]string       `json:"accounts,omitempty"`
 	// GroupRef replaces the literal accounts list by an account group; an empty dimension clears it.
 	GroupRef *GroupRef `json:"group_ref,omitempty"`
 	Order    *int      `json:"order,omitempty"`
@@ -56,6 +58,7 @@ type StatusLine struct {
 	Synthetic       bool      `json:"synthetic,omitempty"`
 	ID              string    `json:"id"`
 	Name            string    `json:"name"`
+	Revision        int       `json:"revision,omitempty"`
 	Limit           float64   `json:"limit"`
 	Actual          float64   `json:"actual"`
 	Avg6            float64   `json:"avg6"`
@@ -159,10 +162,23 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 	if in.ID == "" || len(in.ID) > 100 {
 		return SetResult{}, fmt.Errorf("line id required")
 	}
+	var result SetResult
+	err := s.audit.Workflow(ctx, func(tx context.Context) error {
+		var err error
+		result, err = s.set(tx, p, in)
+		return err
+	})
+	return result, err
+}
+func (s *Service) set(ctx context.Context, p principal.Principal, in SetInput) (SetResult, error) {
 	var old Line
 	e := s.repo.db.Collection("budgets").FindOne(ctx, bson.M{"user_id": p.UserID, "id": in.ID}).Decode(&old)
 	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
 		return SetResult{}, e
+	}
+	exists := e == nil
+	if in.ExpectedRevision != nil && ((!exists && *in.ExpectedRevision != -1) || (exists && *in.ExpectedRevision != old.Revision)) {
+		return SetResult{}, principal.ErrConflict
 	}
 	line := old
 	line.Archived = false
@@ -198,6 +214,7 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 	if in.Order != nil {
 		line.Order = *in.Order
 	}
+	line.Revision = old.Revision + 1
 	id, e := s.audit.Write(ctx, p, "budget_set_line", audit.Target{Collection: "budgets", ID: in.ID}, "", old, line, func(tx context.Context) error {
 		mine := line.Accounts
 		if line.GroupRef != nil {
@@ -225,7 +242,24 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 				}
 			}
 		}
-		_, e = s.repo.db.Collection("budgets").ReplaceOne(tx, bson.M{"user_id": p.UserID, "id": in.ID}, line, options.Replace().SetUpsert(true))
+		collection := s.repo.db.Collection("budgets")
+		if !exists {
+			_, e = collection.InsertOne(tx, line)
+			if mongo.IsDuplicateKeyError(e) {
+				return principal.ErrConflict
+			}
+			return e
+		}
+		filter := bson.M{"user_id": p.UserID, "id": in.ID}
+		if old.Revision == 0 {
+			filter["$or"] = []bson.M{{"revision": 0}, {"revision": bson.M{"$exists": false}}}
+		} else {
+			filter["revision"] = old.Revision
+		}
+		result, e := collection.ReplaceOne(tx, filter, line)
+		if e == nil && result.MatchedCount == 0 {
+			return principal.ErrConflict
+		}
 		return e
 	})
 	return SetResult{line, id}, e
@@ -369,7 +403,7 @@ func (s *Service) GetWindow(ctx context.Context, p principal.Principal, month st
 		}
 	}
 	for _, l := range lines {
-		r := StatusLine{ID: l.ID, Name: l.Name, Limit: l.Limit.Float(), LimitExact: l.Limit.String(), Accounts: l.Accounts, LiteralAccounts: l.LiteralAccounts, GroupRef: l.GroupRef, Synthetic: l.Synthetic, Status: "within"}
+		r := StatusLine{ID: l.ID, Name: l.Name, Revision: l.Revision, Limit: l.Limit.Float(), LimitExact: l.Limit.String(), Accounts: l.Accounts, LiteralAccounts: l.LiteralAccounts, GroupRef: l.GroupRef, Synthetic: l.Synthetic, Status: "within"}
 		avg := new(big.Rat)
 		for _, m := range months {
 			if m.Month == month {
