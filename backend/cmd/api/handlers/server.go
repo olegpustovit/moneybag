@@ -196,6 +196,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("POST /settings/feed", h.settingsFeed)
 	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	mux.Handle("POST /api/mcp", h.browser(browserTransport))
+	mux.Handle("POST /api/expr/check", h.browser(http.HandlerFunc(h.apiExpressionCheck)))
 	mux.HandleFunc("GET /api/session", h.apiSession)
 	mux.HandleFunc("GET /api/imports", h.apiImports)
 	mux.HandleFunc("GET /api/settings", h.apiSettings)

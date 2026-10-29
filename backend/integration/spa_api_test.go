@@ -104,4 +104,44 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	if status != 400 || body["error"] == nil {
 		t.Fatalf("feed validation: %d %v", status, body)
 	}
+	check := func(payload string, signed, csrf bool) (int, map[string]any) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, "POST", endpoint+"/api/expr/check", strings.NewReader(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if signed {
+			req.AddCookie(&http.Cookie{Name: "moneybag_session", Value: raw})
+		}
+		if csrf {
+			req.Header.Set("X-CSRF-Token", session.CSRF)
+		}
+		res, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		var result map[string]any
+		if err := json.NewDecoder(res.Body).Decode(&result); err != nil {
+			t.Fatal(err)
+		}
+		return res.StatusCode, result
+	}
+	payload := `{"expr":"1 / 0", "role":"value", "from":"postings"}`
+	if status, _ := check(payload, false, false); status != 401 {
+		t.Fatalf("expression auth: %d", status)
+	}
+	if status, _ := check(payload, true, false); status != 403 {
+		t.Fatalf("expression csrf: %d", status)
+	}
+	if status, result := check(payload, true, true); status != 200 || result["ok"] != true {
+		t.Fatalf("expression compile: %d %v", status, result)
+	}
+	if status, result := check(`{"expr":"sum(missing)","role":"agg"}`, true, true); status != 200 || result["ok"] != false || len(result["issues"].([]any)) == 0 {
+		t.Fatalf("expression issue: %d %v", status, result)
+	}
+	if status, _ := check(`{"expr":"1","role":"unknown"}`, true, true); status != 400 {
+		t.Fatalf("expression role: %d", status)
+	}
 }

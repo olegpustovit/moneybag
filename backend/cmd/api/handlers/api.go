@@ -1,6 +1,29 @@
 package handlers
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+)
+
+func (h *Handler) apiExpressionCheck(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Expr string `json:"expr"`
+		Role string `json:"role"`
+		From string `json:"from"`
+	}
+	if err := decode(r, &in); err != nil || len(in.Expr) > 2000 || len(in.From) > 200 {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid expression request"})
+		return
+	}
+	switch in.Role {
+	case "where", "derive", "agg", "value":
+	default:
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid expression role"})
+		return
+	}
+	respond(w, http.StatusOK, dashboard.CheckExpression(h.services.Expr, in.Expr, in.Role))
+}
 
 func (h *Handler) apiSession(w http.ResponseWriter, r *http.Request) {
 	p, session, err := h.session(r)
