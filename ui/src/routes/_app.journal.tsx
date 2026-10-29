@@ -1,7 +1,6 @@
-import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { useRef, useState, type FormEvent } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
-import { useVirtualizer } from '@tanstack/react-virtual'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
@@ -9,14 +8,18 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { EntryForm } from '../features/journal/entry-form'
 import { accountsQuery } from '../features/accounts/queries'
 import { journalQuery } from '../features/journal/queries'
+import { DataTable } from '../features/dashboard/data-table'
+import { compareDecimals } from '../features/dashboard/decimal-sort'
+import { tableSort } from '../features/dashboard/table-sort'
 import { tool, type Session } from '../lib/api'
 import type { EntriesListInput } from '../lib/tools'
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined)
-const searchSchema = z.object({ text:z.string().max(200).optional().catch(undefined), account:z.string().optional().catch(undefined), tag:z.string().optional().catch(undefined), from:date, to:date, status:z.enum(['draft','posted']).optional().catch(undefined), effective:z.boolean().optional().catch(undefined), sort:z.enum(['date','-date','amount','-amount']).optional().catch(undefined), entry:z.string().optional().catch(undefined), new:z.boolean().optional().catch(undefined) })
+const searchSchema = z.object({ text:z.string().max(200).optional().catch(undefined), account:z.string().optional().catch(undefined), tag:z.string().optional().catch(undefined), from:date, to:date, status:z.enum(['draft','posted']).optional().catch(undefined), effective:z.boolean().optional().catch(undefined), sort:tableSort, entry:z.string().optional().catch(undefined), new:z.boolean().optional().catch(undefined) })
+const serverSort=(sort:string|undefined) => sort?.split(',').find(item => ['date','-date','amount','-amount'].includes(item))
 export const Route = createFileRoute('/_app/journal')({
   validateSearch: searchSchema,
-  loaderDeps: ({ search }) => ({ text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:search.sort }),
+  loaderDeps: ({ search }) => ({ text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:serverSort(search.sort) }),
   loader: async ({ context, deps }) => { await Promise.all([context.queryClient.infiniteQuery({ ...journalQuery(context.session, deps), staleTime:'static' }), context.queryClient.query({ ...accountsQuery(context.session), staleTime:'static' })]) },
   pendingComponent: () => <section aria-busy="true"><h1>Journal</h1><p>Loading entries…</p></section>,
   errorComponent: JournalError,
@@ -27,45 +30,22 @@ function Journal() {
   const { session } = Route.useRouteContext()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
-  const filters: EntriesListInput = { text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:search.sort }
+  const filters: EntriesListInput = { text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:serverSort(search.sort) }
   const entries = useInfiniteQuery(journalQuery(session, filters))
   const { data: accounts } = useSuspenseQuery(accountsQuery(session))
   const names = new Map(accounts.map((account) => [account.id, account.name]))
   const rows = entries.data?.pages.flatMap((page) => page.items ?? []) ?? []
-  const scrollRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const [focus,setFocus]=useState({row:0,col:0})
-  const virtualizer = useVirtualizer({ count:rows.length, getScrollElement:() => scrollRef.current, estimateSize:() => 32, overscan:12 })
-  const virtual = virtualizer.getVirtualItems()
-  function tableKey(event:KeyboardEvent<HTMLTableElement>) {
-    if(event.key==='/' && !event.ctrlKey && !event.metaKey && !event.altKey) {event.preventDefault();searchRef.current?.focus();return}
-    if(!(event.target instanceof HTMLTableCellElement))return
-    const row=Number(event.target.parentElement?.dataset.row),col=event.target.cellIndex
-    if(event.key==='Enter') {event.preventDefault();const entry=rows[row];if(entry)void navigate({search:(old) => ({...old,entry:entry.id})});return}
-    const move:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}
-    const delta=move[event.key];if(!delta)return
-    event.preventDefault();const nextRow=row+delta[0],nextCol=col+delta[1]
-    const target=event.currentTarget.querySelector<HTMLTableCellElement>(`tbody tr[data-row="${nextRow}"] td:nth-child(${nextCol+1})`)
-    if(target){target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'})}
-  }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const data = new FormData(event.currentTarget)
     const value = (key:string) => String(data.get(key) || '') || undefined
     void navigate({ search: { text:value('text'), account:value('account'), tag:value('tag'), from:value('from'), to:value('to'), status: data.get('status') === 'draft' ? 'draft' : data.get('status') === 'posted' ? 'posted' : undefined, effective:data.has('effective') || undefined, sort:search.sort, entry:undefined } })
-    scrollRef.current?.scrollTo(0,0)
   }
   return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / JOURNAL</p><h1>Journal</h1><p className="description">Entries and their postings.</p></div><Button onClick={() => void navigate({search:(old) => ({...old,new:true,entry:undefined})})}>New entry</Button></header>
     <form className="journal-filters" key={JSON.stringify(filters)} onSubmit={submit}>
       <label>Search<Input ref={searchRef} name="text" type="search" defaultValue={search.text} maxLength={200}/></label><label>Account<Input name="account" list="journal-accounts" defaultValue={search.account}/><datalist id="journal-accounts">{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</datalist></label><label>Tag<Input name="tag" defaultValue={search.tag}/></label><label>From<Input name="from" type="date" defaultValue={search.from}/></label><label>To<Input name="to" type="date" defaultValue={search.to}/></label><label>Status<select name="status" defaultValue={search.status ?? ''}><option value="">All</option><option value="draft">Draft</option><option value="posted">Posted</option></select></label><label className="journal-check"><input name="effective" type="checkbox" defaultChecked={search.effective}/> Effective only</label><Button type="submit" variant="outline" size="sm">Apply filters</Button>
     </form>
-    {entries.isPending ? <p aria-busy="true">Loading entries…</p> : entries.isError && rows.length === 0 ? <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.refetch()}>Retry</Button></div> : rows.length === 0 ? <p className="settings-empty">No entries match these filters.</p> : <div ref={scrollRef} className="journal-scroll" role="region" aria-label="Journal entries" tabIndex={0} onScroll={() => { const element=scrollRef.current; if (element && element.scrollHeight-element.scrollTop-element.clientHeight < 320 && entries.hasNextPage && !entries.isFetching) void entries.fetchNextPage() }}>
-      <table className="journal-table" onKeyDown={tableKey}><thead><tr><th aria-sort={search.sort === 'date' ? 'ascending' : search.sort === '-date' ? 'descending' : 'none'}><button type="button" onClick={() => {scrollRef.current?.scrollTo(0,0);void navigate({search:(old) => ({...old,sort:old.sort==='date' ? '-date' : 'date'})})}}>Date{search.sort === 'date' ? ' ↑' : search.sort === '-date' ? ' ↓' : ''}</button></th><th>Payee</th><th>Accounts</th><th className="numeric" aria-sort={search.sort === 'amount' ? 'ascending' : search.sort === '-amount' ? 'descending' : 'none'}><button type="button" title="Sort the displayed posting amount numerically across commodities" onClick={() => {scrollRef.current?.scrollTo(0,0);void navigate({search:(old) => ({...old,sort:old.sort==='amount' ? '-amount' : 'amount'})})}}>Posting amount{search.sort === 'amount' ? ' ↑' : search.sort === '-amount' ? ' ↓' : ''}</button></th><th>Status</th><th>Tags</th></tr></thead><tbody>
-        {virtual.length > 0 && virtual[0].start > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:virtual[0].start,padding:0,border:0}}/></tr>}
-        {/* shortcut: amounts use one posting until main-commodity selection is defined. */}
-        {virtual.map((item) => { const entry=rows[item.index]; const amount=(entry.postings?.find((posting) => search.account && posting.account === search.account) ?? entry.postings?.[0])?.amount; const cells=[<button className="journal-entry-link" onClick={(event) => { event.stopPropagation(); void navigate({ search:(old) => ({...old,entry:entry.id}) }) }}>{entry.date}</button>,entry.payee || '—',(entry.postings ?? []).map((posting) => names.get(posting.account) || posting.account).join(', '),amount ? `${amount.v.replace(/^-/, '−')} ${amount.c}` : '—',entry.status,entry.tags?.join(', ') || '—'];const activeRow=virtual.some(v => v.index===focus.row) ? focus.row : virtual[0]?.index;return <tr key={entry.id} data-row={item.index} onClick={() => void navigate({ search:(old) => ({...old,entry:entry.id}) })}>{cells.map((cell,col) => <td key={col} className={col===3 ? 'numeric' : undefined} tabIndex={item.index===activeRow && col===focus.col ? 0 : -1} onFocus={(event) => {if(event.target===event.currentTarget)setFocus({row:item.index,col})}}>{cell}</td>)}</tr> })}
-        {virtual.length > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:Math.max(0,virtualizer.getTotalSize()-virtual[virtual.length-1].end),padding:0,border:0}}/></tr>}
-      </tbody></table>{entries.isFetchingNextPage && <p>Loading more entries…</p>}{entries.isFetchNextPageError && <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.fetchNextPage()}>Retry</Button></div>}{entries.hasNextPage && <Button variant="outline" size="sm" disabled={entries.isFetching} onClick={() => void entries.fetchNextPage()}>Load more</Button>}
-    </div>}
+    {entries.isPending ? <p aria-busy="true">Loading entries…</p> : entries.isError && rows.length === 0 ? <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.refetch()}>Retry</Button></div> : rows.length === 0 ? <p className="settings-empty">No entries match these filters.</p> : <DataTable key={`table:${JSON.stringify(filters)}`} storageKey={`journal:${session.user.id}`} regionLabel="Journal entries" resetKey={JSON.stringify(filters)} externalFilterRef={searchRef} forceVirtual sort={search.sort} onSortChange={sort => void navigate({search:old => ({...old,sort})})} onRowActivate={row => void navigate({search:old => ({...old,entry:String(row._id.v)})})} onScroll={element => {if(element.scrollHeight-element.scrollTop-element.clientHeight<320 && entries.hasNextPage && !entries.isFetching)void entries.fetchNextPage()}} footer={<>{entries.isFetchingNextPage && <p>Loading more entries…</p>}{entries.isFetchNextPageError && <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.fetchNextPage()}>Retry</Button></div>}{entries.hasNextPage && <Button variant="outline" size="sm" disabled={entries.isFetching} onClick={() => void entries.fetchNextPage()}>Load more</Button>}</>} sorters={{amount:(a,b) => {const left=String(a.amount.v),right=String(b.amount.v);return left==='' ? right==='' ? 0 : -1 : right==='' ? 1 : compareDecimals(left,right)}}} value={{type:'table',columns:[{key:'date',label:'Date',format:'date',align:'left'},{key:'payee',label:'Payee',format:'text',align:'left'},{key:'accounts',label:'Accounts',format:'account',align:'left'},{key:'amount',label:'Posting amount',format:'money',align:'right'},{key:'status',label:'Status',format:'status',align:'left'},{key:'tags',label:'Tags',format:'text',align:'left'}],rows:rows.map(entry => {const amount=(entry.postings?.find(posting => search.account && posting.account===search.account) ?? entry.postings?.[0])?.amount,accounts=(entry.postings ?? []).map(posting => names.get(posting.account) || posting.account).join(', '),tags=entry.tags?.join(', ') || '—';return {_id:{v:entry.id,t:''},date:{v:entry.date,t:entry.date},payee:{v:entry.payee || '',t:entry.payee || '—'},accounts:{v:accounts,t:accounts},amount:{v:amount?.v ?? '',t:amount ? `${amount.v.replace(/^-/, '−')} ${amount.c}` : '—'},status:{v:entry.status,t:entry.status},tags:{v:tags,t:tags}}})}} renderCell={(row,column) => column==='date' ? <button className="journal-entry-link" onClick={event => {event.stopPropagation();void navigate({search:old => ({...old,entry:String(row._id.v)})})}}>{row.date.t}</button> : row[column]?.t ?? '—'}/>}
     <Sheet open={!!search.entry || !!search.new} onOpenChange={(open) => { if (!open) void navigate({search:(old) => ({...old,entry:undefined,new:undefined})}) }}><SheetContent className="journal-sheet"><SheetHeader><SheetTitle>{search.new ? "New entry" : "Entry"}</SheetTitle><SheetDescription>Postings, links and history</SheetDescription></SheetHeader>{search.new ? <div className="journal-detail"><EntryForm session={session} accounts={accounts} onDone={() => void navigate({search:(old) => ({...old,new:undefined})})} onCancel={() => void navigate({search:(old) => ({...old,new:undefined})})}/></div> : search.entry && <EntryDetail key={search.entry} session={session} id={search.entry} names={names} accounts={accounts}/>}</SheetContent></Sheet>
   </>
 }

@@ -150,13 +150,8 @@ th { color:var(--text2); font-weight:600; }
 .journal-filters input, .journal-filters select { min-width:8rem; }
 .journal-filters .journal-check { flex-direction:row; align-items:center; min-height:2rem; }
 .journal-filters .journal-check input { min-width:0; }
-.journal-scroll { height:min(65vh, 720px); overflow:auto; border:1px solid var(--border); }
-.journal-table { width:100%; min-width:760px; border-collapse:collapse; table-layout:fixed; }
-.journal-table thead { position:sticky; top:0; z-index:1; background:var(--background); }
-.journal-table th, .journal-table td { height:32px; padding:0 .5rem; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-.journal-table tbody tr { cursor:pointer; }
-.journal-table tbody tr:hover { background:var(--muted); }
-.journal-table td:focus-visible { outline:2px solid var(--foreground); outline-offset:-2px; }
+.data-table-scroll[aria-label="Journal entries"] tbody tr[data-row] { cursor:pointer; }
+.data-table-scroll[aria-label="Journal entries"] tbody tr[data-row]:hover { background:var(--hover); }
 .journal-entry-link { text-decoration:underline; text-underline-offset:3px; }
 .journal-sheet { overflow:auto; width:min(100%, 36rem); max-width:36rem; }
 .journal-detail { padding:0 1rem 1rem; }
