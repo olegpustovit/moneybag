@@ -198,6 +198,7 @@ func (e *Engine) Compile(src string) (cel.Program, error) {
 	return p, nil
 }
 func (e *Engine) Eval(ctx context.Context, src string, vars map[string]any) (Result, error) {
+	markVolatile(ctx, src)
 	p, err := e.Compile(src)
 	if err != nil {
 		return Result{}, err

@@ -45,10 +45,14 @@ type Outcome struct {
 	At     time.Time       `json:"at" bson:"at"`
 }
 type MongoRepository struct{ DB *mongo.Database }
-type Service struct{ repo *MongoRepository }
+type Service struct {
+	repo *MongoRepository
+	// OnChange is configured before serving requests; false starts a write, true finishes it.
+	OnChange func(userID string, finished bool)
+}
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository) *Service                 { return &Service{r} }
+func NewService(r *MongoRepository) *Service                 { return &Service{repo: r} }
 func (s *Service) Workflow(ctx context.Context, fn func(context.Context) error) error {
 	return mongodb.Workflow(ctx, fn)
 }
@@ -85,7 +89,7 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		if err != nil {
 			return err
 		}
-		writeErr := fn(tx)
+		writeErr := s.Mutation(tx, p, fn)
 		beforeJSON, encodeErr := json.Marshal(before)
 		if encodeErr != nil {
 			return encodeErr

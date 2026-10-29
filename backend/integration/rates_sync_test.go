@@ -135,6 +135,19 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	if s := state("swissquote"); s.Status != "skipped" {
 		t.Fatal("fallback not skipped", s)
 	}
+	revisions := audit.NewService(audit.NewMongoRepository(db))
+	before, e := revisions.Revision(ctx, p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	res, e = prices.Sync(ctx, p, true, false)
+	if e != nil || len(res.Written) != 0 {
+		t.Fatal("unchanged provider sync", res.Written, e)
+	}
+	after, e := revisions.Revision(ctx, p)
+	if e != nil || after <= before {
+		t.Fatal("provider state did not invalidate revision", before, after, e)
+	}
 	// The request quote cache answers "at or before" exactly like the indexed query, and skips archived quotes.
 	cached := rates.WithQuoteCache(ctx)
 	for _, when := range []string{"2026-10-27T00:00:00Z", at, "2026-12-01T00:00:00Z"} {

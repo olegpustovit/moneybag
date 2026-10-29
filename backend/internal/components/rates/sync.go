@@ -107,7 +107,12 @@ func (s *Service) track(ctx context.Context, p principal.Principal, provider str
 			}
 		}
 	}
-	_, e := s.repo.db.Collection("rate_sync").ReplaceOne(ctx, bson.M{"_id": id}, st, options.Replace().SetUpsert(true))
+	e := s.audit.Workflow(ctx, func(tx context.Context) error {
+		return s.audit.Mutation(tx, p, func(tx context.Context) error {
+			_, err := s.repo.db.Collection("rate_sync").ReplaceOne(tx, bson.M{"_id": id}, st, options.Replace().SetUpsert(true))
+			return err
+		})
+	})
 	return q, e
 }
 
@@ -133,7 +138,9 @@ func (s *Service) Sync(ctx context.Context, p principal.Principal, ecb, gold boo
 	if gold {
 		ok := run("gold-api", func() ([]Quote, error) { return s.refreshGold(ctx, p, s.urls.gold, goldSource, parseGoldAPI) })
 		if ok {
-			s.skip(ctx, p, "swissquote")
+			if err := s.skip(ctx, p, "swissquote"); err != nil && firstErr == nil {
+				firstErr = err
+			}
 		} else {
 			run("swissquote", func() ([]Quote, error) { return s.refreshGold(ctx, p, s.urls.swiss, swissSource, parseSwissquote) })
 		}
@@ -148,9 +155,14 @@ func (s *Service) provState(ctx context.Context, p principal.Principal, provider
 	var st ProviderState
 	return st, s.repo.db.Collection("rate_sync").FindOne(ctx, bson.M{"_id": p.UserID + "|" + provider}).Decode(&st)
 }
-func (s *Service) skip(ctx context.Context, p principal.Principal, provider string) {
+func (s *Service) skip(ctx context.Context, p principal.Principal, provider string) error {
 	id := p.UserID + "|" + provider
-	_, _ = s.repo.db.Collection("rate_sync").UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": "skipped", "user_id": p.UserID, "provider": provider}}, options.UpdateOne().SetUpsert(true))
+	return s.audit.Workflow(ctx, func(tx context.Context) error {
+		return s.audit.Mutation(tx, p, func(tx context.Context) error {
+			_, err := s.repo.db.Collection("rate_sync").UpdateOne(tx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": "skipped", "user_id": p.UserID, "provider": provider}}, options.UpdateOne().SetUpsert(true))
+			return err
+		})
+	})
 }
 
 // existing indexes stored quotes by pair@at, whatever their source.

@@ -54,3 +54,17 @@ func TestDataReferences(t *testing.T) {
 		}
 	}
 }
+
+func TestVolatilityTracksNowAcrossChildContexts(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := WithVolatility(context.Background())
+	if _, err := e.Eval(ctx, "today()", nil); err != nil || Volatile(ctx) {
+		t.Fatalf("today: %v, volatile=%v", err, Volatile(ctx))
+	}
+	if _, err := e.Eval(context.WithValue(ctx, struct{}{}, 1), "now()", nil); err != nil || !Volatile(ctx) {
+		t.Fatalf("now: %v, volatile=%v", err, Volatile(ctx))
+	}
+}
