@@ -7,6 +7,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
+	"sort"
 	"time"
 )
 
@@ -45,33 +46,44 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 	if e != nil {
 		return nil, e
 	}
+	if in.StreamID == "" && len(state.Streams) == 0 {
+		return []IncomeMonth{}, nil
+	}
+	if in.StreamID != "" {
+		found := false
+		for _, stream := range state.Streams {
+			if stream.ID == in.StreamID {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, principal.ErrNotFound
+		}
+	}
 	accounts, e := s.accountMap(ctx, p)
 	if e != nil {
 		return nil, e
 	}
 	var entries []ledger.Entry
-	page := ledger.EntriesInput{From: in.From, To: in.To, Status: "posted", Limit: 500}
-	for {
-		res, e := s.Ledger.Entries(ctx, p, page)
-		if e != nil {
-			return nil, e
+	// shortcut: the old paged reader accepted a final page through 20,500 entries; enforce 20,000 when the public contract permits.
+	e = s.Ledger.PostedStream(ctx, p, in.From, in.To, false, func(entry ledger.Entry) error {
+		if len(entries) >= 20500 {
+			return fmt.Errorf("range holds too many entries; narrow from/to")
 		}
-		entries = append(entries, res.Items...)
-		if res.NextCursor == 0 {
-			break
-		}
-		if len(entries) > 20000 {
-			return nil, fmt.Errorf("range holds too many entries; narrow from/to")
-		}
-		page.Cursor = res.NextCursor
+		entries = append(entries, entry)
+		return nil
+	})
+	if e != nil {
+		return nil, e
 	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Seq > entries[j].Seq })
+
 	out := []IncomeMonth{}
-	found := in.StreamID == ""
 	for _, st := range state.Streams {
 		if in.StreamID != "" && st.ID != in.StreamID {
 			continue
 		}
-		found = true
 		expected := st.Amount
 		switch st.Frequency {
 		case "biweekly":
@@ -145,9 +157,6 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 			r.Variance = round(r.Actual - r.Expected)
 			out = append(out, *r)
 		}
-	}
-	if !found {
-		return nil, principal.ErrNotFound
 	}
 	return out, nil
 }
