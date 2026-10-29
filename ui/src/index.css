@@ -25,6 +25,11 @@ body { margin:0; min-width:320px; }
 [data-sonner-toaster] [data-sonner-toast][data-styled="true"] { --normal-bg:var(--paper); --normal-text:var(--text); --normal-border:var(--bd); }
 :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 .data, table, input[inputmode="decimal"] { font-feature-settings:"tnum", "ss03", "ss05", "ss09"; font-variant-numeric:tabular-nums; }
+.readable-account { display:inline-flex; align-items:center; gap:4px; max-width:100%; }
+.account-trail { color:var(--text2); }
+.readable-account button { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; flex:none; border:0; background:none; color:var(--text2); cursor:pointer; }
+.readable-account button:hover { background:var(--hover); color:var(--text); }
+.account-groups .readable-account > span:first-child { font-weight:600; }
 .workspace-shell { min-height:100vh; display:grid; grid-template-columns:248px minmax(0,1fr); }
 .desktop-sidebar { position:sticky; top:0; height:100vh; overflow-y:auto; border-right:1px solid var(--bd); background:var(--sunk); }
 .navigation { display:flex; flex-direction:column; min-height:100%; background:var(--sunk); }
