@@ -264,7 +264,11 @@ func (s *Service) Validate(ctx context.Context, in Authorization) (Client, []str
 	}
 	scopes := strings.Fields(in.Scope)
 	if len(scopes) == 0 {
-		scopes = []string{"ledger:read"}
+		// No requested scope means the endpoint's full access; the consent page lists exactly what is granted.
+		scopes = slices.Clone(principal.Scopes)
+		if strings.HasSuffix(in.Resource, "/readonly") {
+			scopes = []string{"ledger:read"}
+		}
 	}
 	for _, scope := range scopes {
 		if !slices.Contains(principal.Scopes, scope) || (strings.HasSuffix(in.Resource, "/readonly") && scope != "ledger:read") {

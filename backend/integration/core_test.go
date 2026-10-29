@@ -13,6 +13,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -175,6 +176,18 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	}
 	verifier := identity.Random()
 	auth := oauth.Authorization{ClientID: reg.ID, RedirectURI: reg.RedirectURIs[0], ResponseType: "code", Scope: "ledger:read ledger:write", State: "opaque-state", Challenge: oauth.Challenge(verifier), ChallengeMethod: "S256", Resource: "http://localhost:6459/mcp"}
+	unscoped := auth
+	unscoped.Scope = ""
+	if _, granted, e := oa.Validate(ctx, unscoped); e != nil || !slices.Equal(granted, principal.Scopes) {
+		t.Fatal("unscoped request should get full access", granted, e)
+	}
+	unscoped.Resource += "/readonly"
+	if _, granted, e := oa.Validate(ctx, unscoped); e != nil || !slices.Equal(granted, []string{"ledger:read"}) {
+		t.Fatal("unscoped readonly request", granted, e)
+	}
+	if e := readonlyPrincipalScopeError(pa); !strings.Contains(e, "ledger:write") {
+		t.Fatal("forbidden error should name the scope", e)
+	}
 	code, e := oa.Authorize(ctx, auth, pa)
 	if e != nil {
 		t.Fatal(e)
@@ -231,4 +244,12 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 		t.Fatal("durable outcome after cancellation", recorded, e)
 	}
 	testProductWorkflows(t, ctx, db, pa, pb, book, auditSvc, ids)
+}
+
+func readonlyPrincipalScopeError(p principal.Principal) string {
+	p.Scopes = []string{"ledger:read"}
+	if e := p.Require("ledger:write"); e != nil {
+		return e.Error()
+	}
+	return ""
 }

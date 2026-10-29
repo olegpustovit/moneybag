@@ -73,7 +73,12 @@ func (h *Handler) RemoteMCP(readOnly bool) http.Handler {
 	})
 }
 func (h *Handler) unauthorized(w http.ResponseWriter, path string) {
-	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+h.cfg.PublicURL+"/.well-known/oauth-protected-resource"+path+`", scope="ledger:read"`)
+	// Connectors request exactly the challenged scopes, so the full endpoint must advertise all of them.
+	scope := strings.Join(principal.Scopes, " ")
+	if strings.HasSuffix(path, "/readonly") {
+		scope = "ledger:read"
+	}
+	w.Header().Set("WWW-Authenticate", `Bearer resource_metadata="`+h.cfg.PublicURL+"/.well-known/oauth-protected-resource"+path+`", scope="`+scope+`"`)
 	respond(w, 401, map[string]string{"error": "invalid_token"})
 }
 func (h *Handler) allowedOrigin(origin string) bool {

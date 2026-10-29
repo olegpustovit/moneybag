@@ -3,6 +3,7 @@ package principal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/oklog/ulid/v2"
 	"slices"
 )
@@ -25,8 +26,11 @@ type Principal struct {
 var Scopes = []string{"ledger:read", "ledger:write", "import:write", "model:write", "dash:write", "dash:share"}
 
 func (p Principal) Require(scope string) error {
-	if p.Valid() != nil || !slices.Contains(p.Scopes, scope) {
+	if p.Valid() != nil {
 		return ErrForbidden
+	}
+	if !slices.Contains(p.Scopes, scope) {
+		return fmt.Errorf("%w: this connection lacks the %s scope; reconnect and grant it", ErrForbidden, scope)
 	}
 	return nil
 }

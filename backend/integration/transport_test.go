@@ -48,7 +48,7 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 		t.Fatal(e)
 	}
 	response.Body.Close()
-	if response.StatusCode != 401 || !strings.Contains(response.Header.Get("WWW-Authenticate"), "oauth-protected-resource/mcp") {
+	if response.StatusCode != 401 || !strings.Contains(response.Header.Get("WWW-Authenticate"), "oauth-protected-resource/mcp") || !strings.Contains(response.Header.Get("WWW-Authenticate"), "dash:share") {
 		t.Fatal("HTTP auth challenge", response.StatusCode)
 	}
 	response, e = http.Get(endpoint + "/.well-known/oauth-protected-resource/mcp/readonly")
