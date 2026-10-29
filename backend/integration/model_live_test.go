@@ -57,7 +57,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
 	models := model.NewService(model.NewMongoRepository(db), tables.NewService(tables.NewMongoRepository(db), a, expr), a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
-	for _, acc := range []ledger.Account{{ID: "assets:w", Type: "asset", Name: "W", Pot: "wise", Commodities: []string{"USD"}}, {ID: "assets:k", Type: "asset", Name: "K", Pot: "kyiv", Commodities: []string{"USD"}}, {ID: "equity:open", Type: "equity", Name: "Open", Commodities: []string{"USD"}}, {ID: "income:pay", Type: "income", Name: "Pay", Commodities: []string{"USD"}}} {
+	for _, acc := range []ledger.Account{{ID: "assets:w", Type: "asset", Name: "W", Pot: "wise_usd", Commodities: []string{"USD"}}, {ID: "assets:k", Type: "asset", Name: "K", Pot: "cash_kyiv", Commodities: []string{"USD"}}, {ID: "equity:open", Type: "equity", Name: "Open", Commodities: []string{"USD"}}, {ID: "income:pay", Type: "income", Name: "Pay", Commodities: []string{"USD"}}} {
 		if _, e = book.CreateAccount(ctx, p, acc); e != nil {
 			t.Fatal(e)
 		}

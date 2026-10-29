@@ -36,7 +36,7 @@ type Provenance struct {
 	Inputs      []ResolvedInput `json:"resolved_inputs"`
 }
 
-// liveStart values the ledger as of a date (default today, Europe/Zagreb). Pots are the account `pot` field: accounts with pot "wise" and "kyiv" form those cash pots; gold is the XAU_g commodity.
+// liveStart values the ledger as of a date (default today, Europe/Zagreb). Pots are the account `pot` field: pots starting with "wise" (wise_usd, wise_eur) and pots containing "kyiv" (cash_kyiv) form those cash pots; gold is the XAU_g commodity.
 // It returns nil values (stored assumptions are used) when no ledger, rates or balances are available.
 func (s *Service) liveStart(ctx context.Context, p principal.Principal, asOf string) (map[string]float64, Provenance, error) {
 	pr := Provenance{StartAsOf: asOf, StartSource: "assumptions", RatesUsed: []RateUsed{}, Inputs: []ResolvedInput{}}
@@ -83,10 +83,11 @@ func (s *Service) liveStart(ctx context.Context, p principal.Principal, asOf str
 				grams += amt.Value.Float()
 				continue
 			}
-			switch acc.Pot {
-			case "wise":
+			// Pots are named per account (wise_usd, wise_eur, cash_kyiv), so match by name.
+			switch {
+			case strings.HasPrefix(acc.Pot, "wise"):
 				wise += usd
-			case "kyiv":
+			case strings.Contains(acc.Pot, "kyiv"):
 				kyiv += usd
 			}
 		}
