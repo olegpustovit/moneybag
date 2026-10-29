@@ -47,10 +47,15 @@ type HistoryResult struct {
 	NextCursor int64                      `json:"next_cursor,omitempty"`
 }
 
-func (s *Service) Of(ctx context.Context, p principal.Principal, id string) (HistoryResult, error) {
+func (s *Service) Of(ctx context.Context, p principal.Principal, id string, includePayload bool) (HistoryResult, error) {
 	v, e := s.Audit.List(ctx, p, audit.ListInput{Target: id})
 	if e != nil {
 		return HistoryResult{}, e
+	}
+	if !includePayload {
+		for i := range v.Events {
+			v.Events[i].Before, v.Events[i].After = nil, nil
+		}
 	}
 	out := HistoryResult{Events: v.Events, Versions: []dashboard.VersionSummary{}, NextCursor: v.NextCursor}
 	versions, e := s.Dashboard.Versions(ctx, p, id)
@@ -305,6 +310,12 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 			return e
 		}
 		return s.Tables.Archive(ctx, p, id, old.Archived, reason)
+	case "db_alter":
+		old, e := decodeBefore[tables.ColumnsState](event)
+		if e != nil {
+			return e
+		}
+		return s.Tables.SetColumns(ctx, p, id, old.Columns, reason)
 	case "db_update_cells":
 		old, e := decodeBefore[[]tables.Row](event)
 		if e != nil {
@@ -363,7 +374,7 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 			return e
 		}
 		return s.Dashboard.Archive(ctx, p, id, old.Archived, reason)
-	case "dashboard_publish":
+	case "dashboard_publish", "dashboard_unpublish":
 		old, e := decodeBefore[dashboard.Head](event)
 		if e != nil {
 			return e

@@ -9,6 +9,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/model"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ type Sources struct {
 	Tables *tables.Service
 	Valuer ledger.Valuer
 	Rates  *rates.Service
+	Views  *Service // saved views (view:<id>); set once the dashboard service exists
+	Expr   *expressions.Engine
 }
 
 func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
@@ -191,6 +194,8 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		for _, q := range quotes {
 			out = append(out, map[string]any{"pair": q.Pair, "base": q.Base, "quote": q.Quote, "at": q.At, "value": q.Value.Float(), "source": q.Source})
 		}
+	case strings.HasPrefix(source, "view:"):
+		return s.viewRows(ctx, p, strings.TrimPrefix(source, "view:"))
 	case source == "balance_history":
 		// Month-end USD totals for the last 12 months (today for the current month).
 		today := time.Now()
@@ -218,7 +223,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			out = append(out, map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
 		}
 	default:
-		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id> or table:<id>", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id>, table:<id> or view:<id>", source)
 	}
 	return out, nil
 }

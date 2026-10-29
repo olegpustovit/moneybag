@@ -17,6 +17,9 @@ type Query struct {
 	Key    string            `json:"key,omitempty"`
 	Value  string            `json:"value,omitempty"`
 	N      string            `json:"n,omitempty"`
+	// HideZero drops result rows that have numeric value columns (the agg columns when aggregating, else every
+	// numeric column) all equal to zero; rows without numeric value columns are kept.
+	HideZero bool `json:"hide_zero,omitempty"`
 }
 type Column struct {
 	Label  string `json:"label"`
@@ -46,7 +49,7 @@ type Component struct {
 	Sub       string    `json:"sub,omitempty"`
 	Tone      string    `json:"tone,omitempty"`
 	Format    string    `json:"format,omitempty"`
-	Rows      string    `json:"rows,omitempty"`
+	Rows      string    `json:"rows,omitempty"` // data source name, or a CEL expression returning a list of rows
 	Columns   []Column  `json:"columns,omitempty"`
 	Label     string    `json:"label,omitempty"`
 	Actual    string    `json:"actual,omitempty"`
@@ -103,9 +106,22 @@ type Version struct {
 	Note        string          `json:"note" bson:"note"`
 }
 type Issue struct {
-	Path string `json:"path"`
-	Msg  string `json:"msg"`
+	Path        string `json:"path"`
+	Msg         string `json:"msg"`
+	ComponentID string `json:"component_id,omitempty"`
+	Field       string `json:"field,omitempty"`
+	Expr        string `json:"expr,omitempty"`
+	Hint        string `json:"hint,omitempty"`
 }
+
+func (i Issue) String() string {
+	s := i.Path + ": " + i.Msg
+	if i.Hint != "" {
+		s += " (" + i.Hint + ")"
+	}
+	return s
+}
+
 type Validation struct {
 	OK       bool    `json:"ok"`
 	Errors   []Issue `json:"errors"`

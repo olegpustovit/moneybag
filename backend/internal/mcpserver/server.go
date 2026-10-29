@@ -242,7 +242,7 @@ func New(s Services, opts Options) *mcp.Server {
 	add(r, "db_query", "tables", "ledger:read", "Use this when reading your database rows. db is a logical table ID from db_list, where is CEL over row, sort uses +/-column names, limit 1..5000.", true, false, s.Tables.Query)
 	add(r, "db_create", "tables", "model:write", "Use this when you need a new user database. Columns have unique id and type number/string/bool/date/formula. Formula columns require CEL and are read-only cells.", false, false, s.Tables.Create)
 	add(r, "db_update_cells", "tables", "model:write", "Use this when editing assumptions or cells. Row IDs may create rows; updates are type-checked and formulas recomputed. Optional version rejects stale edits.", false, false, s.Tables.Update)
-	add(r, "db_delete_rows", "tables", "model:write", "Use this to delete rows from a data table by row id (1..500). Rows are archived, so undo restores them. To change a row, use db_update_cells with its row_id.", false, true, s.Tables.DeleteRows)
+	add(r, "db_delete_rows", "tables", "model:write", "Use this to delete rows from a data table, either by row_ids (1..500) or by where (CEL over row; matching 1..500 rows). Give exactly one. Rows are archived, so undo restores them. To change a row, use db_update_cells with its row_id.", false, true, s.Tables.DeleteRows)
 	add(r, "model_get", "model", "ledger:read", "Use this when you need assumptions, income streams and scenarios before forecasting.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (model.State, error) {
 		return s.Model.Get(ctx, p)
 	})
@@ -333,14 +333,11 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return access.Dashboard.Compose(ctx, access.Principal, access.ID, in.Page, in.Layout)
 	})
-	add(r, "dashboard_patch", "dashboard", "dash:write", "Use this for RFC6902 JSON Patch edits to a dashboard draft. At most 200 operations and 256 KiB; unknown spec fields are rejected.", false, false, func(ctx context.Context, p principal.Principal, in struct {
-		DashboardID string           `json:"dashboard_id"`
-		Ops         []map[string]any `json:"ops"`
+	add(r, "dashboard_patch", "dashboard", "dash:write", "Use this for RFC6902 JSON Patch edits to a dashboard draft. ops is a JSON array of operations, or a string containing that array. At most 500 operations and 1 MiB; unknown spec fields are rejected. A failing operation is reported as op <index>: path <path> not found (or its error).", false, false, func(ctx context.Context, p principal.Principal, in struct {
+		DashboardID string          `json:"dashboard_id"`
+		Ops         json.RawMessage `json:"ops" jsonschema:"RFC6902 operations: a JSON array, or a string containing that array"`
 	}) (dashboard.EditResult, error) {
-		b, e := json.Marshal(in.Ops)
-		if e != nil {
-			return dashboard.EditResult{}, e
-		}
+		b := in.Ops
 		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
 		if e != nil {
 			return dashboard.EditResult{}, e
@@ -474,13 +471,15 @@ func New(s Services, opts Options) *mcp.Server {
 		return engine.Evaluate(ctx, p, in.Expr, data, params)
 	})
 	add(r, "audit_log", "audit", "ledger:read", "Use this when asked who changed what. Events are hash-chained per user and include durable workflow outcomes; missing outcome indicates interruption. Page with next_cursor.", true, false, s.Audit.List)
-	add(r, "history_of", "audit", "ledger:read", "Use this when tracing a specific entry, rule, table or dashboard. Returns that target's audit events and outcomes.", true, false, func(ctx context.Context, p principal.Principal, in struct {
-		TargetID string `json:"target_id"`
+	add(r, "history_of", "audit", "ledger:read", "Use this when tracing a specific entry, rule, table or dashboard. Returns that target's audit events and outcomes; before/after payloads (full specs) are omitted unless include_payload is true.", true, false, func(ctx context.Context, p principal.Principal, in struct {
+		TargetID       string `json:"target_id"`
+		IncludePayload bool   `json:"include_payload,omitempty" jsonschema:"return full before/after payloads (default false: event metadata only)"`
 	}) (history.HistoryResult, error) {
-		return s.History.Of(ctx, p, in.TargetID)
+		return s.History.Of(ctx, p, in.TargetID, in.IncludePayload)
 	})
 	add(r, "undo", "audit", "ledger:write", "Use this to append an inverse for a completed mutation. Requires event_id and reason; posted journal entries are reversed and history is retained. Each affected domain scope is required.", false, true, s.History.Undo)
 	registerWorkflows(r, s)
+	registerViewsAndTables(r, s)
 	registerReference(server, s)
 	return server
 }

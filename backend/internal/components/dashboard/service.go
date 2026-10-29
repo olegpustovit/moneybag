@@ -339,21 +339,34 @@ func (s *Service) UpdateComponent(ctx context.Context, p principal.Principal, id
 	})
 }
 func (s *Service) Patch(ctx context.Context, p principal.Principal, id string, ops json.RawMessage) (EditResult, error) {
-	if len(ops) > 256*1024 {
-		return EditResult{}, fmt.Errorf("patch exceeds 256 KiB")
+	// ops may arrive as a JSON string containing the array.
+	var text string
+	if json.Unmarshal(ops, &text) == nil {
+		ops = json.RawMessage(text)
+	}
+	if len(ops) > 1<<20 {
+		return EditResult{}, fmt.Errorf("patch exceeds 1 MiB")
 	}
 	patch, e := jsonpatch.DecodePatch(ops)
 	if e != nil {
-		return EditResult{}, fmt.Errorf("invalid RFC6902 patch")
+		return EditResult{}, fmt.Errorf("invalid RFC6902 patch: %w", e)
 	}
-	if len(patch) > 200 {
-		return EditResult{}, fmt.Errorf("at most 200 patch operations")
+	if len(patch) > 500 {
+		return EditResult{}, fmt.Errorf("at most 500 patch operations")
 	}
 	return s.edit(ctx, p, id, "dashboard_patch", func(spec *Spec) error {
 		b, _ := json.Marshal(spec)
-		next, e := patch.Apply(b)
-		if e != nil {
-			return fmt.Errorf("patch does not apply")
+		next := b
+		for i, op := range patch {
+			path, _ := op.Path()
+			var e error
+			if next, e = (jsonpatch.Patch{op}).Apply(next); e == nil {
+				continue
+			}
+			if errors.Is(e, jsonpatch.ErrMissing) {
+				return fmt.Errorf("op %d: path %s not found", i, path)
+			}
+			return fmt.Errorf("op %d (%s %s): %w", i, op.Kind(), path, e)
 		}
 		// Decode into a fresh Spec: decoding into the old one merges maps, so removed queries would survive.
 		var patched Spec
@@ -417,7 +430,7 @@ func (s *Service) Publish(ctx context.Context, p principal.Principal, id string,
 		if !rendered.Validation.OK {
 			reasons := []string{}
 			for _, i := range rendered.Validation.Errors {
-				reasons = append(reasons, i.Path+": "+i.Msg)
+				reasons = append(reasons, i.String())
 			}
 			return fmt.Errorf("publish gate failed: %s", strings.Join(reasons, "; "))
 		}
@@ -482,4 +495,34 @@ func (s *Service) Diff(ctx context.Context, p principal.Principal, id, from, to 
 		}
 	}
 	return out, nil
+}
+
+// Unpublish takes the dashboard offline without touching drafts or versions; undo or a new publish restores it.
+func (s *Service) Unpublish(ctx context.Context, p principal.Principal, id, reason string) error {
+	if e := p.Require("dash:write"); e != nil {
+		return e
+	}
+	return s.audit.Workflow(ctx, func(tx context.Context) error {
+		h, e := s.head(tx, p, id)
+		if e != nil {
+			return e
+		}
+		if h.PublishedVersion == 0 {
+			return fmt.Errorf("dashboard is not published")
+		}
+		draft := h.DraftVersion
+		if draft == 0 {
+			draft = h.PublishedVersion
+		}
+		_, e = s.audit.Write(tx, p, "dashboard_unpublish", audit.Target{Collection: "dashboards", ID: id}, reason, h, struct {
+			PublishedVersion int `json:"published_version"`
+		}{0}, func(tx context.Context) error {
+			r, e := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"published_version": 0, "draft_version": draft}})
+			if e == nil && r.MatchedCount != 1 {
+				return principal.ErrConflict
+			}
+			return e
+		})
+		return e
+	})
 }

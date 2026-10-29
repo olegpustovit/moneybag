@@ -83,6 +83,7 @@ func run() error {
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
+	sources.Views, sources.Expr = dash, expr
 	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
