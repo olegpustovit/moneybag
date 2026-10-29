@@ -38,6 +38,18 @@ func header(s string) string {
 	return strings.ToLower(strings.TrimSpace(strings.TrimPrefix(s, "\ufeff")))
 }
 
+func statementPayee(payee string) string {
+	if len(payee) <= 300 {
+		return payee
+	}
+	end := 300
+	for !utf8.RuneStart(payee[end]) {
+		end--
+	}
+	// The complete bank description remains in ImportRow.Raw.
+	return payee[:end]
+}
+
 var aliases = map[string][]string{
 	"date":     {"date", "date time", "completed date", "created date", "transaction date", "дата", "дата операції", "дата i час операцiї", "дата і час операції"},
 	"amount":   {"amount", "amount (transaction currency)", "net amount", "сума", "сума операції", "сума у валюті картки", "сума в валюті картки"},
@@ -192,6 +204,13 @@ func Parse(content []byte, format string, mapping Mapping) ([]Parsed, error) {
 	}
 	if headerRow < 0 {
 		return nil, fmt.Errorf("date and amount columns not found; supply mapping with exact header names")
+	}
+	for field, name := range explicit {
+		if name != "" {
+			if _, ok := indices[field]; !ok {
+				return nil, fmt.Errorf("mapped %s column %q not found", field, name)
+			}
+		}
 	}
 	if _, ok := indices["currency"]; !ok {
 		return nil, fmt.Errorf("currency column not found; supply mapping")

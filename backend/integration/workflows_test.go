@@ -32,6 +32,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database, pa, pb principal.Principal, book *ledger.Service, a *audit.Service, ids *identity.Service) {
@@ -91,7 +92,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if _, e = budgets.Set(ctx, pa, budget.SetInput{ID: "food", Name: &name, Limit: &amount, Accounts: &accounts}); e != nil {
 		t.Fatal(e)
 	}
-	csv := "Date,Amount,Currency,Description,ID,Balance\n2026-10-01,-20.00,EUR,Coffee,bank-1,-20.00\n2026-10-02,-30.00,EUR,Store,bank-2,-50.00\n"
+	longDescription := "Coffee " + strings.Repeat("Ж", 200)
+	csv := "Date,Amount,Currency,Description,ID,Balance\n2026-10-01,-20.00,EUR," + longDescription + ",bank-1,-20.00\n2026-10-02,-30.00,EUR,Store,bank-2,-50.00\n"
 	start, e := imp.Start(ctx, pa, imports.StartInput{Account: "assets:bank", Format: "generic_csv", ContentB64: base64.StdEncoding.EncodeToString([]byte(csv))})
 	if e != nil {
 		t.Fatal("stage", e)
@@ -100,6 +102,9 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || len(preview.Proposed) != 2 {
 		t.Fatal("preview", preview, e)
 	}
+	if row := preview.Proposed[0]; row.Raw["Description"] != longDescription || len(row.Proposed.Payee) > 300 || !utf8.ValidString(row.Proposed.Payee) {
+		t.Fatal("long bank description lost or invalid display payee", row)
+	}
 	if _, e = imp.Preview(ctx, pb, start.BatchID, 0); !errors.Is(e, principal.ErrNotFound) {
 		t.Fatal("cross-user import access", e)
 	}
@@ -107,6 +112,10 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	account := "expenses:food"
 	edit.Set.Account = &account
 	if _, e = imp.Edit(ctx, pa, edit); e != nil {
+		t.Fatal(e)
+	}
+	// A batch staged before the display-payee fix must also remain resumable.
+	if _, e = db.Collection("import_rows").UpdateOne(ctx, bson.M{"_id": preview.Proposed[0].ID, "user_id": pa.UserID}, bson.M{"$set": bson.M{"proposed.payee": longDescription}}); e != nil {
 		t.Fatal(e)
 	}
 	posted, e := imp.Commit(ctx, pa, start.BatchID, true)

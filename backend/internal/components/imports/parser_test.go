@@ -3,7 +3,9 @@ package imports
 import (
 	"encoding/json"
 	"github.com/xuri/excelize/v2"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestStatements(t *testing.T) {
@@ -95,5 +97,38 @@ func TestMappedAccount(t *testing.T) {
 	}
 	if _, e := mappedAccount("equty:transfers"); e == nil {
 		t.Fatal("unknown account type accepted silently")
+	}
+}
+
+func TestMissingExplicitStatementColumns(t *testing.T) {
+	content := []byte("Date,Amount,Currency,Description,ID,Balance,Category\n2026-10-01,-12.34,EUR,Coffee,bank-1,100.00,Food\n")
+	for name, mapping := range map[string]Mapping{
+		"id":       {ID: "missing_id"},
+		"balance":  {Balance: "missing_balance"},
+		"payee":    {Payee: "missing_payee"},
+		"category": {Category: "missing_category"},
+		"currency": {Currency: "missing_currency"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse(content, "generic_csv", mapping); err == nil {
+				t.Fatal("missing explicitly mapped column accepted")
+			}
+		})
+	}
+	rows, err := Parse(content, "generic_csv", Mapping{ID: "ID", Balance: "Balance"})
+	if err != nil || len(rows) != 1 || rows[0].ExternalID != "bank-1" || rows[0].Balance == nil || rows[0].Balance.String() != "100.00" {
+		t.Fatalf("valid mapping lost bank identity or balance: %+v, %v", rows, err)
+	}
+}
+
+func TestStatementPayee(t *testing.T) {
+	for _, description := range []string{"Coffee", strings.Repeat("x", 301), strings.Repeat("x", 299) + "Ж", strings.Repeat("€", 101)} {
+		payee := statementPayee(description)
+		if len(payee) > 300 || !utf8.ValidString(payee) || !strings.HasPrefix(description, payee) {
+			t.Fatalf("invalid ledger payee: %q", payee)
+		}
+		if len(description) <= 300 && payee != description {
+			t.Fatal("short description changed")
+		}
 	}
 }

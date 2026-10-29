@@ -245,7 +245,7 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 							return fmt.Errorf("mapped category is not an owned account: %w", e)
 						}
 					}
-					proposed := ledger.EntryInput{Date: row.Date, Payee: row.Payee, Postings: []ledger.Posting{{Account: in.Account, Amount: ledger.Amount{Value: row.Amount, Commodity: row.Currency}}, {Account: counterpart, Amount: ledger.Amount{Value: row.Amount.Negate(), Commodity: row.Currency}}}, Tags: []string{}}
+					proposed := ledger.EntryInput{Date: row.Date, Payee: statementPayee(row.Payee), Postings: []ledger.Posting{{Account: in.Account, Amount: ledger.Amount{Value: row.Amount, Commodity: row.Currency}}, {Account: counterpart, Amount: ledger.Amount{Value: row.Amount.Negate(), Commodity: row.Currency}}}, Tags: []string{}}
 					rule, e := s.classify.Classify(tx, writer, ledger.Entry{Date: row.Date, Payee: row.Payee, Postings: proposed.Postings})
 					if e != nil {
 						return e
@@ -415,6 +415,7 @@ func (s *Service) Commit(ctx context.Context, p principal.Principal, id string, 
 				continue
 			}
 			proposed := row.Proposed
+			proposed.Payee = statementPayee(proposed.Payee)
 			proposed.Commit = true
 			entry, e := s.ledger.PostLinkedID(tx, writer, proposed, row.ProposedID, row.Kind, []ledger.Link{{Rel: "from_import_row", ID: row.ID}, {Rel: "from_import_batch", ID: id}}, "import_commit", "")
 			if e != nil {
