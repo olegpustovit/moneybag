@@ -11,6 +11,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -161,6 +162,12 @@ func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in A
 	}
 	db, _ := s.repo.db(p)
 	id, e := s.audit.Write(ctx, p, "account_update", audit.Target{Collection: "accounts", ID: a.ID}, "", old, a, func(tx context.Context) error {
+		// Compare in Go: a whole-document filter breaks on groups map key order, but a concurrent edit must still conflict.
+		if current, err := s.repo.Account(tx, p, in.ID); err != nil {
+			return err
+		} else if !reflect.DeepEqual(current, old) {
+			return principal.ErrConflict
+		}
 		result, err := db.Collection("accounts").ReplaceOne(tx, bson.M{"_id": old.Key}, a)
 		if err == nil && result.MatchedCount != 1 {
 			return principal.ErrConflict
