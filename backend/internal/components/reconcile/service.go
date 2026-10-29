@@ -158,31 +158,35 @@ func (s *Service) Status(ctx context.Context, p principal.Principal, account str
 	if account != "" {
 		f["account"] = account
 	}
-	cur, e := s.repo.db.Collection("balance_assertions").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "date", Value: -1}}).SetLimit(5001))
+	cur, e := s.repo.db.Collection("balance_assertions").Aggregate(ctx, bson.A{
+		bson.M{"$match": f},
+		bson.M{"$sort": bson.D{{Key: "ok", Value: -1}, {Key: "date", Value: -1}}},
+		bson.M{"$limit": 5001},
+		bson.M{"$group": bson.M{"_id": "$account", "last_ok": bson.M{"$first": bson.M{"$cond": bson.A{"$ok", "$date", ""}}}, "count": bson.M{"$sum": 1}}},
+	}, options.Aggregate().SetBatchSize(5001))
 	if e != nil {
 		return nil, e
 	}
 	defer cur.Close(ctx)
-	var assertions []Assertion
+	var assertions []struct {
+		Account string `bson:"_id"`
+		LastOK  string `bson:"last_ok"`
+		Count   int    `bson:"count"`
+	}
 	if e = cur.All(ctx, &assertions); e != nil {
 		return nil, e
 	}
-	if len(assertions) > 5000 {
+	byAccount := map[string]*AccountStatus{}
+	count := 0
+	for _, a := range assertions {
+		count += a.Count
+		byAccount[a.Account] = &AccountStatus{Account: a.Account, LastOK: a.LastOK, Discrepancies: []Discrepancy{}}
+	}
+	if count > 5000 {
 		return nil, fmt.Errorf("too many assertions; select one account")
 	}
-	byAccount := map[string]*AccountStatus{}
-	for _, a := range assertions {
-		r := byAccount[a.Account]
-		if r == nil {
-			r = &AccountStatus{Account: a.Account, Discrepancies: []Discrepancy{}}
-			byAccount[a.Account] = r
-		}
-		if a.OK && r.LastOK == "" {
-			r.LastOK = a.Date
-		}
-	}
 	f["status"] = "open"
-	cur, e = s.repo.db.Collection("discrepancies").Find(ctx, f, options.Find().SetLimit(5001))
+	cur, e = s.repo.db.Collection("discrepancies").Find(ctx, f, options.Find().SetLimit(5001).SetBatchSize(5001))
 	if e != nil {
 		return nil, e
 	}
