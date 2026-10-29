@@ -357,3 +357,6 @@ th { color:var(--text2); font-weight:600; }
 .shared-data-table th button { border:0; background:none; color:inherit; font:inherit; cursor:pointer; padding:0; }
 .shared-data-table td { overflow:hidden; text-overflow:ellipsis; }
 .column-resize { position:absolute; right:-3px; top:0; width:8px; height:100%; cursor:col-resize; touch-action:none; }
+.data-table-filter { display:flex; align-items:center; gap:6px; margin-bottom:6px; color:var(--text2); font-size:12px; }
+.data-table-filter input { min-width:0; padding:3px 6px; border:1px solid var(--bd); border-radius:3px; background:var(--paper); color:var(--text); }
+.shared-data-table td:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
