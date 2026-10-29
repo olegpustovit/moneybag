@@ -4,6 +4,8 @@ import { createFileRoute, Link, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
+import { LoadingTable } from '../features/imports/loading-table'
 import { accountsQuery } from '../features/accounts/queries'
 import { importsQuery } from '../features/imports/queries'
 import { DataTable } from '../features/dashboard/data-table'
@@ -11,8 +13,9 @@ import { tableSort } from '../features/dashboard/table-sort'
 import { tool } from '../lib/api'
 import type { ImportStartInput } from '../lib/tools'
 
-export const Route=createFileRoute('/_app/imports/')({validateSearch:z.object({sort:tableSort}),loader:async ({context}) => {await Promise.all([context.queryClient.query({...importsQuery(context.session),staleTime:'static'}),context.queryClient.query({...accountsQuery(context.session),staleTime:'static'})])},pendingComponent:() => <section aria-busy="true"><h1>Imports</h1><p>Loading imports…</p></section>,errorComponent:ImportError,component:Imports})
-function ImportError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load imports</h1><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
+export const Route=createFileRoute('/_app/imports/')({validateSearch:z.object({sort:tableSort}),loader:async ({context}) => {await Promise.all([context.queryClient.query({...importsQuery(context.session),staleTime:'static'}),context.queryClient.query({...accountsQuery(context.session),staleTime:'static'})])},pendingMs:150,pendingMinMs:300,pendingComponent:ImportsPending,errorComponent:ImportError,component:Imports})
+function ImportsPending() {return <section role="status" aria-busy="true"><span className="sr-only">Loading imports…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / IMPORTS</p><h1>Imports</h1><p className="description">Stage a statement, review its rows, then post it.</p></div></header><div aria-hidden="true"><section className="import-panel"><h2>Upload a statement</h2><div className="import-upload import-loading-upload"><Skeleton className="skeleton-bar"/>{['Account','Format'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}<Skeleton className="skeleton-bar"/></div></section><section className="import-panel"><h2>Recent imports</h2><LoadingTable columns={['Account','Period','Format','Status','Review']}/></section></div></section>}
+function ImportError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error" role="alert"><h1>Could not load imports</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
 function Imports() {
  const {session}=Route.useRouteContext(),navigate=Route.useNavigate(),search=Route.useSearch(),client=useQueryClient(),{data:batches}=useSuspenseQuery(importsQuery(session)),{data:accounts}=useSuspenseQuery(accountsQuery(session))
  const [file,setFile]=useState<File|null>(null),[format,setFormat]=useState('generic_csv'),[fileError,setFileError]=useState('')

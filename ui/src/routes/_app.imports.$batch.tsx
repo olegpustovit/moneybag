@@ -5,6 +5,8 @@ import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { AccountPicker, type Account } from '../components/account-picker'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
+import { LoadingTable } from '../features/imports/loading-table'
 import { accountsQuery, balancesQuery } from '../features/accounts/queries'
 import { importsQuery, previewQuery } from '../features/imports/queries'
 import { DataTable } from '../features/dashboard/data-table'
@@ -19,7 +21,8 @@ type TableRow=Extract<ComponentValue,{type:'table'|'scenario_compare'}>['rows'][
 const reviewColumns=[{key:'date',label:'Date',format:'date',align:'left'},{key:'payee',label:'Payee',format:'text',align:'left'},{key:'postings',label:'Proposed postings',format:'text',align:'left'},{key:'classification',label:'Classification',format:'text',align:'left'}]
 const reviewSizing={date:120,payee:180,postings:280,classification:300}
 const reviewRequired=['classification']
-export const Route=createFileRoute('/_app/imports/$batch')({validateSearch:z.object({sort:tableSort}),loader:async ({context,params}) => {await Promise.all([context.queryClient.query({...importsQuery(context.session),staleTime:'static'}),context.queryClient.query({...accountsQuery(context.session),staleTime:'static'}),context.queryClient.infiniteQuery({...previewQuery(context.session,params.batch),staleTime:'static'})])},pendingComponent:() => <section aria-busy="true"><h1>Review import</h1><p>Loading statement rows…</p></section>,errorComponent:PreviewError,component:Preview})
+export const Route=createFileRoute('/_app/imports/$batch')({validateSearch:z.object({sort:tableSort}),loader:async ({context,params}) => {await Promise.all([context.queryClient.query({...importsQuery(context.session),staleTime:'static'}),context.queryClient.query({...accountsQuery(context.session),staleTime:'static'}),context.queryClient.infiniteQuery({...previewQuery(context.session,params.batch),staleTime:'static'})])},pendingMs:150,pendingMinMs:300,pendingComponent:ReviewPending,errorComponent:PreviewError,component:Preview})
+function ReviewPending() {const {batch}=Route.useParams();return <section role="status" aria-busy="true"><span className="sr-only">Loading statement rows…</span><header className="page-header"><div><p className="breadcrumb">IMPORTS / {batch}</p><h1>Review import</h1><p className="description">Review this statement before posting.</p></div></header><div aria-hidden="true"><div className="import-counts import-loading-counts">{Array.from({length:4},(_,index) => <Skeleton key={index} className="skeleton-bar"/>)}</div><LoadingTable columns={reviewColumns.map(column => column.label)}/><section className="import-commit"><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/></section></div></section>}
 function PreviewError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load this import</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
 function decimalEqual(a:string,b:string):boolean {const parse=(value:string) => {if(!/^-?\d+(\.\d+)?$/.test(value)) return null;const [whole,fraction='']=value.split('.');return {digits:BigInt(whole+fraction),scale:fraction.length}};const x=parse(a),y=parse(b);if(!x || !y) return false;const scale=Math.max(x.scale,y.scale);return x.digits*10n**BigInt(scale-x.scale)===y.digits*10n**BigInt(scale-y.scale)}
 function Preview() {const {batch}=Route.useParams();return <ImportPreview key={batch} id={batch}/>}

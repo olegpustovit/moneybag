@@ -247,6 +247,7 @@ th { color:var(--text2); font-weight:600; }
 .formula-display label { flex:1; font-size:.8rem; }
 @media (max-width:600px) { .grid-loading-filter > div { flex:1; font-size:.8rem; }.grid-loading-filter > .skeleton-bar { width:90px; }.grid-loading-filter .skeleton-bar { height:32px; margin-top:4px; }.grid-loading-table table { table-layout:fixed; }
 .grid-filter { flex-direction:column; align-items:stretch; } }
+.import-loading-table table { table-layout:fixed; }.import-loading-upload > .skeleton-bar:first-child { height:100px; }.import-loading-upload > div { font-size:.8rem; }.import-loading-upload > div .skeleton-bar { height:32px; margin-top:4px; }.import-loading-upload > .skeleton-bar:last-child { width:120px; height:32px; }.import-loading-counts .skeleton-bar { width:110px; }.import-commit > .skeleton-bar:first-child { width:45%; height:18px; }.import-commit > .skeleton-bar:last-child { width:120px; height:32px; }
 .import-panel, .import-balance { border:1px solid var(--border); padding:1.25rem; margin-bottom:1.5rem; }
 .import-panel h2, .import-balance h2 { font-weight:600; }
 .import-panel p, .import-balance p { color:var(--muted-foreground); margin:.5rem 0; }
