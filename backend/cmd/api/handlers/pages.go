@@ -161,15 +161,20 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request) {
 		data.Content = template.HTML(view.Snapshot.Rendered.HTML)
 		data.Description = "Shared " + view.Grant.Mode + " · " + view.Grant.Role
 		if view.Grant.Role == "editor" {
-			access, err := h.services.Sharing.Access(r.Context(), p, id, true)
+			access, err := h.services.Sharing.EditorAccess(r.Context(), p, id)
 			if err != nil {
-				data.Error = err.Error()
+				data.Error = "Shared dashboard unavailable"
+				data.Title = "Shared dashboard unavailable"
+				data.Content = ""
 				break
 			}
 			data.CanEditDashboard = true
 			v, err := access.Dashboard.Get(r.Context(), access.Principal, access.ID, r.URL.Query().Get("version"))
 			if err != nil {
-				data.Error = err.Error()
+				data.Error = "Shared dashboard unavailable"
+				data.Title = "Shared dashboard unavailable"
+				data.Content = ""
+				data.CanEditDashboard = false
 				break
 			}
 			data.CurrentVersion = v.Version
@@ -188,6 +193,13 @@ func (h *Handler) page(w http.ResponseWriter, r *http.Request) {
 				data.Content = ""
 			} else {
 				data.Content = template.HTML(rendered.HTML)
+			}
+			if err = h.services.Sharing.RecordEditorRead(r.Context(), p, access); err != nil {
+				data.Error = "Shared dashboard unavailable"
+				data.Title = "Shared dashboard unavailable"
+				data.Content = ""
+				data.SpecJSON = ""
+				data.CanEditDashboard = false
 			}
 		}
 

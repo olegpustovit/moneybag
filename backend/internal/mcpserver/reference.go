@@ -93,6 +93,11 @@ func registerReference(server *mcp.Server, s Services) {
 			if e != nil {
 				return nil, e
 			}
+			if access.Grant != nil {
+				if e = s.Sharing.RecordEditorRead(ctx, p, access); e != nil {
+					return nil, e
+				}
+			}
 			return resourceResult(uri, v)
 		})
 	}

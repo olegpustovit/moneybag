@@ -283,17 +283,38 @@ func (s *Service) EditorAccess(ctx context.Context, p principal.Principal, id st
 }
 
 func (s *Service) RecordEditorRead(ctx context.Context, p principal.Principal, original Access) error {
-	current, err := s.EditorAccess(ctx, p, original.Grant.ID)
-	if err != nil {
-		return err
+	if original.Grant == nil {
+		return nil
 	}
-	if PermissionHash(*current.Grant) != PermissionHash(*original.Grant) {
+	return s.audit.Workflow(ctx, func(tx context.Context) error {
+		current, err := s.Resolve(tx, p, original.Grant.ID)
+		if err != nil {
+			return err
+		}
+		if current.Role != "editor" || PermissionHash(current) != PermissionHash(*original.Grant) {
+			return principal.ErrForbidden
+		}
+		_, err = s.audit.Write(tx, ownerPrincipal(current, p.Actor), "dashboard_shared_read", audit.Target{Collection: "shares", ID: current.ID}, "", nil, struct {
+			Mode string `json:"mode"`
+		}{Mode: "editor"}, func(context.Context) error { return nil })
+		return err
+	})
+}
+
+func (s *Service) EditorWrite(ctx context.Context, p principal.Principal, original Access, fn func(context.Context, Access) error) error {
+	if original.Grant == nil {
 		return principal.ErrForbidden
 	}
-	_, err = s.audit.Write(ctx, current.Principal, "dashboard_shared_read", audit.Target{Collection: "shares", ID: current.Grant.ID}, "", nil, struct {
-		Mode string `json:"mode"`
-	}{Mode: "editor"}, func(context.Context) error { return nil })
-	return err
+	return s.audit.Workflow(ctx, func(tx context.Context) error {
+		current, err := s.EditorAccess(tx, p, original.Grant.ID)
+		if err != nil {
+			return err
+		}
+		if PermissionHash(*current.Grant) != PermissionHash(*original.Grant) {
+			return principal.ErrForbidden
+		}
+		return fn(tx, current)
+	})
 }
 func (s *Service) View(ctx context.Context, p principal.Principal, id string) (SharedView, error) {
 	g, e := s.Resolve(ctx, p, id)
@@ -330,13 +351,19 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 		}
 		snap = Snapshot{GrantHash: PermissionHash(g), ID: g.ID, OwnerUser: g.OwnerUser, DashboardID: g.DashboardID, Version: v.Version, Title: v.Spec.Title, Rendered: rendered, At: time.Now().UTC()}
 	}
-	if _, e = s.Resolve(ctx, p, id); e != nil {
-		return SharedView{}, e
-	}
-	owner := ownerPrincipal(g, p.Actor)
-	_, e = s.audit.Write(ctx, owner, "dashboard_shared_read", audit.Target{Collection: "shares", ID: g.ID}, "", nil, struct {
-		Version int `json:"version"`
-	}{snap.Version}, func(context.Context) error { return nil })
+	e = s.audit.Workflow(ctx, func(tx context.Context) error {
+		current, err := s.Resolve(tx, p, id)
+		if err != nil {
+			return err
+		}
+		if PermissionHash(current) != PermissionHash(g) {
+			return principal.ErrForbidden
+		}
+		_, err = s.audit.Write(tx, ownerPrincipal(g, p.Actor), "dashboard_shared_read", audit.Target{Collection: "shares", ID: g.ID}, "", nil, struct {
+			Version int `json:"version"`
+		}{snap.Version}, func(context.Context) error { return nil })
+		return err
+	})
 	return SharedView{g, snap}, e
 }
 

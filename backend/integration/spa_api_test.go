@@ -3,11 +3,13 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -260,6 +262,73 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		}
 		if !foundEditor {
 			t.Fatal("shared editor read was not audited")
+		}
+
+		created, err := services.Dashboard.Create(ctx, p, dashboard.CreateInput{ID: "spa-shared-race", Title: "Before"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = services.Dashboard.Publish(ctx, p, "spa-shared-race", created.Version, ""); err != nil {
+			t.Fatal(err)
+		}
+		raceGrant, err := services.Sharing.Share(ctx, p, sharing.ShareInput{DashboardID: "spa-shared-race", Grantee: viewer.ID, Role: "editor"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		original, err := services.Sharing.EditorAccess(ctx, viewerPrincipal, raceGrant.ShareID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readOnlyEditor := viewerPrincipal
+		readOnlyEditor.Scopes = []string{"ledger:read"}
+		readClient := mcpSession(t, ctx, readOnlyEditor, services, true)
+		readResult, err := readClient.CallTool(ctx, &mcp.CallToolParams{Name: "dashboard_get", Arguments: map[string]any{"id": raceGrant.ShareID}})
+		if err != nil || readResult.IsError {
+			t.Fatal("read-only shared editor MCP access", readResult, err)
+		}
+		mcpClient := mcpSession(t, ctx, viewerPrincipal, services, false)
+		locked, release, started := make(chan struct{}), make(chan struct{}), make(chan struct{}, 2)
+		ownerDone := make(chan error, 1)
+		go func() {
+			ownerDone <- services.Audit.Workflow(ctx, func(tx context.Context) error {
+				close(locked)
+				<-release
+				return services.Sharing.Unshare(tx, p, raceGrant.ShareID)
+			})
+		}()
+		<-locked
+		editorDone := make(chan error, 1)
+		go func() {
+			started <- struct{}{}
+			editorDone <- services.Sharing.EditorWrite(ctx, viewerPrincipal, original, func(tx context.Context, current sharing.Access) error {
+				_, e := current.Dashboard.Patch(tx, current.Principal, current.ID, json.RawMessage(`[{"op":"replace","path":"/title","value":"Should not write"}]`))
+				return e
+			})
+		}()
+		mcpDone := make(chan error, 1)
+		go func() {
+			started <- struct{}{}
+			result, e := mcpClient.CallTool(ctx, &mcp.CallToolParams{Name: "dashboard_patch", Arguments: map[string]any{"dashboard_id": raceGrant.ShareID, "ops": []any{map[string]any{"op": "replace", "path": "/title", "value": "Should not write"}}}})
+			if e == nil && result.IsError {
+				e = principal.ErrNotFound
+			}
+			mcpDone <- e
+		}()
+		<-started
+		<-started
+		close(release)
+		if err := <-ownerDone; err != nil {
+			t.Fatal("revoke", err)
+		}
+		if err := <-editorDone; !errors.Is(err, principal.ErrNotFound) {
+			t.Fatal("queued shared edit after revoke", err)
+		}
+		if err := <-mcpDone; err == nil {
+			t.Fatal("queued MCP edit after revoke succeeded")
+		}
+		unchanged, err := services.Dashboard.Get(ctx, p, "spa-shared-race", "")
+		if err != nil || unchanged.Spec.Title != "Before" {
+			t.Fatal("revoked queued write changed dashboard", unchanged, err)
 		}
 		if err = services.Sharing.Unshare(ctx, p, grant.ShareID); err != nil {
 			t.Fatal(err)

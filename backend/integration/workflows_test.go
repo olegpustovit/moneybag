@@ -31,9 +31,27 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 )
+
+type blockedShareReader struct {
+	reader  dashboard.Reader
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (b *blockedShareReader) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
+	b.once.Do(func() { close(b.entered) })
+	select {
+	case <-b.release:
+		return b.reader.Rows(ctx, p, source)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
 func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database, pa, pb principal.Principal, book *ledger.Service, a *audit.Service, ids *identity.Service) {
 	t.Helper()
@@ -306,6 +324,33 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	view, e = shares.View(ctx, pb, live.ShareID)
 	if e != nil || view.Snapshot.Rendered.Values["value"].(map[string]any)["value"] != float64(20) {
 		t.Fatal("live share used wrong owner or stale values", view, e)
+	}
+
+	blocked := &blockedShareReader{reader: sources, entered: make(chan struct{}), release: make(chan struct{})}
+	blockedService := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, blocked, expr, a)
+	result := make(chan error, 1)
+	go func() { _, err := blockedService.View(ctx, pb, live.ShareID); result <- err }()
+	<-blocked.entered
+	if _, err := shares.Share(ctx, pa, sharing.ShareInput{DashboardID: "live", Grantee: pb.UserID, Role: "editor", Mode: "live", Sources: []string{"table:margin"}, RowFilter: "row.qty >= 1.0"}); err != nil {
+		close(blocked.release)
+		t.Fatal(err)
+	}
+	close(blocked.release)
+	if err := <-result; !errors.Is(err, principal.ErrForbidden) {
+		t.Fatal("changed grant allowed stale shared read", err)
+	}
+	if _, err := shares.Share(ctx, pa, sharing.ShareInput{DashboardID: "live", Grantee: pb.UserID, Role: "editor", Mode: "live", Sources: []string{"table:margin"}, RowFilter: "row.qty >= 2.0"}); err != nil {
+		t.Fatal(err)
+	}
+
+	readOnlyEditor := pb
+	readOnlyEditor.Scopes = []string{"ledger:read"}
+	readAccess, err := shares.Access(ctx, readOnlyEditor, live.ShareID, false)
+	if err != nil {
+		t.Fatal("read-only editor access", err)
+	}
+	if err = shares.RecordEditorRead(ctx, readOnlyEditor, readAccess); err != nil {
+		t.Fatal("read-only editor audit", err)
 	}
 	access, e := shares.Access(ctx, pb, live.ShareID, true)
 	if e != nil {

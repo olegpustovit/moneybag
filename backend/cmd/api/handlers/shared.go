@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -187,7 +189,13 @@ func (h *Handler) apiSharedDraft(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, result)
 }
 
-// shortcut: a concurrent revoke can race an in-flight write; serialize grant changes and edits when strict cancellation is required.
+func (h *Handler) sharedWriteError(w http.ResponseWriter, err error) {
+	if errors.Is(err, principal.ErrNotFound) || errors.Is(err, principal.ErrForbidden) {
+		respond(w, http.StatusNotFound, map[string]string{"error": "shared dashboard unavailable"})
+		return
+	}
+	respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+}
 func (h *Handler) apiSharedPatch(w http.ResponseWriter, r *http.Request) {
 	access, ok := h.sharedEditor(w, r)
 	if !ok {
@@ -200,12 +208,15 @@ func (h *Handler) apiSharedPatch(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid patch"})
 		return
 	}
-	if !h.recheckSharedEditor(w, r, access) {
-		return
-	}
-	result, err := access.Dashboard.Patch(r.Context(), access.Principal, access.ID, in.Ops)
+	p, _ := principal.From(r.Context())
+	var result dashboard.EditResult
+	err := h.services.Sharing.EditorWrite(r.Context(), p, access, func(tx context.Context, current sharing.Access) error {
+		var err error
+		result, err = current.Dashboard.Patch(tx, current.Principal, current.ID, in.Ops)
+		return err
+	})
 	if err != nil {
-		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		h.sharedWriteError(w, err)
 		return
 	}
 	respond(w, http.StatusOK, result)
@@ -223,12 +234,15 @@ func (h *Handler) apiSharedPublish(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid version"})
 		return
 	}
-	if !h.recheckSharedEditor(w, r, access) {
-		return
-	}
-	result, err := access.Dashboard.PublishDraft(r.Context(), access.Principal, access.ID, in.Version, in.Note)
+	p, _ := principal.From(r.Context())
+	var result dashboard.PublishResult
+	err := h.services.Sharing.EditorWrite(r.Context(), p, access, func(tx context.Context, current sharing.Access) error {
+		var err error
+		result, err = current.Dashboard.PublishDraft(tx, current.Principal, current.ID, in.Version, in.Note)
+		return err
+	})
 	if err != nil {
-		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		h.sharedWriteError(w, err)
 		return
 	}
 	if err = h.services.Sharing.RefreshDashboard(r.Context(), access.Principal, access.ID); err != nil {

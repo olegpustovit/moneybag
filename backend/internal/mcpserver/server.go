@@ -51,6 +51,23 @@ type Services struct {
 	Sources     dashboard.Reader
 	Logger      *slog.Logger
 }
+
+// dashboardWrite keeps grant resolution and the write inside the same serialized workflow.
+func dashboardWrite[T any](ctx context.Context, p principal.Principal, s Services, id string, fn func(context.Context, sharing.Access) (T, error)) (T, sharing.Access, error) {
+	var value T
+	var access sharing.Access
+	err := s.Audit.Workflow(ctx, func(tx context.Context) error {
+		var err error
+		access, err = s.Sharing.Access(tx, p, id, true)
+		if err != nil {
+			return err
+		}
+		value, err = fn(tx, access)
+		return err
+	})
+	return value, access, err
+}
+
 type Options struct {
 	ReadOnly bool
 	Toolsets map[string]bool
@@ -355,16 +372,22 @@ func New(s Services, opts Options) *mcp.Server {
 		if e != nil {
 			return dashboard.GetResult{}, e
 		}
-		return access.Dashboard.Get(ctx, access.Principal, access.ID, v)
+		result, err := access.Dashboard.Get(ctx, access.Principal, access.ID, v)
+		if err == nil && access.Grant != nil {
+			err = s.Sharing.RecordEditorRead(ctx, p, access)
+		}
+		if err != nil {
+			return dashboard.GetResult{}, err
+		}
+		return result, nil
 	})
 	add(r, "dashboard_create", "dashboard", "dash:write", "Use this when creating a dashboard draft. Optional from_template is budget-vs-actual or forecast. It belongs to your authenticated user.", false, false, s.Dashboard.Create)
 	add(r, "dashboard_add_component", "dashboard", "dash:write", "Use this when adding a KPI, table, chart, budget_bars, scenario_compare or text note. New components append a layout row by default; a missing named page is added. Spans are 1..12.", false, false, func(ctx context.Context, p principal.Principal, in dashboard.AddInput) (dashboard.EditResult, error) {
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.EditResult{}, e
-		}
-		in.DashboardID = access.ID
-		return access.Dashboard.Add(ctx, access.Principal, in)
+		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+			in.DashboardID = access.ID
+			return access.Dashboard.Add(tx, access.Principal, in)
+		})
+		return result, err
 	})
 	add(r, "dashboard_update_component", "dashboard", "dash:write", "Use this when changing fields on one draft component. set is a partial component; its id cannot change. Creates a new immutable draft version.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string         `json:"dashboard_id"`
@@ -379,43 +402,39 @@ func New(s Services, opts Options) *mcp.Server {
 		if e = json.Unmarshal(b, &set); e != nil {
 			return dashboard.EditResult{}, e
 		}
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.EditResult{}, e
-		}
-		return access.Dashboard.UpdateComponent(ctx, access.Principal, access.ID, in.ComponentID, set)
+		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+			return access.Dashboard.UpdateComponent(tx, access.Principal, access.ID, in.ComponentID, set)
+		})
+		return result, err
 	})
 	add(r, "dashboard_remove_component", "dashboard", "dash:write", "Use this when removing a component and its layout placements from a new draft version. Published output is unchanged until publish.", false, true, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
 		ComponentID string `json:"component_id"`
 	}) (dashboard.EditResult, error) {
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.EditResult{}, e
-		}
-		return access.Dashboard.Remove(ctx, access.Principal, access.ID, in.ComponentID)
+		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+			return access.Dashboard.Remove(tx, access.Principal, access.ID, in.ComponentID)
+		})
+		return result, err
 	})
 	add(r, "dashboard_compose", "dashboard", "dash:write", "Use this when rearranging a page's 12-column layout. A missing named page is added. Each row contains cols with span and component ID.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string          `json:"dashboard_id"`
 		Page        string          `json:"page,omitempty"`
 		Layout      []dashboard.Row `json:"layout"`
 	}) (dashboard.EditResult, error) {
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.EditResult{}, e
-		}
-		return access.Dashboard.Compose(ctx, access.Principal, access.ID, in.Page, in.Layout)
+		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+			return access.Dashboard.Compose(tx, access.Principal, access.ID, in.Page, in.Layout)
+		})
+		return result, err
 	})
 	add(r, "dashboard_patch", "dashboard", "dash:write", "Use this for RFC6902 JSON Patch edits to a dashboard draft. ops is a JSON array of operations, or a string containing that array. At most 500 operations and 1 MiB; unknown spec fields are rejected. A failing operation is reported as op <index>: path <path> not found (or its error).", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string          `json:"dashboard_id"`
 		Ops         json.RawMessage `json:"ops" jsonschema:"RFC6902 operations: a JSON array, or a string containing that array"`
 	}) (dashboard.EditResult, error) {
 		b := in.Ops
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.EditResult{}, e
-		}
-		return access.Dashboard.Patch(ctx, access.Principal, access.ID, b)
+		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+			return access.Dashboard.Patch(tx, access.Principal, access.ID, b)
+		})
+		return result, err
 	})
 	add(r, "dashboard_validate", "dashboard", "ledger:read", "Use this before preview or publish. Compiles every CEL expression, evaluates all rows, checks layout references and renders every component within the server budget.", true, false, func(ctx context.Context, p principal.Principal, in DashboardInput) (dashboard.Validation, error) {
 		v, e := versionRef(in.Version)
@@ -427,7 +446,13 @@ func New(s Services, opts Options) *mcp.Server {
 			return dashboard.Validation{}, e
 		}
 		r, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, nil)
-		return r.Validation, e
+		if e == nil && access.Grant != nil {
+			e = s.Sharing.RecordEditorRead(ctx, p, access)
+		}
+		if e != nil {
+			return dashboard.Validation{}, e
+		}
+		return r.Validation, nil
 	})
 	add(r, "dashboard_preview", "dashboard", "ledger:read", "Use this to read back a dashboard as rendered: values (per component id), computed (every computed value) and validation, plus html and preview links unless values_only is true. version is a number, draft or published. Does not publish or execute browser code.", true, false, func(ctx context.Context, p principal.Principal, in PreviewInput) (dashboard.Rendered, error) {
 		v, e := versionRef(in.Version)
@@ -439,6 +464,12 @@ func New(s Services, opts Options) *mcp.Server {
 			return dashboard.Rendered{}, e
 		}
 		rendered, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, in.Params)
+		if e == nil && access.Grant != nil {
+			e = s.Sharing.RecordEditorRead(ctx, p, access)
+		}
+		if e != nil {
+			return dashboard.Rendered{}, e
+		}
 		if in.ValuesOnly {
 			rendered.HTML = ""
 			return rendered, e
@@ -474,20 +505,26 @@ func New(s Services, opts Options) *mcp.Server {
 			}{}, e
 		}
 		v, e := access.Dashboard.Diff(ctx, access.Principal, access.ID, a, b)
+		if e == nil && access.Grant != nil {
+			e = s.Sharing.RecordEditorRead(ctx, p, access)
+		}
+		if e != nil {
+			return struct {
+				Changes []dashboard.Change `json:"changes"`
+			}{}, e
+		}
 		return struct {
 			Changes []dashboard.Change `json:"changes"`
-		}{v}, e
+		}{v}, nil
 	})
 	add(r, "dashboard_publish", "dashboard", "dash:write", "Use this to publish a draft immediately. No human approval required. Validation and a successful server render gate the publish; failures keep the live head unchanged.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
 		Version     int    `json:"version"`
 		Note        string `json:"note,omitempty"`
 	}) (dashboard.PublishResult, error) {
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.PublishResult{}, e
-		}
-		v, e := access.Dashboard.Publish(ctx, access.Principal, access.ID, in.Version, in.Note)
+		v, access, e := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.PublishResult, error) {
+			return access.Dashboard.Publish(tx, access.Principal, access.ID, in.Version, in.Note)
+		})
 		if access.Grant != nil {
 			v.URL = "/shared/" + access.Grant.ID
 		}
@@ -503,11 +540,9 @@ func New(s Services, opts Options) *mcp.Server {
 		DashboardID string `json:"dashboard_id"`
 		ToVersion   int    `json:"to_version"`
 	}) (dashboard.PublishResult, error) {
-		access, e := s.Sharing.Access(ctx, p, in.DashboardID, true)
-		if e != nil {
-			return dashboard.PublishResult{}, e
-		}
-		v, e := access.Dashboard.Rollback(ctx, access.Principal, access.ID, in.ToVersion)
+		v, access, e := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.PublishResult, error) {
+			return access.Dashboard.Rollback(tx, access.Principal, access.ID, in.ToVersion)
+		})
 		if access.Grant != nil {
 			v.URL = "/shared/" + access.Grant.ID
 		}
