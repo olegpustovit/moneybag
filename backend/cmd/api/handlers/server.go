@@ -55,6 +55,7 @@ func (h *Handler) RemoteMCP(readOnly bool) http.Handler {
 	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.security(w)
+		w.Header().Set("Cache-Control", "no-store")
 		if origin := r.Header.Get("Origin"); origin != "" && !h.allowedOrigin(origin) {
 			http.Error(w, "origin not allowed", http.StatusForbidden)
 			return
@@ -96,7 +97,6 @@ func (h *Handler) allowedOrigin(origin string) bool {
 	return false
 }
 func (h *Handler) security(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
@@ -125,6 +125,7 @@ func (h *Handler) Handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-cache")
 		if name == "app.js" {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		} else {
@@ -166,6 +167,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /", h.page)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.security(w)
+		w.Header().Set("Cache-Control", "no-store")
 		if h.limited(w, r) {
 			return
 		}

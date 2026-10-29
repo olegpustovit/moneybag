@@ -32,9 +32,13 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 	}
 	endpoint := "http://" + listener.Addr().String()
 	app := fiber.New()
-	app.All("/mcp", web.RemoteMCP(false))
-	app.All("/mcp/readonly", web.RemoteMCP(true))
-	app.All("/*", web.Handler())
+	compress, e := handlers.Compression()
+	if e != nil {
+		t.Fatal(e)
+	}
+	app.All("/mcp", compress(web.RemoteMCP(false)))
+	app.All("/mcp/readonly", compress(web.RemoteMCP(true)))
+	app.All("/*", compress(web.Handler()))
 	done := make(chan error, 1)
 	go func() { done <- app.Listener(listener, fiber.ListenConfig{DisableStartupMessage: true}) }()
 	t.Cleanup(func() {

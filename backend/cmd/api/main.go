@@ -136,9 +136,13 @@ func run() error {
 	defer stopJobs()
 	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
-	app.All("/mcp", web.RemoteMCP(false))
-	app.All("/mcp/readonly", web.RemoteMCP(true))
-	app.All("/*", web.Handler())
+	compress, e := handlers.Compression()
+	if e != nil {
+		return fmt.Errorf("configure HTTP compression: %w", e)
+	}
+	app.All("/mcp", compress(web.RemoteMCP(false)))
+	app.All("/mcp/readonly", compress(web.RemoteMCP(true)))
+	app.All("/*", compress(web.Handler()))
 	done := make(chan error, 1)
 	go func() { done <- app.Listen(cfg.Listen, fiber.ListenConfig{DisableStartupMessage: true}) }()
 	log.Info("Moneybag listening", "address", cfg.Listen, "version", version)
