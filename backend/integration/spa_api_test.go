@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -381,7 +382,37 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	t.Cleanup(func() {
 		_, _ = db.Collection("oauth_grants").DeleteMany(context.Background(), bson.M{"_id": bson.M{"$in": []string{"activity-old", "activity-new", "activity-blank", "activity-expired", "activity-other", "activity-overlap"}}})
 	})
-	for _, path := range []string{"/api/session", "/api/imports", "/api/settings", "/api/activity/agents", "/api/expr/catalog"} {
+	beforeImports, err := services.Imports.StagedCount(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeDiscrepancies, err := services.Reconcile.OpenCount(ctx, p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batches := make([]any, 0, 105)
+	for i := 0; i < 102; i++ {
+		batches = append(batches, bson.M{"_id": fmt.Sprintf("navigation-count-%d", i), "user_id": p.UserID, "status": "ready"})
+	}
+	batches = append(batches, bson.M{"_id": "navigation-staging", "user_id": p.UserID, "status": "staging"}, bson.M{"_id": "navigation-committing", "user_id": p.UserID, "status": "committing"}, bson.M{"_id": "navigation-committed", "user_id": p.UserID, "status": "committed"}, bson.M{"_id": "navigation-other", "user_id": "other-user", "status": "ready"})
+	if _, err = db.Collection("import_batches").InsertMany(ctx, batches); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Collection("discrepancies").InsertMany(ctx, []any{bson.M{"_id": "navigation-open", "user_id": p.UserID, "status": "open"}, bson.M{"_id": "navigation-archived", "user_id": p.UserID, "status": "open", "archived": true}, bson.M{"_id": "navigation-resolved", "user_id": p.UserID, "status": "resolved"}, bson.M{"_id": "navigation-other", "user_id": "other-user", "status": "open"}}); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]int64{"/api/imports/count": beforeImports + 104, "/api/reconcile/count": beforeDiscrepancies + 1} {
+		status, body, _ := request("GET", path, nil, true, false, true)
+		if status != 200 || body["count"] != float64(want) {
+			t.Fatalf("%s: %d %v, want %d", path, status, body, want)
+		}
+	}
+	for _, collection := range []string{"import_batches", "discrepancies"} {
+		if _, err = db.Collection(collection).DeleteMany(ctx, bson.M{"_id": bson.M{"$regex": "^navigation-"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, path := range []string{"/api/session", "/api/imports", "/api/imports/count", "/api/reconcile/count", "/api/settings", "/api/activity/agents", "/api/expr/catalog"} {
 		status, _, headers := request("GET", path, nil, false, false, true)
 		if status != 401 || headers.Get("Cache-Control") != "no-store" {
 			t.Fatalf("%s unauthenticated: %d", path, status)
@@ -398,6 +429,10 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		case "/api/imports":
 			if _, ok := body["batches"]; !ok {
 				t.Fatalf("imports: %v", body)
+			}
+		case "/api/imports/count", "/api/reconcile/count":
+			if _, ok := body["count"].(float64); !ok {
+				t.Fatalf("count response: %v", body)
 			}
 		case "/api/settings":
 			if _, ok := body["agents"]; !ok {

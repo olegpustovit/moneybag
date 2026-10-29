@@ -204,6 +204,8 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /api/expr/catalog", h.apiExpressionCatalog)
 	mux.HandleFunc("GET /api/session", h.apiSession)
 	mux.HandleFunc("GET /api/imports", h.apiImports)
+	mux.HandleFunc("GET /api/imports/count", h.apiImportCount)
+	mux.HandleFunc("GET /api/reconcile/count", h.apiReconcileCount)
 	mux.HandleFunc("GET /api/settings", h.apiSettings)
 	mux.HandleFunc("GET /api/activity/agents", h.apiActivityAgents)
 	mux.HandleFunc("GET /api/shared/{id}", h.apiShared)

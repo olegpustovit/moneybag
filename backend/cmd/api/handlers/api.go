@@ -89,6 +89,34 @@ func (h *Handler) apiImports(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, map[string]any{"batches": batches})
 }
 
+func (h *Handler) apiImportCount(w http.ResponseWriter, r *http.Request) {
+	p, _, err := h.session(r)
+	if err != nil {
+		respond(w, http.StatusUnauthorized, map[string]string{"error": "sign in to continue"})
+		return
+	}
+	count, err := h.services.Imports.StagedCount(r.Context(), p)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load import count"})
+		return
+	}
+	respond(w, http.StatusOK, map[string]int64{"count": count})
+}
+
+func (h *Handler) apiReconcileCount(w http.ResponseWriter, r *http.Request) {
+	p, _, err := h.session(r)
+	if err != nil {
+		respond(w, http.StatusUnauthorized, map[string]string{"error": "sign in to continue"})
+		return
+	}
+	count, err := h.services.Reconcile.OpenCount(r.Context(), p)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load discrepancy count"})
+		return
+	}
+	respond(w, http.StatusOK, map[string]int64{"count": count})
+}
+
 func (h *Handler) apiSettings(w http.ResponseWriter, r *http.Request) {
 	p, _, err := h.session(r)
 	if err != nil {

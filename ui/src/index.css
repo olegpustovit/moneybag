@@ -47,12 +47,13 @@ body { margin:0; min-width:320px; }
 .workspace-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:650; }
 .navigation nav { flex:1; padding:0 0 16px; }
 .nav-group { padding:16px 16px 5px; color:var(--text3); font:600 10px var(--font-mono); letter-spacing:.07em; text-transform:uppercase; }
-.nav-link { min-width:0; min-height:32px; display:flex; align-items:center; gap:10px; padding:6px 16px; color:var(--text2); font-size:13px; text-decoration:none; }
+.nav-link { position:relative; min-width:0; min-height:32px; display:flex; align-items:center; gap:10px; padding:6px 16px; color:var(--text2); font-size:13px; text-decoration:none; }
 .nav-link svg { flex:none; color:var(--text3); }
 .nav-link:hover { background:var(--hover); color:var(--text); }
 .nav-link.active { background:var(--paper); color:var(--text); box-shadow:inset 3px 0 var(--ink); }
 .nav-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nav-empty { display:block; padding:6px 16px; color:var(--text3); font-size:12px; }
+.nav-count { margin-left:auto; padding:0 5px; border:1px solid var(--bd); color:var(--text2); font-size:11px; font-variant-numeric:tabular-nums; }
 .draft-dot { width:6px; height:6px; margin-left:auto; flex:none; background:#a16f00; }
 .nav-footer { display:flex; align-items:center; justify-content:space-between; border-top:1px solid var(--bd); }
 .version { padding-right:12px; color:var(--text3); font:10px var(--font-mono); overflow:hidden; text-overflow:ellipsis; }
@@ -86,6 +87,7 @@ h2 { font-size:16px; font-weight:620; }
   .workspace-shell { grid-template-columns:56px minmax(0,1fr); }
   .desktop-sidebar .nav-label, .desktop-sidebar .nav-group, .desktop-sidebar .nav-empty, .desktop-sidebar .draft-dot { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
   .desktop-sidebar .nav-link { justify-content:center; padding:8px; }
+  .desktop-sidebar .nav-count { position:absolute; top:1px; right:2px; padding:0 2px; line-height:1.2; background:var(--sunk); font-size:9px; }
   .desktop-sidebar .workspace { justify-content:center; padding:16px 0; }
   .desktop-sidebar .nav-footer { display:block; }
 }

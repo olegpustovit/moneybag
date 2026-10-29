@@ -573,6 +573,14 @@ func (s *Service) List(ctx context.Context, p principal.Principal) ([]Batch, err
 	return out, e
 }
 
+// StagedCount counts batches still awaiting or completing a commit.
+func (s *Service) StagedCount(ctx context.Context, p principal.Principal) (int64, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return 0, err
+	}
+	return s.repo.db.Collection("import_batches").CountDocuments(ctx, bson.M{"user_id": p.UserID, "status": bson.M{"$in": []string{"staging", "ready", "committing"}}})
+}
+
 // mappedAccount returns the account a CSV category names, "" for free-text categories, and an error for account-shaped values of an unknown type.
 func mappedAccount(category string) (string, error) {
 	prefix, _, found := strings.Cut(category, ":")

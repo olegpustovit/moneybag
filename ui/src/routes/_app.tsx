@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from '@tanstack/react-query'
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, Outlet, redirect, useLocation, useRouter } from '@tanstack/react-router'
 import { Activity, BookOpen, Boxes, ChartNoAxesCombined, ChevronRight, CircleDollarSign, ClipboardCheck, Database, FileInput, LayoutDashboard, Menu, Settings, Share2, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
@@ -33,12 +33,21 @@ const workflows: NavLink[] = [
   { href: '/imports', label: 'Imports', icon: FileInput }, { href: '/reconcile', label: 'Reconcile', icon: ClipboardCheck },
   { href: '/shared', label: 'Shared with me', icon: Share2 }, { href: '/activity', label: 'Activity', icon: Activity },
 ]
+async function navCount(path:string):Promise<number> {
+  const response=await fetch(path,{credentials:'same-origin'})
+  if(!response.ok) throw new ApiError('Could not load navigation count.',response.status)
+  const data=await response.json() as {count:unknown}
+  if(typeof data.count!=='number' || !Number.isSafeInteger(data.count) || data.count<0) throw new Error('Invalid navigation count.')
+  return data.count
+}
 function Navigation({ compact = false }: { compact?: boolean }) {
   const { session } = Route.useRouteContext()
   const { data: dashboards } = useSuspenseQuery(dashboardsQuery(session))
   const { data: tables } = useSuspenseQuery(tablesQuery(session))
   const path = useLocation({ select: (location) => location.pathname })
-  const link = ({ href, label, icon: Icon }: NavLink) => <a key={href} href={href} title={compact ? label : undefined} className={path === href || path.startsWith(`${href}/`) ? 'nav-link active' : 'nav-link'} aria-current={path === href ? 'page' : undefined}><Icon aria-hidden="true" size={16} /><span className="nav-label">{label}</span></a>
+  const imports = useQuery({queryKey:['imports',session.user.id,'count'],queryFn:() => navCount('/api/imports/count'),staleTime:30_000,refetchInterval:60_000})
+  const discrepancies = useQuery({queryKey:['reconcile',session.user.id,'count'],queryFn:() => navCount('/api/reconcile/count'),staleTime:30_000,refetchInterval:60_000})
+  const link = ({ href, label, icon: Icon }: NavLink) => {const count=href==='/imports' ? imports.data : href==='/reconcile' ? discrepancies.data : undefined,description=href==='/imports' ? 'staged imports' : 'open discrepancies';return <a key={href} href={href} title={compact ? count ? `${label}: ${count} ${description}` : label : undefined} className={path === href || path.startsWith(`${href}/`) ? 'nav-link active' : 'nav-link'} aria-current={path === href ? 'page' : undefined}><Icon aria-hidden="true" size={16} /><span className="nav-label">{label}</span>{!!count && <span className="nav-count" aria-label={`${count} ${description}`}>{count}</span>}</a>}
   return <div className="navigation">
     <a className="workspace" href="/"><span className="workspace-mark" aria-hidden="true">M</span><span className="nav-label workspace-name">{session.user.name}’s money</span></a>
     <nav aria-label="Workspace">

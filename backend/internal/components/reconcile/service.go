@@ -213,6 +213,15 @@ func (s *Service) Status(ctx context.Context, p principal.Principal, account str
 	sort.Slice(out, func(i, j int) bool { return out[i].Account < out[j].Account })
 	return out, nil
 }
+
+// OpenCount reports recorded open discrepancies without running a balance recheck.
+func (s *Service) OpenCount(ctx context.Context, p principal.Principal) (int64, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return 0, err
+	}
+	return s.repo.db.Collection("discrepancies").CountDocuments(ctx, bson.M{"user_id": p.UserID, "status": "open", "archived": bson.M{"$ne": true}})
+}
+
 func (s *Service) discrepancy(ctx context.Context, p principal.Principal, id string) (Discrepancy, Assertion, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return Discrepancy{}, Assertion{}, e
