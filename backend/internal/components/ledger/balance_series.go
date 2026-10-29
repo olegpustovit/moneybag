@@ -28,6 +28,7 @@ func (s *Service) BalanceSeries(ctx context.Context, p principal.Principal, date
 	if err != nil {
 		return nil, err
 	}
+	// shortcut: facets are capped at 100 MiB; stream per-date aggregates if grouped output exceeds that limit.
 	facets := bson.D{}
 	for i, date := range dates {
 		facets = append(facets, bson.E{Key: strconv.Itoa(i), Value: bson.A{
