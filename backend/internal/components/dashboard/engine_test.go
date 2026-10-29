@@ -395,3 +395,14 @@ func TestSourceMemoDoesNotCrossReaderBoundaries(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluationBudgetLeavesNoActiveReaders(t *testing.T) {
+	expr, _ := expressions.New()
+	reader := &deadlineReader{}
+	engine := Engine{Expr: expr, Reader: reader}
+	start := time.Now()
+	_, err := engine.Evaluate(context.Background(), principal.Principal{}, "1", map[string]Query{"a": {From: "a"}, "b": {From: "b"}, "c": {From: "c"}, "d": {From: "d"}, "e": {From: "e"}}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > evalBudget+100*time.Millisecond || reader.active.Load() != 0 {
+		t.Fatalf("budget: %v after %v, %d readers active", err, time.Since(start), reader.active.Load())
+	}
+}
