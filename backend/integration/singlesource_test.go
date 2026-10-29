@@ -70,6 +70,19 @@ func testSingleSource(t *testing.T, ctx context.Context, p principal.Principal, 
 	if e != nil || len(all.Items) != 5 || len(eff.Items) != 3 {
 		t.Fatal("effective view", len(all.Items), len(eff.Items), e)
 	}
+	// Undo/redo chains: the original is effective after an even number of reversals and gone after an odd one.
+	chain := ledger.EntriesInput{From: "2025-04-01", To: "2025-04-30", Effective: true}
+	last := post("2025-04-02", "WS2 D", "expenses:ws2a", "7").ID
+	for i, want := range []int{0, 1, 0} {
+		r, e := book.Reverse(ctx, p, ledger.ReverseInput{ID: last, Reason: "synthetic undo/redo"})
+		if e != nil {
+			t.Fatal(e)
+		}
+		last = r.Reversal.ID
+		if got, e := book.Entries(ctx, p, chain); e != nil || len(got.Items) != want {
+			t.Fatal("reversal chain", i, len(got.Items), e)
+		}
+	}
 
 	rows, e := sources.Rows(context.Background(), p, "postings")
 	if e != nil {

@@ -100,19 +100,27 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 		if e := cur.All(ctx, &revs); e != nil {
 			return EntriesPage{}, e
 		}
-		undone := map[string]bool{} // reversals that are themselves reversed restore their original
+		reversedBy, isReversal := map[string]string{}, map[string]bool{}
 		for _, r := range revs {
+			isReversal[r.ID] = true
 			for _, l := range r.Links {
-				undone[l.ID] = true
+				if l.Rel == "reverses" {
+					reversedBy[l.ID] = r.ID
+				}
 			}
 		}
+		// Undo/redo builds chains (original ← reversal ← reversal …); an odd chain length nets the original to zero.
 		reversed := []string{}
-		for _, r := range revs {
-			if undone[r.ID] {
+		for id := range reversedBy {
+			if isReversal[id] {
 				continue
 			}
-			for _, l := range r.Links {
-				reversed = append(reversed, l.ID)
+			n := 0
+			for cur, ok := reversedBy[id]; ok && n <= len(revs); cur, ok = reversedBy[cur] {
+				n++
+			}
+			if n%2 == 1 {
+				reversed = append(reversed, id)
 			}
 		}
 		f["_id"] = bson.M{"$nin": reversed}
