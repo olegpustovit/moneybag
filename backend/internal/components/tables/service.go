@@ -93,24 +93,8 @@ func (s *Service) CreateNamed(ctx context.Context, p principal.Principal, id str
 	if strings.TrimSpace(in.Name) == "" || len(in.Name) > 150 || len(in.Columns) < 1 || len(in.Columns) > 50 {
 		return Table{}, fmt.Errorf("name and 1..50 columns required")
 	}
-	seen := map[string]bool{}
-	for _, c := range in.Columns {
-		if !fieldID.MatchString(c.ID) || seen[c.ID] {
-			return Table{}, fmt.Errorf("column ids must be unique identifiers")
-		}
-		seen[c.ID] = true
-		switch c.Type {
-		case "number", "string", "bool", "date", "formula":
-		default:
-			return Table{}, fmt.Errorf("unknown column type %q", c.Type)
-		}
-		if c.Formula != "" {
-			if _, e := s.expr.Compile(c.Formula); e != nil {
-				return Table{}, fmt.Errorf("formula %s: %w", c.ID, e)
-			}
-		} else if c.Type == "formula" {
-			return Table{}, fmt.Errorf("formula column requires an expression")
-		}
+	if e := s.validateColumns(in.Columns); e != nil {
+		return Table{}, e
 	}
 	t := Table{Key: p.UserID + ":" + id, UserID: p.UserID, ID: id, Name: in.Name, Columns: in.Columns}
 	_, e := s.audit.Write(ctx, p, "db_create", audit.Target{Collection: "tables", ID: id}, "", nil, t, func(tx context.Context) error {
@@ -121,6 +105,28 @@ func (s *Service) CreateNamed(ctx context.Context, p principal.Principal, id str
 		return e
 	})
 	return t, e
+}
+func (s *Service) validateColumns(columns []Column) error {
+	seen := map[string]bool{}
+	for _, c := range columns {
+		if !fieldID.MatchString(c.ID) || seen[c.ID] {
+			return fmt.Errorf("column ids must be unique identifiers")
+		}
+		seen[c.ID] = true
+		switch c.Type {
+		case "number", "string", "bool", "date", "formula":
+		default:
+			return fmt.Errorf("unknown column type %q", c.Type)
+		}
+		if c.Formula != "" {
+			if _, e := s.expr.Compile(c.Formula); e != nil {
+				return fmt.Errorf("formula %s: %w", c.ID, e)
+			}
+		} else if c.Type == "formula" {
+			return fmt.Errorf("formula column requires an expression")
+		}
+	}
+	return nil
 }
 func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Table, error) {
 	if e := p.Valid(); e != nil {

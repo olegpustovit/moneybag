@@ -290,6 +290,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("revoked grant still works", e)
 	}
 	hist := &history.Service{Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Reconcile: rec}
+	testViewsTablesUnpublish(t, ctx, pa, pb, dash, tab, hist, sources, expr)
 	createShared("undo-publish", "1", map[string]dashboard.Query{})
 	edited, e := dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-publish", Component: dashboard.Component{ID: "note", Type: "text", MD: "v2"}})
 	if e != nil {

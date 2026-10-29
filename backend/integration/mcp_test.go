@@ -84,7 +84,7 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(tools.Tools) != 68 {
+	if len(tools.Tools) != 74 {
 		t.Fatal("MCP tool catalog", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {

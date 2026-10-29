@@ -2,13 +2,16 @@ package dashboard
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html"
 	"html/template"
 	"math"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func escape(v any) string { return html.EscapeString(fmt.Sprint(v)) }
@@ -25,6 +28,62 @@ func componentHTML(c Component, span int, body string) string {
 		Body            template.HTML
 	}{span, c.ID, c.Title, c.Type, template.HTML(body)})
 	return b.String()
+}
+
+// formats are the names allowed after "|" in a {{ ref | format }} placeholder.
+var formats = map[string]bool{"usd": true, "usd0": true, "eur": true, "eur0": true, "pct0": true, "date": true}
+var holeFormat = regexp.MustCompile(`^(.*[^|\s])\s*\|\s*([a-z0-9]+)\s*$`)
+
+func parseHole(h string) (expr, format string) {
+	h = strings.TrimSpace(h)
+	if m := holeFormat.FindStringSubmatch(h); m != nil {
+		return m[1], m[2]
+	}
+	return h, ""
+}
+
+// template resolves {{ cel [| format] }} placeholders; any failing placeholder is an error naming the field.
+func (x *execution) template(field, s string) (string, error) {
+	var last error
+	out := holes.ReplaceAllStringFunc(s, func(h string) string {
+		expr, f := parseHole(h[2 : len(h)-2])
+		if f != "" && !formats[f] {
+			last = &EvalError{Field: field, Expr: expr, Hint: "formats: usd, usd0, eur, eur0, pct0, date", Err: fmt.Errorf("unknown format %q", f)}
+			return ""
+		}
+		v, e := x.evalAt(field, expr, nil)
+		if e != nil {
+			last = e
+			return ""
+		}
+		switch {
+		case f == "date":
+			text := fmt.Sprint(v)
+			if t, e := time.Parse(time.RFC3339, text); e == nil {
+				return t.Format("2006-01-02")
+			}
+			return text[:min(10, len(text))]
+		case f != "":
+			return format(v, f)
+		}
+		return fmt.Sprint(v)
+	})
+	return out, last
+}
+
+// resolveText expands placeholders in the title and column labels.
+func (x *execution) resolveText(c Component) (Component, error) {
+	var e error
+	if c.Title, e = x.template("title", c.Title); e != nil {
+		return c, e
+	}
+	c.Columns = append([]Column(nil), c.Columns...)
+	for i := range c.Columns {
+		if c.Columns[i].Label, e = x.template(fmt.Sprintf("columns/%d/label", i), c.Columns[i].Label); e != nil {
+			return c, e
+		}
+	}
+	return c, nil
 }
 func format(v any, f string) string {
 	n, e := numeric(v)
@@ -44,6 +103,8 @@ func format(v any, f string) string {
 		return groupNumber(n, 0)
 	case "mo":
 		return groupNumber(n, 1) + " mo"
+	case "pct0":
+		return groupNumber(n, 0) + "%"
 	case "pct":
 		return groupNumber(n, 1) + "%"
 	default:
@@ -70,11 +131,11 @@ func groupNumber(n float64, d int) string {
 	}
 	return sign + integer
 }
-func (x *execution) tone(expr string, row map[string]any) (string, error) {
+func (x *execution) tone(field, expr string, row map[string]any) (string, error) {
 	if expr == "" {
 		return "", nil
 	}
-	v, e := x.eval(expr, row)
+	v, e := x.evalAt(field, expr, row)
 	if e != nil {
 		return "", e
 	}
@@ -83,39 +144,59 @@ func (x *execution) tone(expr string, row map[string]any) (string, error) {
 	}
 	return "", nil
 }
-func (x *execution) rows(name string) ([]map[string]any, error) {
+
+// rows resolves a component's rows: a data source name, otherwise a CEL expression returning a list.
+func (x *execution) rows(c Component) ([]map[string]any, error) {
 	data := x.vars["data"].(map[string]any)
-	v, ok := data[name]
+	v, ok := data[c.Rows]
 	if !ok {
-		return nil, fmt.Errorf("unknown query %q", name)
+		names := []string{}
+		for k := range data {
+			names = append(names, k)
+		}
+		sort.Strings(names)
+		hint := "rows must name a data source (" + strings.Join(names, ", ") + ") or be a CEL expression returning a list of rows"
+		if c.Rows == "" {
+			return nil, &EvalError{Field: "rows", Hint: hint, Err: fmt.Errorf("rows is empty")}
+		}
+		var e error
+		if v, e = x.eval(c.Rows, nil); e != nil {
+			return nil, &EvalError{Field: "rows", Expr: c.Rows, Hint: hint, Err: fmt.Errorf("unknown data source and not a valid expression: %w", e)}
+		}
 	}
-	rows, ok := v.([]map[string]any)
-	if !ok {
-		return nil, fmt.Errorf("query %q must be rows", name)
+	if rows, ok := v.([]map[string]any); ok {
+		return rows, nil
+	}
+	var rows []map[string]any
+	b, _ := json.Marshal(v)
+	if e := json.Unmarshal(b, &rows); e != nil {
+		return nil, &EvalError{Field: "rows", Expr: c.Rows, Hint: "rows must resolve to a list of objects", Err: fmt.Errorf("rows %q is not a list of rows", c.Rows)}
 	}
 	return rows, nil
 }
 func (x *execution) render(c Component) (string, any, error) {
 	switch c.Type {
 	case "kpi":
-		v, e := x.eval(c.Value, nil)
+		v, e := x.evalAt("value", c.Value, nil)
 		if e != nil {
 			return "", nil, e
 		}
-		t, e := x.tone(c.Tone, nil)
+		t, e := x.tone("tone", c.Tone, nil)
 		if e != nil {
 			return "", nil, e
 		}
 		sub := ""
 		if c.Sub != "" {
-			s, e := x.eval(c.Sub, nil)
+			s, e := x.evalAt("sub", c.Sub, nil)
 			if e != nil {
 				return "", nil, e
 			}
-			sub = fmt.Sprint(s)
+			if sub, e = x.template("sub", fmt.Sprint(s)); e != nil {
+				return "", nil, e
+			}
 		}
 		if c.Delta != "" {
-			d, e := x.eval(c.Delta, nil)
+			d, e := x.evalAt("delta", c.Delta, nil)
 			if e != nil {
 				return "", nil, e
 			}
@@ -123,24 +204,16 @@ func (x *execution) render(c Component) (string, any, error) {
 		}
 		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div></div>`, v, nil
 	case "text":
-		var last error
-		text := holes.ReplaceAllStringFunc(c.MD, func(h string) string {
-			v, e := x.eval(strings.TrimSpace(h[2:len(h)-2]), nil)
-			if e != nil {
-				last = e
-				return ""
-			}
-			return fmt.Sprint(v)
-		})
-		if last != nil {
-			return "", nil, last
+		text, e := x.template("md", c.MD)
+		if e != nil {
+			return "", nil, e
 		}
 		safe := escape(text)
 		safe = bold.ReplaceAllString(safe, "<strong>$1</strong>")
 		safe = strings.ReplaceAll(safe, "\n", "<br>")
 		return `<div class="dashboard-note">` + safe + `</div>`, text, nil
 	case "table", "scenario_compare":
-		rows, e := x.rows(c.Rows)
+		rows, e := x.rows(c)
 		if e != nil {
 			return "", nil, e
 		}
@@ -162,11 +235,11 @@ func (x *execution) render(c Component) (string, any, error) {
 			b.WriteString(`<tr>`)
 			row := map[string]any{}
 			for i, col := range c.Columns {
-				v, e := x.eval(col.Value, r)
+				v, e := x.evalAt(fmt.Sprintf("columns/%d/value", i), col.Value, r)
 				if e != nil {
 					return "", nil, e
 				}
-				t, e := x.tone(col.Tone, r)
+				t, e := x.tone(fmt.Sprintf("columns/%d/tone", i), col.Tone, r)
 				if e != nil {
 					return "", nil, e
 				}
@@ -186,7 +259,7 @@ func (x *execution) render(c Component) (string, any, error) {
 		b.WriteString(`</tbody></table></div>`)
 		return b.String(), values, nil
 	case "budget_bars":
-		rows, e := x.rows(c.Rows)
+		rows, e := x.rows(c)
 		if e != nil {
 			return "", nil, e
 		}
@@ -197,15 +270,15 @@ func (x *execution) render(c Component) (string, any, error) {
 		bars := []bar{}
 		maxValue := 1.0
 		for _, r := range rows {
-			l, e := x.eval(c.Label, r)
+			l, e := x.evalAt("label", c.Label, r)
 			if e != nil {
 				return "", nil, e
 			}
-			av, e := x.eval(c.Actual, r)
+			av, e := x.evalAt("actual", c.Actual, r)
 			if e != nil {
 				return "", nil, e
 			}
-			lv, e := x.eval(c.Limit, r)
+			lv, e := x.evalAt("limit", c.Limit, r)
 			if e != nil {
 				return "", nil, e
 			}
@@ -250,7 +323,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 	if c.Mark != "bar" && c.Mark != "line" && c.Mark != "area" && c.Mark != "stack" && c.Mark != "donut" {
 		return "", nil, fmt.Errorf("chart mark must be bar, line, area, stack or donut")
 	}
-	rows, e := x.rows(c.Rows)
+	rows, e := x.rows(c)
 	if e != nil {
 		return "", nil, e
 	}
@@ -262,7 +335,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 	}
 	field := func(axis Axis, r map[string]any) (any, error) {
 		if axis.Expr != "" {
-			return x.eval(axis.Expr, r)
+			return x.evalAt("encoding/expr", axis.Expr, r)
 		}
 		v, ok := r[axis.Field]
 		if !ok {
@@ -354,7 +427,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 	hasRule := c.Rule != nil
 	ruleLabel := ""
 	if hasRule {
-		v, e := x.eval(c.Rule.Y, nil)
+		v, e := x.evalAt("rule/y", c.Rule.Y, nil)
 		if e != nil {
 			return "", nil, e
 		}
@@ -365,7 +438,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 		high = math.Max(high, rule)
 		low = math.Min(low, rule)
 		if c.Rule.Label != "" {
-			v, e := x.eval(c.Rule.Label, nil)
+			v, e := x.evalAt("rule/label", c.Rule.Label, nil)
 			if e != nil {
 				return "", nil, e
 			}

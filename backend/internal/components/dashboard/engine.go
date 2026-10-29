@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -203,54 +204,35 @@ func (x *execution) query(q Query) (any, error) {
 				}
 			}
 			for k, agg := range q.Agg {
-				match := aggPattern.FindStringSubmatch(agg)
-				if match == nil {
-					return nil, fmt.Errorf("aggregation must be sum/avg/min/max/count/last(expression)")
+				v, e := x.aggregate(agg, group)
+				if e != nil {
+					return nil, fmt.Errorf("agg %s: %w", k, e)
 				}
-				op, expr := match[1], match[2]
-				if op == "count" {
-					r[k] = float64(len(group))
-					continue
-				}
-				var total float64
-				var last any
-				for i, row := range group {
-					v, e := x.eval(expr, row)
-					if e != nil {
-						return nil, e
-					}
-					last = v
-					if op == "last" {
-						continue
-					}
-					n, e := numeric(v)
-					if e != nil {
-						return nil, e
-					}
-					switch op {
-					case "sum", "avg":
-						total += n
-					case "min":
-						if i == 0 || n < total {
-							total = n
-						}
-					case "max":
-						if i == 0 || n > total {
-							total = n
-						}
-					}
-				}
-				if op == "avg" && len(group) > 0 {
-					total /= float64(len(group))
-				}
-				if op == "last" {
-					r[k] = last
-				} else {
-					r[k] = total
-				}
+				r[k] = v
 			}
 			out = append(out, r)
 		}
+	}
+	if q.HideZero {
+		kept := []map[string]any{}
+		for _, r := range out {
+			numbers, nonzero := 0, false
+			for k, v := range r {
+				if len(q.Agg) > 0 {
+					if _, ok := q.Agg[k]; !ok {
+						continue
+					}
+				}
+				if n, e := numeric(v); e == nil {
+					numbers++
+					nonzero = nonzero || n != 0
+				}
+			}
+			if numbers == 0 || nonzero {
+				kept = append(kept, r)
+			}
+		}
+		out = kept
 	}
 	for i := len(q.Sort) - 1; i >= 0; i-- {
 		key := strings.TrimLeft(q.Sort[i], "-+")
@@ -299,7 +281,169 @@ func (x *execution) query(q Query) (any, error) {
 	return out, nil
 }
 
-var aggPattern = regexp.MustCompile(`^(sum|avg|min|max|count|last)\((.*)\)$`)
+var aggPattern = regexp.MustCompile(`^(sum|avg|mean|min|max|count|last|median|count_distinct|percentile|linear_slope)\((.*)\)$`)
+
+// splitArgs splits on commas outside brackets and quotes.
+func splitArgs(s string) []string {
+	var out []string
+	depth, start := 0, 0
+	var quote rune
+	for i, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			}
+		case r == '\'' || r == '"':
+			quote = r
+		case strings.ContainsRune("([{", r):
+			depth++
+		case strings.ContainsRune(")]}", r):
+			depth--
+		case r == ',' && depth == 0:
+			out = append(out, strings.TrimSpace(s[start:i]))
+			start = i + 1
+		}
+	}
+	return append(out, strings.TrimSpace(s[start:]))
+}
+
+// parseAgg returns the operation (mean is avg) and its argument expressions.
+func parseAgg(s string) (string, []string, error) {
+	m := aggPattern.FindStringSubmatch(s)
+	if m == nil {
+		return "", nil, fmt.Errorf("aggregation must be sum/avg/mean/min/max/count/last/median/count_distinct(expr), percentile(expr, p) or linear_slope(x, y)")
+	}
+	op, args := m[1], splitArgs(m[2])
+	if op == "mean" {
+		op = "avg"
+	}
+	want := 1
+	if op == "percentile" || op == "linear_slope" {
+		want = 2
+	}
+	if op != "count" && len(args) != want {
+		return "", nil, fmt.Errorf("%s takes %d argument(s)", op, want)
+	}
+	return op, args, nil
+}
+
+func (x *execution) aggregate(agg string, group []map[string]any) (any, error) {
+	op, args, e := parseAgg(agg)
+	if e != nil {
+		return nil, e
+	}
+	if op == "count" {
+		return float64(len(group)), nil
+	}
+	values := func(expr string) ([]any, error) {
+		out := make([]any, len(group))
+		for i, row := range group {
+			v, e := x.eval(expr, row)
+			if e != nil {
+				return nil, e
+			}
+			out[i] = v
+		}
+		return out, nil
+	}
+	first, e := values(args[0])
+	if e != nil {
+		return nil, e
+	}
+	switch op {
+	case "last":
+		if len(first) == 0 {
+			return nil, nil
+		}
+		return first[len(first)-1], nil
+	case "count_distinct":
+		seen := map[string]bool{}
+		for _, v := range first {
+			seen[fmt.Sprint(v)] = true
+		}
+		return float64(len(seen)), nil
+	}
+	nums := make([]float64, len(first))
+	for i, v := range first {
+		if nums[i], e = numeric(v); e != nil {
+			return nil, e
+		}
+	}
+	switch op {
+	case "sum", "avg":
+		total := 0.0
+		for _, n := range nums {
+			total += n
+		}
+		if op == "avg" && len(nums) > 0 {
+			total /= float64(len(nums))
+		}
+		return total, nil
+	case "min", "max":
+		best := 0.0
+		for i, n := range nums {
+			if i == 0 || op == "min" && n < best || op == "max" && n > best {
+				best = n
+			}
+		}
+		return best, nil
+	case "median", "percentile":
+		p := 50.0
+		if op == "percentile" {
+			v, e := x.eval(args[1], nil)
+			if e == nil {
+				p, e = numeric(v)
+			}
+			if e != nil || p < 0 || p > 100 {
+				return nil, fmt.Errorf("percentile p must be a number 0..100")
+			}
+		}
+		if len(nums) == 0 {
+			return nil, nil
+		}
+		sort.Float64s(nums)
+		rank := p / 100 * float64(len(nums)-1)
+		lo := int(math.Floor(rank))
+		hi := min(lo+1, len(nums)-1)
+		return nums[lo] + (nums[hi]-nums[lo])*(rank-float64(lo)), nil
+	}
+	// linear_slope: least-squares dy/dx.
+	second, e := values(args[1])
+	if e != nil {
+		return nil, e
+	}
+	var sx, sy, sxy, sxx float64
+	for i, n := range nums {
+		y, e := numeric(second[i])
+		if e != nil {
+			return nil, e
+		}
+		sx, sy, sxy, sxx = sx+n, sy+y, sxy+n*y, sxx+n*n
+	}
+	count := float64(len(nums))
+	if den := count*sxx - sx*sx; len(nums) >= 2 && den != 0 {
+		return (count*sxy - sx*sy) / den, nil
+	}
+	return nil, nil
+}
+
+// EvalError locates a failed expression inside a component so validation can name it.
+type EvalError struct {
+	Field, Expr, Hint string
+	Err               error
+}
+
+func (e *EvalError) Error() string { return e.Err.Error() }
+func (e *EvalError) Unwrap() error { return e.Err }
+
+func (x *execution) evalAt(field, expr string, row map[string]any) (any, error) {
+	v, e := x.eval(expr, row)
+	if e != nil {
+		return nil, &EvalError{Field: field, Expr: expr, Err: e}
+	}
+	return v, nil
+}
 
 func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) (Rendered, error) {
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
@@ -307,7 +451,19 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	ctx = context.WithValue(ctx, paramsKey{}, spec.Params)
 	result := Rendered{Values: map[string]any{}, Validation: Validation{OK: true, Errors: []Issue{}, Warnings: []Issue{}}}
 	issue := func(path string, err error) {
-		result.Validation.Errors = append(result.Validation.Errors, Issue{path, err.Error()})
+		i := Issue{Path: path, Msg: err.Error()}
+		var ee *EvalError
+		if errors.As(err, &ee) {
+			i.Field, i.Expr, i.Hint = ee.Field, ee.Expr, ee.Hint
+		}
+		if rest, ok := strings.CutPrefix(path, "/components/"); ok {
+			var field string
+			i.ComponentID, field, _ = strings.Cut(rest, "/")
+			if i.Field == "" {
+				i.Field = field
+			}
+		}
+		result.Validation.Errors = append(result.Validation.Errors, i)
 		result.Validation.OK = false
 	}
 	raw, err := json.Marshal(spec)
@@ -344,13 +500,19 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	components := map[string]Component{}
 	html := map[string]string{}
 	for i, c := range spec.Components {
-		path := fmt.Sprintf("/components/%d", i)
 		if c.ID == "" {
-			issue(path+"/id", fmt.Errorf("id required"))
+			issue(fmt.Sprintf("/components/%d/id", i), fmt.Errorf("id required"))
 			continue
 		}
+		path := "/components/" + c.ID
 		if _, ok := components[c.ID]; ok {
 			issue(path+"/id", fmt.Errorf("duplicate component id"))
+			continue
+		}
+		components[c.ID] = c
+		c, err := x.resolveText(c)
+		if err != nil {
+			issue(path, err)
 			continue
 		}
 		components[c.ID] = c
@@ -380,7 +542,11 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 		pageIDs[pg.ID] = true
 		output.WriteString(`<section class="dashboard-page">`)
 		if len(spec.Pages) > 1 {
-			output.WriteString(`<h2>` + escape(pg.Title) + `</h2>`)
+			title, err := x.template("title", pg.Title)
+			if err != nil {
+				issue(fmt.Sprintf("/pages/%d/title", pi), err)
+			}
+			output.WriteString(`<h2>` + escape(title) + `</h2>`)
 		}
 		output.WriteString(`<div class="dash">`)
 		for ri, r := range pg.Layout {
@@ -412,7 +578,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	}
 	for id := range components {
 		if !used[id] {
-			result.Validation.Warnings = append(result.Validation.Warnings, Issue{"/components", "component " + id + " is not placed"})
+			result.Validation.Warnings = append(result.Validation.Warnings, Issue{Path: "/components/" + id, Msg: "component " + id + " is not placed", ComponentID: id})
 		}
 	}
 	result.Validation.Cost = x.cost
@@ -436,16 +602,38 @@ func walkExpressions(s Spec, fn func(string, string)) {
 			emit(base+"/derive/"+f, v)
 		}
 		for f, v := range q.Agg {
-			if m := aggPattern.FindStringSubmatch(v); m != nil && m[1] != "count" {
-				emit(base+"/agg/"+f, m[2])
+			if op, args, err := parseAgg(v); err == nil && op != "count" {
+				emit(base+"/agg/"+f, args[0])
+				if op == "linear_slope" {
+					emit(base+"/agg/"+f, args[1])
+				}
 			}
 		}
 	}
 	for k, v := range s.Computed {
 		emit("/computed/"+k, v)
 	}
+	for _, pg := range s.Pages {
+		for _, h := range holes.FindAllStringSubmatch(pg.Title, -1) {
+			expr, _ := parseHole(h[1])
+			emit("/pages/"+pg.ID+"/title", expr)
+		}
+	}
 	for i, c := range s.Components {
-		base := fmt.Sprintf("/components/%d", i)
+		base := "/components/" + c.ID
+		if c.ID == "" {
+			base = fmt.Sprintf("/components/%d", i)
+		}
+		for _, h := range holes.FindAllStringSubmatch(c.Title, -1) {
+			expr, _ := parseHole(h[1])
+			emit(base+"/title", expr)
+		}
+		for j, col := range c.Columns {
+			for _, h := range holes.FindAllStringSubmatch(col.Label, -1) {
+				expr, _ := parseHole(h[1])
+				emit(fmt.Sprintf("%s/columns/%d/label", base, j), expr)
+			}
+		}
 		for k, v := range map[string]string{"value": c.Value, "delta": c.Delta, "sub": c.Sub, "tone": c.Tone, "label": c.Label, "actual": c.Actual, "limit": c.Limit, "metric": c.Metric} {
 			emit(base+"/"+k, v)
 		}
@@ -465,7 +653,8 @@ func walkExpressions(s Spec, fn func(string, string)) {
 			emit(base+"/rule/label", c.Rule.Label)
 		}
 		for _, m := range holes.FindAllStringSubmatch(c.MD, -1) {
-			emit(base+"/md", strings.TrimSpace(m[1]))
+			expr, _ := parseHole(m[1])
+			emit(base+"/md", expr)
 		}
 	}
 }
