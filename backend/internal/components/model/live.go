@@ -6,6 +6,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"math"
 	"strings"
 	"time"
@@ -39,6 +40,18 @@ type Provenance struct {
 // liveStart values the ledger as of a date (default today, Europe/Zagreb). Pots are the account `pot` field: pots starting with "wise" (wise_usd, wise_eur) and pots containing "kyiv" (cash_kyiv) form those cash pots; gold is the XAU_g commodity.
 // It returns nil values (stored assumptions are used) when no ledger, rates or balances are available.
 func (s *Service) liveStart(ctx context.Context, p principal.Principal, asOf string) (map[string]float64, Provenance, error) {
+	type start struct {
+		live map[string]float64
+		pr   Provenance
+	}
+	v, e := reqcache.Do(ctx, "live:"+p.UserID+":"+asOf, func() (start, error) {
+		live, pr, e := s.computeStart(ctx, p, asOf)
+		return start{live, pr}, e
+	})
+	return v.live, v.pr, e
+}
+
+func (s *Service) computeStart(ctx context.Context, p principal.Principal, asOf string) (map[string]float64, Provenance, error) {
 	pr := Provenance{StartAsOf: asOf, StartSource: "assumptions", RatesUsed: []RateUsed{}, Inputs: []ResolvedInput{}}
 	if asOf == "" {
 		loc, e := time.LoadLocation("Europe/Zagreb")

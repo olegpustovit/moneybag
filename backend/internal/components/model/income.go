@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"time"
 )
 
@@ -27,6 +29,7 @@ type IncomeMonth struct {
 // Actual is the net of postings on lands_in, or of income-type accounts (sign flipped) when lands_in is empty, converted to the stream currency.
 // shortcut: expected ignores growth_pct and uses the average monthly amount (26/12 for biweekly); upgrade when pay-date counts matter.
 func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in ReconcileInput) ([]IncomeMonth, error) {
+	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // quotes and accounts load once per request
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
@@ -47,7 +50,7 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 		return nil, e
 	}
 	var entries []ledger.Entry
-	page := ledger.EntriesInput{From: in.From, To: in.To, Status: "posted", Limit: 100}
+	page := ledger.EntriesInput{From: in.From, To: in.To, Status: "posted", Limit: 500}
 	for {
 		res, e := s.Ledger.Entries(ctx, p, page)
 		if e != nil {

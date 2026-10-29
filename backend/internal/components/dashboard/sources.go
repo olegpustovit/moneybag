@@ -11,8 +11,10 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"maps"
 	"math/big"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -27,13 +29,57 @@ type Sources struct {
 	Expr   *expressions.Engine
 }
 
+type rowCacheKey struct{}
+
+// rowCache keeps each source's rows for one request, so views and queries over the same source build it once.
+type rowCache struct {
+	mu   sync.Mutex
+	rows map[string][]map[string]any
+}
+
+// WithRowCache scopes a row cache to ctx; use it only around reads.
+func WithRowCache(ctx context.Context) context.Context {
+	if _, ok := ctx.Value(rowCacheKey{}).(*rowCache); ok {
+		return ctx
+	}
+	return context.WithValue(ctx, rowCacheKey{}, &rowCache{rows: map[string][]map[string]any{}})
+}
+
 func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
+	c, ok := ctx.Value(rowCacheKey{}).(*rowCache)
+	if !ok {
+		return s.rows(ctx, p, source)
+	}
+	params, _ := json.Marshal(ctx.Value(paramsKey{}))
+	key := p.UserID + "|" + source + "|" + string(params)
+	c.mu.Lock()
+	cached, hit := c.rows[key]
+	c.mu.Unlock()
+	if !hit {
+		rows, e := s.rows(ctx, p, source)
+		if e != nil {
+			return nil, e
+		}
+		c.mu.Lock()
+		c.rows[key] = rows
+		c.mu.Unlock()
+		cached = rows
+	}
+	// Queries derive in place, so every caller gets its own row maps.
+	out := make([]map[string]any, len(cached))
+	for i, r := range cached {
+		out[i] = maps.Clone(r)
+	}
+	return out, nil
+}
+
+func (s *Sources) rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
 	params, _ := ctx.Value(paramsKey{}).(map[string]any)
 	month, _ := params["month"].(string)
 	out := []map[string]any{}
 	switch {
 	case source == "journal" || source == "effective_entries" || source == "postings":
-		in := ledger.EntriesInput{Status: "posted", Limit: 100, Effective: source != "journal"}
+		in := ledger.EntriesInput{Status: "posted", Limit: 500, Effective: source != "journal"}
 		if source == "postings" {
 			in.From, _ = params["from"].(string)
 			in.To, _ = params["to"].(string)

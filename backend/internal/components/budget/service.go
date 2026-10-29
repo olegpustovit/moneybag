@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -120,6 +122,14 @@ type accountID struct {
 
 func (s *Service) groupAccounts(ctx context.Context, p principal.Principal, ref GroupRef) ([]accountID, error) {
 	var found []accountID
+	if all, ok, err := ledger.CachedAccounts(ctx, s.repo.db, p); ok {
+		for _, a := range all {
+			if a.Type == "expense" && a.ClosedAt == nil && a.Groups[ref.Dimension] == ref.Value {
+				found = append(found, accountID{a.ID})
+			}
+		}
+		return found, err
+	}
 	c, err := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}, "groups." + ref.Dimension: ref.Value}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
 	if err == nil {
 		err = c.All(ctx, &found)
@@ -308,6 +318,7 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, month string) 
 	return s.GetWindow(ctx, p, month, Window{})
 }
 func (s *Service) GetWindow(ctx context.Context, p principal.Principal, month string, w Window) (Status, error) {
+	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // quotes and accounts load once per request
 	if w.Months == 0 {
 		w.Months = 6
 	}
@@ -378,15 +389,24 @@ func (s *Service) GetWindow(ctx context.Context, p principal.Principal, month st
 			mapped[a] = true
 		}
 	}
-	cur, e := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
-	if e != nil {
-		return Status{}, e
-	}
-	var expenses []struct {
-		ID string `bson:"id"`
-	}
-	if e = cur.All(ctx, &expenses); e != nil {
-		return Status{}, e
+	var expenses []accountID
+	if all, ok, e := ledger.CachedAccounts(ctx, s.repo.db, p); ok {
+		if e != nil {
+			return Status{}, e
+		}
+		for _, a := range all {
+			if a.Type == "expense" && a.ClosedAt == nil {
+				expenses = append(expenses, accountID{a.ID})
+			}
+		}
+	} else {
+		cur, e := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+		if e != nil {
+			return Status{}, e
+		}
+		if e = cur.All(ctx, &expenses); e != nil {
+			return Status{}, e
+		}
 	}
 	for _, a := range expenses {
 		if !mapped[a.ID] {

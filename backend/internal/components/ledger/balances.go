@@ -82,15 +82,31 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 		return BalancesResult{}, fmt.Errorf("balance result exceeds 5000 rows")
 	}
 	groups := map[string]map[string]*big.Rat{}
+	accounts := map[string]Account{}
+	if in.GroupBy == "pot" || in.GroupBy == "type" {
+		// One paged read instead of a query per balance row.
+		for cursor := ""; ; {
+			page, e := s.repo.Accounts(ctx, p, AccountsInput{IncludeClosed: true, Limit: 500, Cursor: cursor})
+			if e != nil {
+				return BalancesResult{}, e
+			}
+			for _, a := range page.Items {
+				accounts[a.ID] = a
+			}
+			if cursor = page.NextCursor; cursor == "" {
+				break
+			}
+		}
+	}
 	for _, r := range raw {
 		key := r.ID.Account
 		switch in.GroupBy {
 		case "commodity":
 			key = r.ID.Commodity
 		case "pot", "type":
-			a, e := s.repo.Account(ctx, p, r.ID.Account)
-			if e != nil {
-				return BalancesResult{}, e
+			a, ok := accounts[r.ID.Account]
+			if !ok {
+				return BalancesResult{}, fmt.Errorf("account %s not found", r.ID.Account)
 			}
 			if in.GroupBy == "pot" {
 				key = a.Pot

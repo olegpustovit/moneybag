@@ -9,6 +9,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"regexp"
+	"slices"
+	"strings"
 )
 
 type MongoRepository struct{ DB *mongo.Database }
@@ -21,6 +23,16 @@ func (r *MongoRepository) Account(ctx context.Context, p principal.Principal, id
 	db, e := r.db(p)
 	if e != nil {
 		return Account{}, e
+	}
+	if all, ok, e := CachedAccounts(ctx, db, p); ok {
+		if e != nil {
+			return Account{}, e
+		}
+		i, found := slices.BinarySearchFunc(all, id, func(a Account, id string) int { return strings.Compare(a.ID, id) })
+		if !found {
+			return Account{}, principal.ErrNotFound
+		}
+		return all[i], nil
 	}
 	var a Account
 	e = db.Collection("accounts").FindOne(ctx, bson.M{"user_id": p.UserID, "id": id}).Decode(&a)
@@ -135,11 +147,15 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	if limit == 0 {
 		limit = 100
 	}
-	pipeline := bson.A{bson.M{"$match": f}, bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}}, bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"}}
+	overlay := bson.A{bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}}, bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"}}
+	page := bson.A{bson.M{"$sort": bson.D{{Key: "seq", Value: -1}}}, bson.M{"$limit": int64(limit + 1)}}
+	pipeline := bson.A{bson.M{"$match": f}}
 	if in.Tag != "" {
-		pipeline = append(pipeline, bson.M{"$match": bson.M{"tags": in.Tag}})
+		// The tag filter needs the overlay first; otherwise page first so only one page is joined.
+		pipeline = append(append(append(pipeline, overlay...), bson.M{"$match": bson.M{"tags": in.Tag}}), page...)
+	} else {
+		pipeline = append(append(pipeline, page...), overlay...)
 	}
-	pipeline = append(pipeline, bson.M{"$sort": bson.D{{Key: "seq", Value: -1}}}, bson.M{"$limit": int64(limit + 1)})
 	cur, e := db.Collection("journal").Aggregate(ctx, pipeline)
 	if e != nil {
 		return EntriesPage{}, e
@@ -158,6 +174,24 @@ func (r *MongoRepository) Accounts(ctx context.Context, p principal.Principal, i
 	if e != nil {
 		return AccountsPage{}, e
 	}
+	limit := in.Limit
+	if limit == 0 {
+		limit = 100
+	}
+	if all, ok, e := CachedAccounts(ctx, db, p); ok {
+		out := AccountsPage{Items: []Account{}}
+		for _, a := range all {
+			if e != nil || !in.IncludeClosed && a.ClosedAt != nil || in.Type != "" && a.Type != in.Type || in.Pot != "" && a.Pot != in.Pot || a.ID <= in.Cursor {
+				continue
+			}
+			if len(out.Items) == limit {
+				out.NextCursor = out.Items[limit-1].ID
+				break
+			}
+			out.Items = append(out.Items, a)
+		}
+		return out, e
+	}
 	f := bson.M{"user_id": p.UserID}
 	if !in.IncludeClosed {
 		f["closed_at"] = bson.M{"$exists": false}
@@ -170,10 +204,6 @@ func (r *MongoRepository) Accounts(ctx context.Context, p principal.Principal, i
 	}
 	if in.Cursor != "" {
 		f["id"] = bson.M{"$gt": in.Cursor}
-	}
-	limit := in.Limit
-	if limit == 0 {
-		limit = 100
 	}
 	cur, e := db.Collection("accounts").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}).SetLimit(int64(limit+1)))
 	if e != nil {

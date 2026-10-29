@@ -24,6 +24,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"log/slog"
 	"reflect"
@@ -128,6 +129,9 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 		if e != nil {
 			return nil, zero, e
 		}
+		if readOnly {
+			ctx = dashboard.WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // reads only: sources, quotes and accounts load once per call
+		}
 		out, e := fn(ctx, p, in)
 		if e != nil {
 			var command mongo.CommandError
@@ -144,8 +148,13 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 		return nil, out, nil
 	})
 }
+func anySchema() *jsonschema.Schema {
+	return &jsonschema.Schema{Types: []string{"null", "boolean", "number", "integer", "string", "array", "object"}}
+}
 func schema[T any]() (*jsonschema.Schema, error) {
-	return jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[ledger.Decimal](): {Type: "string", Pattern: `^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`}, reflect.TypeFor[json.RawMessage](): {}}})
+	return jsonschema.ForType(reflect.TypeFor[T](), &jsonschema.ForOptions{TypeSchemas: map[reflect.Type]*jsonschema.Schema{reflect.TypeFor[ledger.Decimal](): {Type: "string", Pattern: `^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`}, reflect.TypeFor[json.RawMessage](): anySchema(),
+		// Some connectors silently drop tools whose properties use the bare `true` schema that `any` produces; spell it out.
+		reflect.TypeFor[any](): anySchema()}})
 }
 
 // openObjects lets output objects carry fields a client's cached schema predates, so adding a result field never breaks a connected client.

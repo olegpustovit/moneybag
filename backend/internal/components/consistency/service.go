@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
@@ -19,6 +20,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 )
 
 type Service struct {
@@ -147,6 +149,7 @@ func (s *Service) known(ctx context.Context, p principal.Principal) (map[string]
 const runTimeout = 30 * time.Second
 
 func (s *Service) Run(ctx context.Context, p principal.Principal) (Result, error) {
+	ctx = dashboard.WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // sources, quotes and accounts are read once per request
 	if e := p.Require("ledger:read"); e != nil {
 		return Result{}, e
 	}
@@ -184,22 +187,39 @@ func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error
 	if e != nil {
 		return Result{}, e
 	}
-	var dashes []published
-	var failed []string
-	for _, h := range heads {
+	// Render published dashboards in parallel; they share the request caches.
+	slots := make([]*published, len(heads))
+	errs := make([]string, len(heads))
+	var wg sync.WaitGroup
+	for i, h := range heads {
 		if h.PublishedVersion == 0 {
 			continue
 		}
-		v, e := s.Dashboard.Get(ctx, p, h.ID, "published")
-		if e != nil {
-			failed = append(failed, h.ID+": "+e.Error())
-			continue
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			v, e := s.Dashboard.Get(ctx, p, h.ID, "published")
+			if e != nil {
+				errs[i] = h.ID + ": " + e.Error()
+				return
+			}
+			r, e := s.Dashboard.Preview(ctx, p, h.ID, "published", nil)
+			if e != nil {
+				errs[i] = h.ID + ": " + e.Error()
+			}
+			slots[i] = &published{v.Spec, r}
+		}()
+	}
+	wg.Wait()
+	var dashes []published
+	var failed []string
+	for i := range heads {
+		if slots[i] != nil {
+			dashes = append(dashes, *slots[i])
 		}
-		r, e := s.Dashboard.Preview(ctx, p, h.ID, "published", nil)
-		if e != nil {
-			failed = append(failed, h.ID+": "+e.Error())
+		if errs[i] != "" {
+			failed = append(failed, errs[i])
 		}
-		dashes = append(dashes, published{v.Spec, r})
 	}
 	var checks []Check
 	add := func(id string, bad any, empty bool) {

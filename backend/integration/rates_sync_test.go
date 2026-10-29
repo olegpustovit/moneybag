@@ -135,6 +135,17 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	if s := state("swissquote"); s.Status != "skipped" {
 		t.Fatal("fallback not skipped", s)
 	}
+	// The request quote cache answers "at or before" exactly like the indexed query, and skips archived quotes.
+	cached := rates.WithQuoteCache(ctx)
+	for _, when := range []string{"2026-10-27T00:00:00Z", at, "2026-12-01T00:00:00Z"} {
+		for _, pair := range []string{"EUR/USD", "EUR/GBP", "XAU_g/USD"} {
+			want, we := prices.Get(ctx, p, []string{pair}, when)
+			got, ge := prices.Get(cached, p, []string{pair}, when)
+			if (we == nil) != (ge == nil) || we == nil && (want[0].ID != got[0].ID || want[0].Value.String() != got[0].Value.String()) {
+				t.Fatal("cached quote differs", pair, when, want, we, got, ge)
+			}
+		}
+	}
 	stale, e := prices.Stale(ctx, p, time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC))
 	if e != nil || len(stale) != 2 {
 		t.Fatal("stale rates not reported", stale, e)

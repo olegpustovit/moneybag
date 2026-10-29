@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"maps"
 	"math"
 	"regexp"
@@ -28,13 +31,14 @@ type Engine struct {
 	Reader Reader
 }
 type execution struct {
-	ctx    context.Context
-	engine *Engine
-	p      principal.Principal
-	vars   map[string]any
-	cost   uint64
-	count  int
-	source map[string][]map[string]any // rows already read from each source in this execution
+	ctx        context.Context
+	engine     *Engine
+	p          principal.Principal
+	vars       map[string]any
+	cost       uint64
+	count      int
+	source     map[string][]map[string]any // rows already read from each source in this execution
+	dataBudget *byteBudget                 // all query results of this execution share 8 MiB
 }
 
 func (x *execution) eval(expr string, row map[string]any) (any, error) {
@@ -457,6 +461,7 @@ func (x *execution) evalAt(field, expr string, row map[string]any) (any, error) 
 }
 
 func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) (Rendered, error) {
+	ctx = WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
 	ctx = context.WithValue(ctx, paramsKey{}, spec.Params)
@@ -510,6 +515,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	}
 	components := map[string]Component{}
 	html := map[string]string{}
+	valuesBudget := &byteBudget{8 * 1024 * 1024}
 	for i, c := range spec.Components {
 		if c.ID == "" {
 			issue(fmt.Sprintf("/components/%d/id", i), fmt.Errorf("id required"))
@@ -538,7 +544,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 		}
 		html[c.ID] = body
 		result.Values[c.ID] = value
-		if e := boundedData(result.Values); e != nil {
+		if e := valuesBudget.spend(value); e != nil {
 			issue(path, e)
 			return result, nil
 		}
@@ -686,7 +692,10 @@ func (x *execution) load(data map[string]Query, computedExprs map[string]string,
 				continue
 			}
 			x.vars["data"].(map[string]any)[k] = v
-			if e := boundedData(x.vars["data"]); e != nil {
+			if x.dataBudget == nil {
+				x.dataBudget = &byteBudget{8 * 1024 * 1024}
+			}
+			if e := x.dataBudget.spend(v); e != nil {
 				issue("/data", e)
 				return
 			}
@@ -727,6 +736,7 @@ func (x *execution) load(data map[string]Query, computedExprs map[string]string,
 }
 
 func (e *Engine) Evaluate(ctx context.Context, p principal.Principal, expr string, data map[string]Query, params map[string]any) (expressions.Result, error) {
+	ctx = WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
 	ctx = context.WithValue(ctx, paramsKey{}, params)

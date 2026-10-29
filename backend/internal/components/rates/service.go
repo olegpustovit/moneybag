@@ -227,6 +227,9 @@ func (s *Service) History(ctx context.Context, p principal.Principal, pairs []st
 	return out, nil
 }
 func (s *Service) quote(ctx context.Context, p principal.Principal, base, quote, at string) (Quote, error) {
+	if c, ok := ctx.Value(cacheKey{}).(*quoteCache); ok {
+		return s.cachedQuote(ctx, c, p, base+"/"+quote, at)
+	}
 	var q Quote
 	e := s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "pair": base + "/" + quote, "at": bson.M{"$lte": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: -1}})).Decode(&q)
 	return q, e

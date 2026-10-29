@@ -11,6 +11,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -140,6 +141,9 @@ func (s *Service) Get(ctx context.Context, p principal.Principal) (State, error)
 	if e := p.Require("ledger:read"); e != nil {
 		return State{}, e
 	}
+	return reqcache.Do(ctx, "model:"+p.UserID, func() (State, error) { return s.load(ctx, p) })
+}
+func (s *Service) load(ctx context.Context, p principal.Principal) (State, error) {
 	out := State{Assumptions: []tables.Row{}, Scenarios: []Scenario{}, Streams: []Income{}}
 	q, e := s.tables.Query(ctx, p, tables.QueryInput{DB: "assumptions"})
 	if e == nil {
@@ -278,6 +282,7 @@ func (s *Service) SetIncome(ctx context.Context, p principal.Principal, streams 
 	return streams, e
 }
 func (s *Service) Forecast(ctx context.Context, p principal.Principal, in ForecastInput) ([]Projection, error) {
+	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // quotes and accounts load once per request
 	if in.HorizonMonths < 1 || in.HorizonMonths > 600 || len(in.ScenarioIDs) < 1 || len(in.ScenarioIDs) > 20 || (in.ValueIn != "" && in.ValueIn != "USD" && in.ValueIn != "EUR") {
 		return nil, fmt.Errorf("1..20 scenarios, horizon 1..600 and USD/EUR value_in required")
 	}
