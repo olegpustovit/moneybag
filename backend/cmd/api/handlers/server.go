@@ -2,10 +2,12 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
 	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
@@ -24,6 +26,24 @@ import (
 //go:embed web/*
 var webFS embed.FS
 
+var assetPaths = func() map[string]string {
+	paths := map[string]string{}
+	for _, name := range []string{"app.js", "style.css"} {
+		data, err := webFS.ReadFile("web/" + name)
+		if err != nil {
+			panic(err)
+		}
+		sum := sha256.Sum256(data)
+		stem, ext, _ := strings.Cut(name, ".")
+		paths[name] = fmt.Sprintf("/assets/%s.%x.%s", stem, sum[:12], ext)
+	}
+	return paths
+}()
+
+func parseTemplates() (*template.Template, error) {
+	return template.New("").Funcs(template.FuncMap{"asset": func(name string) string { return assetPaths[name] }}).ParseFS(webFS, "web/*.html")
+}
+
 type Config struct {
 	PublicURL, SetupToken, Version string
 	Toolsets                       map[string]bool
@@ -40,7 +60,7 @@ type Handler struct {
 }
 
 func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.MongoRepository, client *mongo.Client) *Handler {
-	h := &Handler{cfg: cfg, services: s, oauth: oa, ledgerRepo: repo, client: client, templates: template.Must(template.ParseFS(webFS, "web/*.html"))}
+	h := &Handler{cfg: cfg, services: s, oauth: oa, ledgerRepo: repo, client: client, templates: template.Must(parseTemplates())}
 	h.full = mcpserver.New(s, mcpserver.Options{Version: cfg.Version, Toolsets: cfg.Toolsets})
 	h.readonly = mcpserver.New(s, mcpserver.Options{Version: cfg.Version, ReadOnly: true, Toolsets: cfg.Toolsets})
 	return h
@@ -115,8 +135,17 @@ func (h *Handler) Handler() http.Handler {
 		respond(w, 200, map[string]string{"status": "ok", "version": h.cfg.Version})
 	})
 	mux.HandleFunc("GET /assets/{file}", func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("file")
-		if name != "app.js" && name != "style.css" {
+		requested := r.PathValue("file")
+		name := ""
+		immutable := false
+		for _, candidate := range []string{"app.js", "style.css"} {
+			if requested == candidate || "/assets/"+requested == assetPaths[candidate] {
+				name = candidate
+				immutable = requested != candidate
+				break
+			}
+		}
+		if name == "" {
 			http.NotFound(w, r)
 			return
 		}
@@ -125,7 +154,11 @@ func (h *Handler) Handler() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-cache")
+		if immutable {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-store")
+		}
 		if name == "app.js" {
 			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		} else {

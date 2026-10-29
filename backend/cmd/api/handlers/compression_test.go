@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"compress/gzip"
 	"context"
-	"html/template"
 	"io"
 	"net"
 	"net/http"
@@ -21,15 +20,22 @@ func TestCompressionAndLegacyCacheHeaders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	h := &Handler{templates: template.Must(template.ParseFS(webFS, "web/*.html"))}
+	templates, err := parseTemplates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Handler{templates: templates}
 	app := wrap(h.Handler())
 	for _, tc := range []struct {
 		method, path, cache string
 		status              int
 	}{
-		{"GET", "/assets/app.js", "no-cache", 200},
-		{"GET", "/assets/style.css", "no-cache", 200},
+		{"GET", "/assets/app.js", "no-store", 200},
+		{"GET", assetPaths["app.js"], "public, max-age=31536000, immutable", 200},
+		{"GET", "/assets/style.css", "no-store", 200},
+		{"GET", assetPaths["style.css"], "public, max-age=31536000, immutable", 200},
 		{"GET", "/assets/missing.js", "no-store", 404},
+		{"GET", "/assets/app.invalid.js", "no-store", 404},
 		{"GET", "/login", "no-store", 200},
 		{"POST", "/api/mcp", "no-store", 401},
 	} {
@@ -40,7 +46,7 @@ func TestCompressionAndLegacyCacheHeaders(t *testing.T) {
 		if rec.Code != tc.status || rec.Header().Get("Cache-Control") != tc.cache {
 			t.Fatalf("%s: status %d cache %q", tc.path, rec.Code, rec.Header().Get("Cache-Control"))
 		}
-		if tc.path == "/assets/app.js" {
+		if tc.path == "/assets/app.js" || tc.path == assetPaths["app.js"] {
 			if rec.Header().Get("Content-Encoding") != "gzip" || !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
 				t.Fatalf("asset compression: %v", rec.Header())
 			}

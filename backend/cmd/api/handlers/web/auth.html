@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="/assets/style.css"><script src="/assets/app.js" defer></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><link rel="stylesheet" href="{{asset "style.css"}}"><script src="{{asset "app.js"}}" defer></script></head>
 <body><main class="auth"><a class="brand auth-brand" href="/"><span class="logo">M</span><span>Moneybag</span></a><h1>{{.Title}}</h1>
 {{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
 <form method="post" action="{{.Action}}" class="stack">
