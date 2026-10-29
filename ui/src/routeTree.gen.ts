@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
+import { Route as AppActivityRouteImport } from './routes/_app.activity'
 import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
 import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppReconcileRouteImport } from './routes/_app.reconcile'
@@ -34,6 +35,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountsRoute = AppAccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppActivityRoute = AppActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBudgetsRoute = AppBudgetsRouteImport.update({
@@ -85,6 +91,7 @@ const AppImportsBatchRoute = AppImportsBatchRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/accounts': typeof AppAccountsRoute
+  '/activity': typeof AppActivityRoute
   '/budgets': typeof AppBudgetsRoute
   '/journal': typeof AppJournalRoute
   '/reconcile': typeof AppReconcileRoute
@@ -97,6 +104,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
+  '/activity': typeof AppActivityRoute
   '/budgets': typeof AppBudgetsRoute
   '/journal': typeof AppJournalRoute
   '/reconcile': typeof AppReconcileRoute
@@ -112,6 +120,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/accounts': typeof AppAccountsRoute
+  '/_app/activity': typeof AppActivityRoute
   '/_app/budgets': typeof AppBudgetsRoute
   '/_app/journal': typeof AppJournalRoute
   '/_app/reconcile': typeof AppReconcileRoute
@@ -128,6 +137,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/accounts'
+    | '/activity'
     | '/budgets'
     | '/journal'
     | '/reconcile'
@@ -140,6 +150,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/accounts'
+    | '/activity'
     | '/budgets'
     | '/journal'
     | '/reconcile'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/_app'
     | '/_app/accounts'
+    | '/_app/activity'
     | '/_app/budgets'
     | '/_app/journal'
     | '/_app/reconcile'
@@ -191,6 +203,13 @@ declare module '@tanstack/react-router' {
       path: '/accounts'
       fullPath: '/accounts'
       preLoaderRoute: typeof AppAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/activity': {
+      id: '/_app/activity'
+      path: '/activity'
+      fullPath: '/activity'
+      preLoaderRoute: typeof AppActivityRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/budgets': {
@@ -261,6 +280,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRoute
+  AppActivityRoute: typeof AppActivityRoute
   AppBudgetsRoute: typeof AppBudgetsRoute
   AppJournalRoute: typeof AppJournalRoute
   AppReconcileRoute: typeof AppReconcileRoute
@@ -275,6 +295,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRoute,
+  AppActivityRoute: AppActivityRoute,
   AppBudgetsRoute: AppBudgetsRoute,
   AppJournalRoute: AppJournalRoute,
   AppReconcileRoute: AppReconcileRoute,
