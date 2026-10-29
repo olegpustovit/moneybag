@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -131,6 +132,90 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, pairs []string
 	}
 	return out, nil
 }
+
+// History returns every stored, non-archived quote for the pairs, oldest first, optionally bounded by from/to (RFC3339 or YYYY-MM-DD); at most 5000.
+// A pair with no direct quotes falls back to the inverted quotes of the opposite pair, as Get does.
+func (s *Service) History(ctx context.Context, p principal.Principal, pairs []string, from, to string) ([]Quote, error) {
+	if e := p.Require("ledger:read"); e != nil {
+		return nil, e
+	}
+	if len(pairs) > 50 {
+		return nil, fmt.Errorf("at most 50 pairs")
+	}
+	bound := func(v string, end bool) (string, error) {
+		if v == "" {
+			return "", nil
+		}
+		if t, e := time.Parse(time.RFC3339, v); e == nil {
+			return t.UTC().Format(time.RFC3339), nil
+		}
+		t, e := time.Parse("2006-01-02", v)
+		if e != nil {
+			return "", fmt.Errorf("from and to must be RFC3339 or YYYY-MM-DD")
+		}
+		if end {
+			t = t.Add(24*time.Hour - time.Second)
+		}
+		return t.Format(time.RFC3339), nil
+	}
+	lo, e := bound(from, false)
+	if e != nil {
+		return nil, e
+	}
+	hi, e := bound(to, true)
+	if e != nil {
+		return nil, e
+	}
+	window := bson.M{}
+	if lo != "" {
+		window["$gte"] = lo
+	}
+	if hi != "" {
+		window["$lte"] = hi
+	}
+	find := func(pair string) ([]Quote, error) {
+		f := bson.M{"user_id": p.UserID, "pair": pair, "archived": bson.M{"$ne": true}}
+		if len(window) > 0 {
+			f["at"] = window
+		}
+		cur, e := s.repo.db.Collection("prices").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "at", Value: 1}}).SetLimit(5001))
+		if e != nil {
+			return nil, e
+		}
+		var qs []Quote
+		return qs, cur.All(ctx, &qs)
+	}
+	out := []Quote{}
+	for _, pair := range pairs {
+		a, b, e := Pair(pair)
+		if e != nil {
+			return nil, e
+		}
+		qs, e := find(a + "/" + b)
+		if e != nil {
+			return nil, e
+		}
+		if len(qs) == 0 {
+			inv, e := find(b + "/" + a)
+			if e != nil {
+				return nil, e
+			}
+			for _, q := range inv {
+				v, e := ledger.ParseDecimal(strings.TrimRight(strings.TrimRight(new(big.Rat).Inv(q.Value.Rat()).FloatString(10), "0"), "."))
+				if e != nil {
+					return nil, e
+				}
+				qs = append(qs, Quote{ID: q.ID, Pair: a + "/" + b, Base: a, Quote: b, At: q.At, Value: v, Source: "inverse of " + q.Pair + " (" + q.Source + ")"})
+			}
+		}
+		out = append(out, qs...)
+		if len(out) > 5000 {
+			return nil, fmt.Errorf("rate_history exceeds 5000 rows; narrow from/to")
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].At < out[j].At })
+	return out, nil
+}
 func (s *Service) quote(ctx context.Context, p principal.Principal, base, quote, at string) (Quote, error) {
 	var q Quote
 	e := s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "pair": base + "/" + quote, "at": bson.M{"$lte": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: -1}})).Decode(&q)
@@ -159,10 +244,19 @@ func (s *Service) rate(ctx context.Context, p principal.Principal, base, quote, 
 	return nil, fmt.Errorf("no quote for %s/%s at or before %s", base, quote, at)
 }
 func (s *Service) Convert(ctx context.Context, p principal.Principal, a ledger.Amount, quote, at string) (ledger.Amount, error) {
-	r, e := s.rate(ctx, p, a.Commodity, quote, at)
-	if e != nil && a.Commodity != "USD" && quote != "USD" {
+	r, e := s.Rate(ctx, p, a.Commodity, quote, at)
+	if e != nil {
+		return ledger.Amount{}, e
+	}
+	return Apply(a, r, quote)
+}
+
+// Rate is the from->quote rate at time at, triangulating through USD when no direct pair exists.
+func (s *Service) Rate(ctx context.Context, p principal.Principal, from, quote, at string) (*big.Rat, error) {
+	r, e := s.rate(ctx, p, from, quote, at)
+	if e != nil && from != "USD" && quote != "USD" {
 		var b, c *big.Rat
-		b, e = s.rate(ctx, p, a.Commodity, "USD", at)
+		b, e = s.rate(ctx, p, from, "USD", at)
 		if e == nil {
 			c, e = s.rate(ctx, p, "USD", quote, at)
 			if e == nil {
@@ -170,9 +264,11 @@ func (s *Service) Convert(ctx context.Context, p principal.Principal, a ledger.A
 			}
 		}
 	}
-	if e != nil {
-		return ledger.Amount{}, e
-	}
+	return r, e
+}
+
+// Apply converts a by rate r into quote, rounded to cents.
+func Apply(a ledger.Amount, r *big.Rat, quote string) (ledger.Amount, error) {
 	v := new(big.Rat).Mul(a.Value.Rat(), r)
 	d, e := ledger.ParseDecimal(v.FloatString(2))
 	return ledger.Amount{Value: d, Commodity: quote}, e

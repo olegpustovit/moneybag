@@ -42,13 +42,9 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 	if e != nil {
 		return nil, e
 	}
-	types := map[string]string{}
-	accounts, e := s.Ledger.Accounts(ctx, p, ledger.AccountsInput{IncludeClosed: true, Limit: 500})
+	accounts, e := s.accountMap(ctx, p)
 	if e != nil {
 		return nil, e
-	}
-	for _, a := range accounts.Items {
-		types[a.ID] = a.Type
 	}
 	var entries []ledger.Entry
 	page := ledger.EntriesInput{From: in.From, To: in.To, Status: "posted", Limit: 100}
@@ -95,10 +91,13 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 			}
 			sum, hit := 0.0, false
 			for _, po := range en.Postings {
-				if st.LandsIn != "" && po.Account != st.LandsIn || st.LandsIn == "" && types[po.Account] != "income" {
+				if st.LandsIn != "" && po.Account != st.LandsIn || st.LandsIn == "" && accounts[po.Account].Type != "income" {
 					continue
 				}
 				v := po.Amount.Value.Float()
+				if st.LandsIn != "" && st.PayerMatch == "" && v <= 0 {
+					continue // without a payer match only inflows to the account count
+				}
 				if po.Amount.Commodity != st.Currency {
 					if s.Rates == nil {
 						return nil, fmt.Errorf("rates unavailable")
@@ -152,4 +151,23 @@ func toAny(in []string) []any {
 		out[i] = v
 	}
 	return out
+}
+
+// accountMap returns every account (closed included) by id.
+func (s *Service) accountMap(ctx context.Context, p principal.Principal) (map[string]ledger.Account, error) {
+	accounts := map[string]ledger.Account{}
+	in := ledger.AccountsInput{IncludeClosed: true, Limit: 500}
+	for {
+		page, e := s.Ledger.Accounts(ctx, p, in)
+		if e != nil {
+			return nil, e
+		}
+		for _, a := range page.Items {
+			accounts[a.ID] = a
+		}
+		if page.NextCursor == "" {
+			return accounts, nil
+		}
+		in.Cursor = page.NextCursor
+	}
 }

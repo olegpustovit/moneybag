@@ -413,19 +413,30 @@ func (x *execution) aggregate(agg string, group []map[string]any) (any, error) {
 	if e != nil {
 		return nil, e
 	}
-	var sx, sy, sxy, sxx float64
+	xs, ys := make([]float64, len(nums)), make([]float64, len(nums))
+	var mx, my float64
 	for i, n := range nums {
 		y, e := numeric(second[i])
 		if e != nil {
 			return nil, e
 		}
-		sx, sy, sxy, sxx = sx+n, sy+y, sxy+n*y, sxx+n*n
+		xs[i], ys[i] = n, y
+		mx, my = mx+n, my+y
 	}
 	count := float64(len(nums))
-	if den := count*sxx - sx*sx; len(nums) >= 2 && den != 0 {
-		return (count*sxy - sx*sy) / den, nil
+	if count < 2 {
+		return nil, nil
 	}
-	return nil, nil
+	mx, my = mx/count, my/count
+	// Centered sums avoid the cancellation of n*sxx - sx*sx on large x (timestamps).
+	var sxy, sxx float64
+	for i := range xs {
+		sxy, sxx = sxy+(xs[i]-mx)*(ys[i]-my), sxx+(xs[i]-mx)*(xs[i]-mx)
+	}
+	if sxx <= count*mx*mx*1e-24 {
+		return nil, nil
+	}
+	return sxy / sxx, nil
 }
 
 // EvalError locates a failed expression inside a component so validation can name it.

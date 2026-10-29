@@ -93,6 +93,7 @@ func SpecLiterals(spec dashboard.Spec) []Literal {
 	return out
 }
 
+var identRe = regexp.MustCompile(`^[A-Za-z_]\w*$`)
 var dataRef = regexp.MustCompile(`\bdata\.([A-Za-z_]\w*)`)
 var computedRef = regexp.MustCompile(`\bcomputed\.([A-Za-z_]\w*)`)
 
@@ -124,11 +125,17 @@ func SpecOrphans(spec dashboard.Spec, tables, scenarios map[string]bool) []strin
 	ids := map[string]bool{}
 	for _, c := range spec.Components {
 		ids[c.ID] = true
-		usedRows[c.Rows] = true
-		for _, v := range []string{c.Value, c.Delta, c.Sub, c.Tone, c.Label, c.Actual, c.Limit, c.Metric, c.MD} {
+		plainRows := identRe.MatchString(c.Rows)
+		if plainRows {
+			usedRows[c.Rows] = true
+		} else {
+			add(c.Rows) // a CEL expression
+		}
+		for _, v := range []string{c.Title, c.Value, c.Delta, c.Sub, c.Tone, c.Label, c.Actual, c.Limit, c.Metric, c.MD} {
 			add(v)
 		}
 		for _, col := range c.Columns {
+			add(col.Label)
 			add(col.Value)
 			add(col.Tone)
 		}
@@ -142,7 +149,7 @@ func SpecOrphans(spec dashboard.Spec, tables, scenarios map[string]bool) []strin
 		if c.Rule != nil {
 			add(c.Rule.Y)
 		}
-		if _, ok := spec.Data[c.Rows]; c.Rows != "" && !ok {
+		if _, ok := spec.Data[c.Rows]; plainRows && !ok {
 			out = append(out, fmt.Sprintf("component %s rows reads missing query %s", c.ID, c.Rows))
 		}
 		for _, s := range c.Scenarios {
@@ -150,6 +157,9 @@ func SpecOrphans(spec dashboard.Spec, tables, scenarios map[string]bool) []strin
 				out = append(out, fmt.Sprintf("component %s lists missing scenario %s", c.ID, s))
 			}
 		}
+	}
+	for _, pg := range spec.Pages {
+		add(pg.Title)
 	}
 	body := text.String()
 	refData, refComputed := map[string]bool{}, map[string]bool{}

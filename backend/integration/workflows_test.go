@@ -56,6 +56,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
+	check := &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
+	dash.Lint = check.SpecLint
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
 	engine := &dashboard.Engine{Expr: expr, Reader: sources}
 	// The initialized model has zero spending, so every scenario's runway is null.
@@ -210,7 +212,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || !resolved.Resolved || resolved.Adjustment == nil {
 		t.Fatal("adjustment", resolved, e)
 	}
-	createShared := func(id, exprValue string, data map[string]dashboard.Query) {
+	createShared := func(id, exprValue string, data map[string]dashboard.Query) []string {
 		t.Helper()
 		if _, e = dash.Create(ctx, pa, dashboard.CreateInput{ID: id, Title: id}); e != nil {
 			t.Fatal(e)
@@ -221,11 +223,16 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		if e != nil || !draft.Validation.OK {
 			t.Fatal("draft", draft, e)
 		}
-		if _, e = dash.Publish(ctx, pa, id, draft.DraftVersion, "Synthetic publish"); e != nil {
+		published, e := dash.Publish(ctx, pa, id, draft.DraftVersion, "Synthetic publish")
+		if e != nil {
 			t.Fatal(e)
 		}
+		return published.Warnings
 	}
 	createShared("fixed", "42", map[string]dashboard.Query{})
+	if w := createShared("orphan", "42", map[string]dashboard.Query{"unused": {From: "journal"}}); len(w) == 0 || !strings.Contains(strings.Join(w, ";"), "data.unused is never referenced") {
+		t.Fatal("publish warning for orphan query", w)
+	}
 	if _, e = dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "fixed", Page: "details", Component: dashboard.Component{ID: "note", Type: "text", MD: "extra"}}); e != nil {
 		t.Fatal("add to a new page", e)
 	}
@@ -308,6 +315,16 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 	if draft, e := dash.Get(ctx, pa, "undo-publish", "draft"); e != nil || draft.Version != edited.DraftVersion || draft.Status != "draft" {
 		t.Fatal("undoing a publish should restore its draft", draft.Version, draft.Status, e)
+	}
+	bulk, e := book.SetTags(ctx, pa, ledger.TagInput{Where: "true", Add: []string{"bulk:undo"}})
+	if e != nil || bulk.Updated < 2 {
+		t.Fatal("bulk tags", bulk, e)
+	}
+	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: bulk.EventID, Reason: "Undo bulk tags"}); e != nil {
+		t.Fatal(e)
+	}
+	if page, e := book.Entries(ctx, pa, ledger.EntriesInput{Tag: "bulk:undo"}); e != nil || len(page.Items) != 0 {
+		t.Fatal("bulk tag undo should restore every entry", page.Items, e)
 	}
 	ro := pa
 	ro.Scopes = []string{"ledger:read"}

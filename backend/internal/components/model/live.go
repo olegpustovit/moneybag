@@ -63,12 +63,13 @@ func (s *Service) liveStart(ctx context.Context, p principal.Principal, asOf str
 	}
 	rateOf := func(q rates.Quote) RateUsed { return RateUsed{q.ID, q.Pair, q.At, q.Value.Float()} }
 	pr.RatesUsed = append(pr.RatesUsed, rateOf(fx[0]))
+	accounts, e := s.accountMap(ctx, p)
+	if e != nil {
+		return nil, pr, e
+	}
 	var net, wise, kyiv, grams float64
 	for _, row := range bal.Rows {
-		acc, e := s.Ledger.Account(ctx, p, row.Key)
-		if e != nil {
-			return nil, pr, e
-		}
+		acc := accounts[row.Key]
 		if acc.Type != "asset" && acc.Type != "liability" {
 			continue
 		}
@@ -106,6 +107,12 @@ func (s *Service) liveStart(ctx context.Context, p principal.Principal, asOf str
 	}
 	pr.StartSource = "ledger"
 	return live, pr, nil
+}
+
+// StartSource reports whether today's projection start resolves from the "ledger" or the stored "assumptions".
+func (s *Service) StartSource(ctx context.Context, p principal.Principal) (string, error) {
+	_, pr, e := s.liveStart(ctx, p, "")
+	return pr.StartSource, e
 }
 
 func validRef(o Override) error {

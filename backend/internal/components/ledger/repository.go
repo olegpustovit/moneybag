@@ -92,9 +92,28 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 		}
 	}
 	if in.Effective {
-		reversed := []string{}
-		if e := db.Collection("journal").Distinct(ctx, "links.id", bson.M{"user_id": p.UserID, "kind": "reversal"}).Decode(&reversed); e != nil {
+		cur, e := db.Collection("journal").Find(ctx, bson.M{"user_id": p.UserID, "kind": "reversal", "status": "posted"}, options.Find().SetProjection(bson.M{"links": 1}))
+		if e != nil {
 			return EntriesPage{}, e
+		}
+		var revs []Entry
+		if e := cur.All(ctx, &revs); e != nil {
+			return EntriesPage{}, e
+		}
+		undone := map[string]bool{} // reversals that are themselves reversed restore their original
+		for _, r := range revs {
+			for _, l := range r.Links {
+				undone[l.ID] = true
+			}
+		}
+		reversed := []string{}
+		for _, r := range revs {
+			if undone[r.ID] {
+				continue
+			}
+			for _, l := range r.Links {
+				reversed = append(reversed, l.ID)
+			}
 		}
 		f["_id"] = bson.M{"$nin": reversed}
 		if in.Kind == "" {

@@ -142,10 +142,23 @@ func (s *Service) known(ctx context.Context, p principal.Principal) (map[string]
 	return tbl, sc, nil
 }
 
+// runTimeout bounds one consistency run so the API and MCP tool cannot hang.
+const runTimeout = 30 * time.Second
+
 func (s *Service) Run(ctx context.Context, p principal.Principal) (Result, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return Result{}, e
 	}
+	ctx, cancel := context.WithTimeout(ctx, runTimeout)
+	defer cancel()
+	res, e := s.run(ctx, p)
+	if e != nil && ctx.Err() != nil {
+		return Result{Checks: []Check{{"consistency", false, "timed out"}}}, nil
+	}
+	return res, e
+}
+
+func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error) {
 	entries, e := s.entries(ctx, p)
 	if e != nil {
 		return Result{}, e
@@ -429,6 +442,10 @@ func (s *Service) Run(ctx context.Context, p principal.Principal) (Result, error
 	// 10. scenario start equals live net worth (assumption start_net_usd)
 	detail, ok := any("no start_net_usd assumption"), true
 	for _, r := range state.Assumptions {
+		if src, e := s.Model.StartSource(ctx, p); e == nil && src == "ledger" {
+			detail, ok = "start resolves live from the ledger; the stored start_net_usd assumption is unused", true
+			break
+		}
 		if v, has := r.Cells["value"].(float64); r.ID == "start_net_usd" && has {
 			live, e := s.netWorth(ctx, p, "USD")
 			ok = e == nil && math.Abs(v-live) <= tolerance

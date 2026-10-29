@@ -231,19 +231,27 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 			return e
 		}
 		closed := old.ClosedAt != nil
-		_, e = s.Ledger.UpdateAccount(ctx, p, ledger.AccountUpdate{ID: id, Name: &old.Name, Pot: &old.Pot, Location: &old.Location, Close: &closed})
+		_, e = s.Ledger.UpdateAccount(ctx, p, ledger.AccountUpdate{ID: id, Name: &old.Name, Pot: &old.Pot, Location: &old.Location, Class: &old.Class, Groups: &old.Groups, Close: &closed})
 		return e
 	case "tags_set":
-		old, e := decodeBefore[[]string](event)
-		if e != nil {
-			return e
+		olds, e := decodeBefore[map[string][]string](event)
+		if e != nil { // old single-entry format: a plain tag list
+			old, e := decodeBefore[[]string](event)
+			if e != nil {
+				return e
+			}
+			olds = map[string][]string{id: old}
 		}
-		current, e := s.Ledger.Get(ctx, p, id)
-		if e != nil {
-			return e
+		for eid, old := range olds {
+			current, e := s.Ledger.Get(ctx, p, eid)
+			if e != nil {
+				return e
+			}
+			if _, e = s.Ledger.SetTags(ctx, p, ledger.TagInput{EntryIDs: []string{eid}, Add: old, Remove: current.Tags}); e != nil {
+				return e
+			}
 		}
-		_, e = s.Ledger.SetTags(ctx, p, ledger.TagInput{EntryIDs: []string{id}, Add: old, Remove: current.Tags})
-		return e
+		return nil
 	case "budget_set_line":
 		old, e := decodeBefore[budget.Line](event)
 		if e != nil {

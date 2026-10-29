@@ -34,6 +34,11 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	switch {
 	case source == "journal" || source == "effective_entries" || source == "postings":
 		in := ledger.EntriesInput{Status: "posted", Limit: 100, Effective: source != "journal"}
+		if source == "postings" {
+			in.From, _ = params["from"].(string)
+			in.To, _ = params["to"].(string)
+		}
+		cache := map[string]*big.Rat{}
 		var accounts map[string]ledger.Account
 		if source == "postings" {
 			var e error
@@ -57,7 +62,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 					return nil, fmt.Errorf("journal source exceeds 8 MiB")
 				}
 				if source == "postings" {
-					rows, e := s.postingRows(ctx, p, entry, accounts)
+					rows, e := s.postingRows(ctx, p, entry, accounts, cache)
 					if e != nil {
 						return nil, e
 					}
@@ -208,6 +213,16 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		for _, q := range quotes {
 			out = append(out, map[string]any{"pair": q.Pair, "base": q.Base, "quote": q.Quote, "at": q.At, "value": q.Value.Float(), "source": q.Source})
 		}
+	case strings.HasPrefix(source, "rate_history:"):
+		from, _ := params["from"].(string)
+		to, _ := params["to"].(string)
+		quotes, e := s.Rates.History(ctx, p, strings.Split(strings.TrimPrefix(source, "rate_history:"), ","), from, to)
+		if e != nil {
+			return nil, e
+		}
+		for _, q := range quotes {
+			out = append(out, map[string]any{"pair": q.Pair, "at": q.At, "value": q.Value.Float(), "source": q.Source})
+		}
 	case strings.HasPrefix(source, "view:"):
 		return s.viewRows(ctx, p, strings.TrimPrefix(source, "view:"))
 	case source == "balance_history":
@@ -280,7 +295,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			out = append(out, r)
 		}
 	default:
-		return nil, fmt.Errorf("unknown source %q; use journal, effective_entries, postings, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id>, forecast_series:<id>, income_actuals, table:<id> or view:<id>", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, effective_entries, postings, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, rate_history:<PAIR[,PAIR]>, scenarios, scenario:<id>, forecast_series:<id>, income_actuals, table:<id> or view:<id>", source)
 	}
 	return out, nil
 }
@@ -318,14 +333,14 @@ func groupsAny(g map[string]string) map[string]any {
 }
 
 // postingRows flattens one entry into a row per posting, valued at the entry date like the months source.
-func (s *Sources) postingRows(ctx context.Context, p principal.Principal, entry ledger.Entry, accounts map[string]ledger.Account) ([]map[string]any, error) {
+func (s *Sources) postingRows(ctx context.Context, p principal.Principal, entry ledger.Entry, accounts map[string]ledger.Account, cache map[string]*big.Rat) ([]map[string]any, error) {
 	rows := []map[string]any{}
 	for _, post := range entry.Postings {
-		eur, e := s.valueAt(ctx, p, post, "EUR", entry.Date)
+		eur, e := s.valueAt(ctx, p, post, "EUR", entry.Date, cache)
 		if e != nil {
 			return nil, e
 		}
-		usd, e := s.valueAt(ctx, p, post, "USD", entry.Date)
+		usd, e := s.valueAt(ctx, p, post, "USD", entry.Date, cache)
 		if e != nil {
 			return nil, e
 		}
@@ -340,7 +355,7 @@ func (s *Sources) postingRows(ctx context.Context, p principal.Principal, entry 
 }
 
 // valueAt mirrors the budget conversion: a posting price in EUR wins, otherwise the rate at end of the entry date.
-func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledger.Posting, target, date string) (ledger.Decimal, error) {
+func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledger.Posting, target, date string, cache map[string]*big.Rat) (ledger.Decimal, error) {
 	amount := post.Amount
 	if amount.Commodity == target {
 		return amount.Value, nil
@@ -355,6 +370,19 @@ func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledge
 			return v, nil
 		}
 	}
-	v, e := s.Valuer.Convert(ctx, p, amount, target, date+"T23:59:59Z")
+	if s.Rates == nil {
+		v, e := s.Valuer.Convert(ctx, p, amount, target, date+"T23:59:59Z")
+		return v.Value, e
+	}
+	key := amount.Commodity + ">" + target + "@" + date
+	r, ok := cache[key]
+	if !ok {
+		var e error
+		if r, e = s.Rates.Rate(ctx, p, amount.Commodity, target, date+"T23:59:59Z"); e != nil {
+			return ledger.Decimal{}, e
+		}
+		cache[key] = r
+	}
+	v, e := rates.Apply(amount, r, target)
 	return v.Value, e
 }

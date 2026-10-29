@@ -20,6 +20,17 @@ func testSingleSource(t *testing.T, ctx context.Context, p principal.Principal, 
 	if _, e := sources.Rates.Set(ctx, p, rates.SetInput{Pair: "EUR/USD", Value: ledger.MustDecimal("1.1"), At: "2025-01-01T00:00:00Z", Source: "Synthetic quote"}); e != nil {
 		t.Fatal(e)
 	}
+	for _, q := range []rates.SetInput{{Pair: "EUR/USD", Value: ledger.MustDecimal("1.2"), At: "2025-02-01T00:00:00Z", Source: "Synthetic quote"}, {Pair: "GBP/CHF", Value: ledger.MustDecimal("2"), At: "2025-01-05T00:00:00Z", Source: "Synthetic quote"}} {
+		if _, e := sources.Rates.Set(ctx, p, q); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if h, e := sources.Rows(ctx, p, "rate_history:EUR/USD"); e != nil || len(h) != 2 || h[0]["at"].(string) > h[1]["at"].(string) || h[1]["value"] != 1.2 {
+		t.Fatal("rate history", h, e)
+	}
+	if h, e := sources.Rows(ctx, p, "rate_history:CHF/GBP"); e != nil || len(h) != 1 || h[0]["value"] != 0.5 {
+		t.Fatal("inverse rate history", h, e)
+	}
 	food := map[string]string{"category": "Food"}
 	for _, a := range []ledger.Account{
 		{ID: "assets:ws2bank", Type: "asset", Name: "Bank", Class: "bank", Commodities: []string{"EUR"}},

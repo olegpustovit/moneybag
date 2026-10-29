@@ -56,6 +56,8 @@ func (s *Service) SetTags(ctx context.Context, p principal.Principal, in TagInpu
 	result := TagResult{Matched: len(in.EntryIDs)}
 	db, _ := s.repo.db(p)
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
+		ids := []string{}
+		before, after := map[string][]string{}, map[string][]string{}
 		for _, id := range in.EntryIDs {
 			entry, e := s.Get(tx, p, id)
 			if e != nil {
@@ -78,17 +80,27 @@ func (s *Service) SetTags(ctx context.Context, p principal.Principal, in TagInpu
 			if slices.Equal(tags, entry.Tags) {
 				continue
 			}
-			event, e := s.audit.Write(tx, p, "tags_set", audit.Target{Collection: "journal", ID: id}, "", entry.Tags, tags, func(ctx context.Context) error {
-				_, e := db.Collection("entry_tags").ReplaceOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID, "entry_id": id, "tags": tags}, options.Replace().SetUpsert(true))
-				return e
-			})
-			if e != nil {
-				return e
-			}
-			result.Updated++
-			result.EventID = event
+			ids = append(ids, id)
+			before[id], after[id] = entry.Tags, tags
 		}
-		return nil
+		if len(ids) == 0 {
+			return nil
+		}
+		// One event per run so a bulk run undoes as a unit; a single entry keeps the plain tag-list format.
+		var b, a any = before, after
+		if len(ids) == 1 {
+			b, a = before[ids[0]], after[ids[0]]
+		}
+		event, e := s.audit.Write(tx, p, "tags_set", audit.Target{Collection: "journal", ID: ids[0]}, "", b, a, func(ctx context.Context) error {
+			for _, id := range ids {
+				if _, e := db.Collection("entry_tags").ReplaceOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID, "entry_id": id, "tags": after[id]}, options.Replace().SetUpsert(true)); e != nil {
+					return e
+				}
+			}
+			return nil
+		})
+		result.Updated, result.EventID = len(ids), event
+		return e
 	})
 	return result, e
 }

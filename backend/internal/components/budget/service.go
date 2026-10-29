@@ -105,24 +105,35 @@ func (s *Service) Lines(ctx context.Context, p principal.Principal) ([]Line, err
 		if l.GroupRef == nil || e != nil {
 			continue
 		}
-		var found []struct {
-			ID string `bson:"id"`
-		}
-		c, err := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}, "groups." + l.GroupRef.Dimension: l.GroupRef.Value}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
-		if err == nil {
-			err = c.All(ctx, &found)
-		}
+		found, err := s.groupAccounts(ctx, p, *l.GroupRef)
 		if err != nil {
 			return nil, err
 		}
-		out[i].Accounts = slices.Clone(l.Accounts)
-		for _, a := range found {
-			if !slices.Contains(out[i].Accounts, a.ID) {
-				out[i].Accounts = append(out[i].Accounts, a.ID)
-			}
-		}
+		out[i].Accounts = mergeAccounts(l.Accounts, found)
 	}
 	return out, e
+}
+
+type accountID struct {
+	ID string `bson:"id"`
+}
+
+func (s *Service) groupAccounts(ctx context.Context, p principal.Principal, ref GroupRef) ([]accountID, error) {
+	var found []accountID
+	c, err := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}, "groups." + ref.Dimension: ref.Value}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+	if err == nil {
+		err = c.All(ctx, &found)
+	}
+	return found, err
+}
+func mergeAccounts(base []string, found []accountID) []string {
+	out := slices.Clone(base)
+	for _, a := range found {
+		if !slices.Contains(out, a.ID) {
+			out = append(out, a.ID)
+		}
+	}
+	return out
 }
 func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (SetResult, error) {
 	if e := p.Require("ledger:write"); e != nil {
@@ -171,7 +182,19 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 		line.Order = *in.Order
 	}
 	id, e := s.audit.Write(ctx, p, "budget_set_line", audit.Target{Collection: "budgets", ID: in.ID}, "", old, line, func(tx context.Context) error {
-		for _, a := range line.Accounts {
+		mine := line.Accounts
+		if line.GroupRef != nil {
+			found, e := s.groupAccounts(tx, p, *line.GroupRef)
+			if e != nil {
+				return e
+			}
+			mine = mergeAccounts(mine, found)
+		}
+		others, e := s.Lines(tx, p) // resolved, so group_ref lines claim their accounts too
+		if e != nil {
+			return e
+		}
+		for _, a := range mine {
 			n, e := s.repo.db.Collection("accounts").CountDocuments(tx, bson.M{"user_id": p.UserID, "id": a, "type": "expense"})
 			if e != nil {
 				return e
@@ -179,15 +202,13 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 			if n != 1 {
 				return fmt.Errorf("budget mapping must reference an owned expense account")
 			}
-			n, e = s.repo.db.Collection("budgets").CountDocuments(tx, bson.M{"user_id": p.UserID, "id": bson.M{"$ne": line.ID}, "accounts": a, "archived": bson.M{"$ne": true}})
-			if e != nil {
-				return e
-			}
-			if n > 0 {
-				return fmt.Errorf("expense account is already mapped to another budget line")
+			for _, o := range others {
+				if o.ID != line.ID && slices.Contains(o.Accounts, a) {
+					return fmt.Errorf("expense account is already mapped to another budget line")
+				}
 			}
 		}
-		_, e := s.repo.db.Collection("budgets").ReplaceOne(tx, bson.M{"user_id": p.UserID, "id": in.ID}, line, options.Replace().SetUpsert(true))
+		_, e = s.repo.db.Collection("budgets").ReplaceOne(tx, bson.M{"user_id": p.UserID, "id": in.ID}, line, options.Replace().SetUpsert(true))
 		return e
 	})
 	return SetResult{line, id}, e

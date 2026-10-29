@@ -187,13 +187,16 @@ func (x *execution) render(c Component) (string, any, error) {
 		}
 		sub := ""
 		if c.Sub != "" {
-			s, e := x.evalAt("sub", c.Sub, nil)
+			// Expand placeholders in the source, never in the result: evaluated ledger text may contain "{{".
+			src, e := x.template("sub", c.Sub)
 			if e != nil {
 				return "", nil, e
 			}
-			if sub, e = x.template("sub", fmt.Sprint(s)); e != nil {
+			s, e := x.evalAt("sub", src, nil)
+			if e != nil {
 				return "", nil, e
 			}
+			sub = fmt.Sprint(s)
 		}
 		if c.Delta != "" {
 			d, e := x.evalAt("delta", c.Delta, nil)
