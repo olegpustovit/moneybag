@@ -169,7 +169,11 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			if proj.Runway != nil {
 				runway = *proj.Runway
 			}
-			out = append(out, map[string]any{"id": proj.Scenario, "name": proj.Name, "spendUsd": proj.SpendUSD, "endNetUsd": proj.EndNetUSD, "runway": runway})
+			var exGold any
+			if proj.RunwayExGold != nil {
+				exGold = *proj.RunwayExGold
+			}
+			out = append(out, map[string]any{"id": proj.Scenario, "name": proj.Name, "spendUsd": proj.SpendUSD, "endNetUsd": proj.EndNetUSD, "runway": runway, "savings_usd_mo": proj.SavingsUSDMo, "kyiv_empty_month": proj.KyivEmptyMonth, "runway_ex_gold": exGold, "start_as_of": proj.StartAsOf, "start_net_usd": proj.StartNetUSD, "journal_seq": proj.JournalSeq})
 		}
 	case source == "income":
 		state, e := s.Model.Get(ctx, p)
@@ -217,8 +221,51 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			}
 			out = append(out, map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
 		}
+	case strings.HasPrefix(source, "forecast_series:"):
+		id := strings.TrimPrefix(source, "forecast_series:")
+		state, e := s.Model.Get(ctx, p)
+		if e != nil {
+			return nil, e
+		}
+		horizon := 12
+		for _, r := range state.Assumptions {
+			if n, ok := r.Cells["value"].(float64); ok && r.ID == "horizon" {
+				horizon = int(n)
+			}
+		}
+		if h, ok := params["horizon"].(float64); ok {
+			horizon = int(h)
+		}
+		projections, e := s.Model.Forecast(ctx, p, model.ForecastInput{ScenarioIDs: []string{id}, HorizonMonths: horizon})
+		if e != nil {
+			return nil, e
+		}
+		for _, pt := range projections[0].Months {
+			out = append(out, map[string]any{"m": pt.M, "net": pt.Net, "cash": pt.Cash, "wise": pt.Wise, "kyiv": pt.Kyiv, "gold": pt.Gold})
+		}
+	case source == "income_actuals":
+		// params from/to (YYYY-MM-DD) default to the last six months through today.
+		to, _ := params["to"].(string)
+		from, _ := params["from"].(string)
+		if to == "" {
+			to = time.Now().Format("2006-01-02")
+		}
+		if from == "" {
+			from = time.Now().AddDate(0, -5, 0).Format("2006-01") + "-01"
+		}
+		months, e := s.Model.IncomeReconcile(ctx, p, model.ReconcileInput{From: from, To: to})
+		if e != nil {
+			return nil, e
+		}
+		for _, m := range months {
+			r, e := native(m)
+			if e != nil {
+				return nil, e
+			}
+			out = append(out, r)
+		}
 	default:
-		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id> or table:<id>", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id>, forecast_series:<id>, income_actuals or table:<id>", source)
 	}
 	return out, nil
 }

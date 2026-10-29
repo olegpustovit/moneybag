@@ -6,12 +6,18 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"math"
+	"slices"
 	"strconv"
+	"strings"
 )
 
+// Metrics lists the valid scenario_compare metric names; cash, gold, wise and kyiv are month-12 values.
+var Metrics = []string{"spendUsd", "endNetUsd", "runway", "cash", "gold", "wise", "kyiv", "savings_usd_mo", "kyiv_empty_month", "runway_ex_gold"}
+
 type CompareInput struct {
-	ScenarioIDs []string `json:"scenario_ids"`
-	Metrics     []string `json:"metrics"`
+	ScenarioIDs []string `json:"scenario_ids" jsonschema:"1..20 scenario ids"`
+	Metrics     []string `json:"metrics,omitempty" jsonschema:"metric names; default spendUsd, endNetUsd, runway"`
+	AsOf        string   `json:"as_of,omitempty" jsonschema:"start date YYYY-MM-DD for the live ledger start; default today"`
 }
 type CompareResult struct {
 	Table []map[string]any `json:"table"`
@@ -22,11 +28,11 @@ func (s *Service) Compare(ctx context.Context, p principal.Principal, in Compare
 		in.Metrics = []string{"spendUsd", "endNetUsd", "runway"}
 	}
 	for _, m := range in.Metrics {
-		if m != "spendUsd" && m != "endNetUsd" && m != "runway" && m != "cash" && m != "gold" && m != "wise" && m != "kyiv" {
-			return CompareResult{}, fmt.Errorf("unknown metric %s", m)
+		if !slices.Contains(Metrics, m) {
+			return CompareResult{}, fmt.Errorf("unknown metric %s; valid metrics: %s", m, strings.Join(Metrics, ", "))
 		}
 	}
-	series, e := s.Forecast(ctx, p, ForecastInput{ScenarioIDs: in.ScenarioIDs, HorizonMonths: 12})
+	series, e := s.Forecast(ctx, p, ForecastInput{ScenarioIDs: in.ScenarioIDs, HorizonMonths: 12, AsOf: in.AsOf})
 	if e != nil {
 		return CompareResult{}, e
 	}
@@ -50,6 +56,12 @@ func (s *Service) Compare(ctx context.Context, p principal.Principal, in Compare
 				row[m] = last.Wise
 			case "kyiv":
 				row[m] = last.Kyiv
+			case "savings_usd_mo":
+				row[m] = r.SavingsUSDMo
+			case "kyiv_empty_month":
+				row[m] = r.KyivEmptyMonth
+			case "runway_ex_gold":
+				row[m] = r.RunwayExGold
 			}
 		}
 		out.Table = append(out.Table, row)

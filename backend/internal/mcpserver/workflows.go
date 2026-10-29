@@ -105,7 +105,7 @@ func registerWorkflows(r registration, s Services) {
 			Groups [][]ledger.Entry `json:"groups"`
 		}{v}, e
 	})
-	add(r, "scenario_compare", "model", "ledger:read", "Use this when comparing scenarios over the next 12 months. Metrics are spendUsd, endNetUsd, runway, cash, gold, wise or kyiv.", true, false, s.Model.Compare)
+	add(r, "scenario_compare", "model", "ledger:read", "Use this when comparing scenarios over the next 12 months. Valid metrics: spendUsd, endNetUsd, runway, cash, gold, wise, kyiv (cash, gold, wise, kyiv are month-12 values), savings_usd_mo, kyiv_empty_month, runway_ex_gold. Default spendUsd, endNetUsd, runway. Starting state comes from the live ledger as of as_of (see forecast_run).", true, false, s.Model.Compare)
 	add(r, "whatif_asset_shock", "model", "ledger:read", "Use this when stress-testing current holdings. Returns USD net-worth change by pot for commodity percentage shocks. Optional scenario_id also reports its 12-month net after the immediate valuation shock, with future cash flows unchanged.", true, false, func(ctx context.Context, p principal.Principal, in model.ShockInput) (model.ShockResult, error) {
 		return s.Model.Shock(ctx, p, in, s.Ledger, s.Rates)
 	})

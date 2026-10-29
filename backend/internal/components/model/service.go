@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
+	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -20,6 +23,9 @@ type Override struct {
 	Assumption string   `json:"assumption" bson:"assumption"`
 	Value      *float64 `json:"value,omitempty" bson:"value,omitempty"`
 	Expr       string   `json:"expr,omitempty" bson:"expr,omitempty"`
+	// Ref resolves a model input at forecast time: budget_line:<id>, budget_lines.total or income_stream:<id>. The assumption name must end in _usd or _eur; the value is converted to that currency with the live EUR/USD rate.
+	Ref    string   `json:"ref,omitempty" bson:"ref,omitempty" jsonschema:"model input: budget_line:<id> (limit), budget_lines.total or income_stream:<id> (monthly amount); assumption must end in _usd or _eur, converted with the live EUR/USD rate"`
+	Factor *float64 `json:"factor,omitempty" bson:"factor,omitempty" jsonschema:"multiplier applied to the resolved ref value"`
 }
 type Event struct {
 	Month   int     `json:"month" bson:"month"`
@@ -59,18 +65,29 @@ type Income struct {
 	Start     string  `json:"start,omitempty" bson:"start,omitempty"`
 	End       string  `json:"end,omitempty" bson:"end,omitempty"`
 	GrowthPct float64 `json:"growth_pct,omitempty" bson:"growth_pct,omitempty"`
-	// Reimbursement streams repay spend already paid from Kyiv cash, so they net against Kyiv instead of adding wealth.
-	Reimbursement bool `json:"reimbursement,omitempty" bson:"reimbursement,omitempty"`
+	// Deprecated: use Kind "reimbursement". Still read so stored streams keep working.
+	Reimbursement bool `json:"reimbursement,omitempty" bson:"reimbursement,omitempty" jsonschema:"deprecated; use kind reimbursement"`
+	// Kind is salary, side or reimbursement. Reimbursement streams repay spend already paid from Kyiv cash, so they net against Kyiv instead of adding wealth.
+	Kind string `json:"kind,omitempty" bson:"kind,omitempty" jsonschema:"salary, side or reimbursement; reimbursement is never counted as income"`
+	// PayerMatch is a CEL expression over row.payee and row.tags selecting the entries that pay this stream.
+	PayerMatch string `json:"payer_match,omitempty" bson:"payer_match,omitempty" jsonschema:"CEL over row.payee and row.tags selecting entries that pay this stream, e.g. row.payee == \"Acme\""`
+	// LandsIn is the account id receiving the money; without it actuals are read from income-type accounts.
+	LandsIn    string `json:"lands_in,omitempty" bson:"lands_in,omitempty" jsonschema:"account id receiving the money; empty reads income-type accounts"`
+	GrossOrNet string `json:"gross_or_net,omitempty" bson:"gross_or_net,omitempty" jsonschema:"gross or net"`
 }
+
+func (v Income) IsReimbursement() bool { return v.Kind == "reimbursement" || v.Reimbursement }
+
 type State struct {
 	Assumptions []tables.Row `json:"assumptions"`
 	Scenarios   []Scenario   `json:"scenarios"`
 	Streams     []Income     `json:"streams"`
 }
 type ForecastInput struct {
-	ScenarioIDs   []string `json:"scenario_ids"`
-	HorizonMonths int      `json:"horizon_months"`
-	ValueIn       string   `json:"value_in,omitempty"`
+	ScenarioIDs   []string `json:"scenario_ids" jsonschema:"1..20 scenario ids"`
+	HorizonMonths int      `json:"horizon_months" jsonschema:"1..600"`
+	ValueIn       string   `json:"value_in,omitempty" jsonschema:"USD (default) or EUR"`
+	AsOf          string   `json:"as_of,omitempty" jsonschema:"start date YYYY-MM-DD for the live ledger start; default today in Europe/Zagreb"`
 }
 type Point struct {
 	M      int      `json:"m"`
@@ -92,6 +109,9 @@ type Projection struct {
 	EndNetUSD      float64  `json:"endNetUsd"`
 	Runway         *float64 `json:"runway"`
 	KyivEmptyMonth int      `json:"kyivEmptyMonth"`
+	SavingsUSDMo   float64  `json:"savings_usd_mo"`
+	RunwayExGold   *float64 `json:"runway_ex_gold"`
+	Provenance
 }
 type MongoRepository struct{ db *mongo.Database }
 type Service struct {
@@ -99,11 +119,15 @@ type Service struct {
 	tables *tables.Service
 	audit  *audit.Service
 	expr   *expressions.Engine
+	// Optional live-start dependencies; without Ledger and Rates forecasts use the stored assumptions.
+	Ledger *ledger.Service
+	Rates  *rates.Service
+	Budget *budget.Service
 }
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
 func NewService(r *MongoRepository, t *tables.Service, a *audit.Service, e *expressions.Engine) *Service {
-	return &Service{r, t, a, e}
+	return &Service{repo: r, tables: t, audit: a, expr: e}
 }
 func (s *Service) Get(ctx context.Context, p principal.Principal) (State, error) {
 	if e := p.Require("ledger:read"); e != nil {
@@ -146,8 +170,21 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 		return Scenario{}, fmt.Errorf("id, name, at most 100 overrides and 600 events required")
 	}
 	for _, o := range in.Overrides {
-		if o.Assumption == "" || (o.Value == nil) == (o.Expr == "") {
-			return Scenario{}, fmt.Errorf("each override needs assumption and exactly one value or expr")
+		n := 0
+		for _, set := range []bool{o.Value != nil, o.Expr != "", o.Ref != ""} {
+			if set {
+				n++
+			}
+		}
+		if o.Assumption == "" || n != 1 {
+			return Scenario{}, fmt.Errorf("each override needs assumption and exactly one value, expr or ref")
+		}
+		if o.Ref != "" {
+			if e := validRef(o); e != nil {
+				return Scenario{}, e
+			}
+		} else if o.Factor != nil {
+			return Scenario{}, fmt.Errorf("factor applies only to ref overrides")
 		}
 		if o.Value != nil && (math.IsInf(*o.Value, 0) || math.IsNaN(*o.Value)) {
 			return Scenario{}, fmt.Errorf("finite override required")
@@ -191,11 +228,23 @@ func (s *Service) SetIncome(ctx context.Context, p principal.Principal, streams 
 		return nil, fmt.Errorf("at most 100 income streams")
 	}
 	ids := map[string]bool{}
-	for _, v := range streams {
+	for i, v := range streams {
 		if v.ID == "" || ids[v.ID] || v.Amount < 0 || math.IsInf(v.Amount, 0) || math.IsNaN(v.Amount) || v.GrowthPct < -100 || math.IsInf(v.GrowthPct, 0) || math.IsNaN(v.GrowthPct) || (v.Currency != "USD" && v.Currency != "EUR") || (v.Frequency != "monthly" && v.Frequency != "biweekly" && v.Frequency != "yearly") {
 			return nil, fmt.Errorf("income needs unique id, positive amount, USD/EUR and monthly/biweekly/yearly frequency")
 		}
 		ids[v.ID] = true
+		if v.Kind != "" && v.Kind != "salary" && v.Kind != "side" && v.Kind != "reimbursement" || v.GrossOrNet != "" && v.GrossOrNet != "gross" && v.GrossOrNet != "net" {
+			return nil, fmt.Errorf("income kind must be salary, side or reimbursement and gross_or_net gross or net")
+		}
+		if v.PayerMatch != "" {
+			if _, e := s.expr.Compile(v.PayerMatch); e != nil {
+				return nil, fmt.Errorf("payer_match: %w", e)
+			}
+		}
+		if v.Kind == "" && v.Reimbursement {
+			streams[i].Kind = "reimbursement"
+		}
+		streams[i].Reimbursement = streams[i].Kind == "reimbursement"
 		for _, d := range []string{v.Start, v.End} {
 			if d != "" {
 				if _, e := time.Parse("2006-01-02", d); e != nil {
@@ -243,6 +292,13 @@ func (s *Service) Forecast(ctx context.Context, p principal.Principal, in Foreca
 			a[key] = float64(v)
 		}
 	}
+	live, prov, e := s.liveStart(ctx, p, in.AsOf)
+	if e != nil {
+		return nil, e
+	}
+	for k, v := range live {
+		a[k] = v
+	}
 	out := []Projection{}
 	for _, id := range in.ScenarioIDs {
 		var sc *Scenario
@@ -259,9 +315,17 @@ func (s *Service) Forecast(ctx context.Context, p principal.Principal, in Foreca
 		for k, v := range a {
 			vars[k] = v
 		}
+		pr := prov
 		for _, o := range sc.Overrides {
 			if o.Value != nil {
 				vars[o.Assumption] = *o.Value
+			} else if o.Ref != "" {
+				v, e := s.resolveRef(ctx, p, o, state.Streams, vars["eurusd"])
+				if e != nil {
+					return nil, e
+				}
+				vars[o.Assumption] = v
+				pr.Inputs = append(append([]ResolvedInput{}, pr.Inputs...), ResolvedInput{o.Assumption, o.Ref, v})
 			} else {
 				r, e := s.expr.Eval(ctx, o.Expr, map[string]any{"params": vars})
 				if e != nil {
@@ -286,6 +350,8 @@ func (s *Service) Forecast(ctx context.Context, p principal.Principal, in Foreca
 		if e != nil {
 			return nil, e
 		}
+		pr.StartNetUSD = round(vars["start_net_usd"])
+		proj.Provenance = pr
 		if in.ValueIn == "EUR" {
 			rate := vars["eurusd"]
 			for i := range proj.Months {
@@ -341,6 +407,7 @@ func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, s
 	out := Projection{Currency: "USD", Scenario: sc.ID, Name: sc.Name, SpendUSD: round(spend), Months: []Point{}}
 	if spend > 0 {
 		out.Runway = ptr(a["start_net_usd"] / spend)
+		out.RunwayExGold = ptr(round((a["start_net_usd"] - a["gold_g"]*a["gold_usd_g"]) / spend))
 	}
 	for m := 0; m <= horizon; m++ {
 		if m > 0 {
@@ -366,12 +433,15 @@ func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, s
 						n *= a["eurusd"]
 					}
 					n *= math.Pow(1+v.GrowthPct/100, float64(m-1)/12)
-					if v.Reimbursement {
+					if v.IsReimbursement() {
 						monthReimb += n
 					} else {
 						monthIncome += n
 					}
 				}
+			}
+			if m == 1 {
+				out.SavingsUSDMo = round(monthIncome - spend)
 			}
 			wise += monthIncome + monthReimb - spend
 			fromKyiv := math.Min(monthReimb, kyiv)

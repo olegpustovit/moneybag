@@ -51,6 +51,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
+	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)

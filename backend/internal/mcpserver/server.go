@@ -246,8 +246,8 @@ func New(s Services, opts Options) *mcp.Server {
 	add(r, "model_get", "model", "ledger:read", "Use this when you need assumptions, income streams and scenarios before forecasting.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (model.State, error) {
 		return s.Model.Get(ctx, p)
 	})
-	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override named after an income stream id replaces that stream amount (0 disables it). Events change cash in a specified future month.", false, false, s.Model.Upsert)
-	add(r, "forecast_run", "model", "ledger:read", "Use this when projecting scenarios. Supply 1..20 scenario IDs and horizon_months 1..600. value_in is USD or EUR; the original tracker projection engine is preserved for migrated scenarios.", true, false, func(ctx context.Context, p principal.Principal, in model.ForecastInput) (struct {
+	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override may instead carry ref (budget_line:<id>, budget_lines.total or income_stream:<id>) with optional factor; the assumption must end in _usd or _eur and the referenced value is converted with the live EUR/USD rate. An override named after an income stream id replaces that stream amount (0 disables it). Events change cash in a specified future month.", false, false, s.Model.Upsert)
+	add(r, "forecast_run", "model", "ledger:read", "Use this when projecting scenarios. Supply 1..20 scenario IDs and horizon_months 1..600. value_in is USD or EUR; the original tracker projection engine is preserved for migrated scenarios. The starting state (net worth, wise and kyiv cash, gold grams, EUR/USD and XAU_g/USD rates) is computed from the live ledger as of as_of (default today, Europe/Zagreb); pots are accounts whose pot field is wise or kyiv, gold is the XAU_g commodity. Stored assumptions are used only when the ledger cannot be valued, and a scenario override still wins. Each series item reports start_as_of, start_source, start_net_usd, journal_seq, rates_used and resolved_inputs, plus savings_usd_mo, kyivEmptyMonth and runway_ex_gold.", true, false, func(ctx context.Context, p principal.Principal, in model.ForecastInput) (struct {
 		Series []model.Projection `json:"series"`
 	}, error) {
 		v, e := s.Model.Forecast(ctx, p, in)
@@ -255,7 +255,7 @@ func New(s Services, opts Options) *mcp.Server {
 			Series []model.Projection `json:"series"`
 		}{v}, e
 	})
-	add(r, "income_model_set", "model", "model:write", "Use this when salary or side income changes. Replaces streams; amount is per declared frequency, currency is USD/EUR, start/end are optional YYYY-MM-DD.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	add(r, "income_model_set", "model", "model:write", "Use this when salary or side income changes. Replaces streams; amount is per declared frequency, currency is USD/EUR, start/end are optional YYYY-MM-DD. kind is salary, side or reimbursement (reimbursement is netted against Kyiv cash and never counted as income); payer_match is CEL over row.payee and row.tags, lands_in an account id and gross_or_net gross or net; income_reconcile uses them.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		Streams []model.Income `json:"streams"`
 	}) (struct {
 		Streams []model.Income `json:"streams"`
@@ -480,6 +480,14 @@ func New(s Services, opts Options) *mcp.Server {
 		return s.History.Of(ctx, p, in.TargetID)
 	})
 	add(r, "undo", "audit", "ledger:write", "Use this to append an inverse for a completed mutation. Requires event_id and reason; posted journal entries are reversed and history is retained. Each affected domain scope is required.", false, true, s.History.Undo)
+	add(r, "income_reconcile", "model", "ledger:read", "Use this when checking income against the model. For each stream (or one stream_id) and month in from..to returns expected (from the model), actual (posted entries matched by payer_match, net of postings on lands_in or of income accounts, in stream currency), variance and entry_ids.", true, false, func(ctx context.Context, p principal.Principal, in model.ReconcileInput) (struct {
+		Months []model.IncomeMonth `json:"months"`
+	}, error) {
+		v, e := s.Model.IncomeReconcile(ctx, p, in)
+		return struct {
+			Months []model.IncomeMonth `json:"months"`
+		}{v}, e
+	})
 	registerWorkflows(r, s)
 	registerReference(server, s)
 	return server
