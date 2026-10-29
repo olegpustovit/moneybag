@@ -9,4 +9,8 @@ version = "0.0.1"
 "github.com/dietrichgebert/ponytail" = {}
 "github.com/olegpustovit/agent-configs/drafts/build-go-stack" = "dev"
 "github.com/olegpustovit/agent-configs/mcps/playwright" = "dev"
+"github.com/olegpustovit/agent-configs/plugins/react-dev" = "dev"
 # "github.com/owner/repo/path" = {}
+
+[mcp.servers]
+moneybag = { type = "http", url = "https://moneybag.microapps.space/mcp" }
