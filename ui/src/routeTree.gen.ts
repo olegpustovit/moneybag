@@ -15,6 +15,7 @@ import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
 import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
 import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppReconcileRouteImport } from './routes/_app.reconcile'
+import { Route as AppScenariosRouteImport } from './routes/_app.scenarios'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
 import { Route as AppDatabasesIdRouteImport } from './routes/_app.databases.$id'
@@ -50,6 +51,11 @@ const AppReconcileRoute = AppReconcileRouteImport.update({
   path: '/reconcile',
   getParentRoute: () => AppRoute,
 } as any)
+const AppScenariosRoute = AppScenariosRouteImport.update({
+  id: '/scenarios',
+  path: '/scenarios',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSettingsRoute = AppSettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/budgets': typeof AppBudgetsRoute
   '/journal': typeof AppJournalRoute
   '/reconcile': typeof AppReconcileRoute
+  '/scenarios': typeof AppScenariosRoute
   '/settings': typeof AppSettingsRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
   '/databases/$id': typeof AppDatabasesIdRoute
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/budgets': typeof AppBudgetsRoute
   '/journal': typeof AppJournalRoute
   '/reconcile': typeof AppReconcileRoute
+  '/scenarios': typeof AppScenariosRoute
   '/settings': typeof AppSettingsRoute
   '/': typeof AppIndexRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/_app/budgets': typeof AppBudgetsRoute
   '/_app/journal': typeof AppJournalRoute
   '/_app/reconcile': typeof AppReconcileRoute
+  '/_app/scenarios': typeof AppScenariosRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/': typeof AppIndexRoute
   '/_app/dashboards/$id': typeof AppDashboardsIdRoute
@@ -122,6 +131,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/journal'
     | '/reconcile'
+    | '/scenarios'
     | '/settings'
     | '/dashboards/$id'
     | '/databases/$id'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/journal'
     | '/reconcile'
+    | '/scenarios'
     | '/settings'
     | '/'
     | '/dashboards/$id'
@@ -146,6 +157,7 @@ export interface FileRouteTypes {
     | '/_app/budgets'
     | '/_app/journal'
     | '/_app/reconcile'
+    | '/_app/scenarios'
     | '/_app/settings'
     | '/_app/'
     | '/_app/dashboards/$id'
@@ -202,6 +214,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppReconcileRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/scenarios': {
+      id: '/_app/scenarios'
+      path: '/scenarios'
+      fullPath: '/scenarios'
+      preLoaderRoute: typeof AppScenariosRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/settings': {
       id: '/_app/settings'
       path: '/settings'
@@ -245,6 +264,7 @@ interface AppRouteChildren {
   AppBudgetsRoute: typeof AppBudgetsRoute
   AppJournalRoute: typeof AppJournalRoute
   AppReconcileRoute: typeof AppReconcileRoute
+  AppScenariosRoute: typeof AppScenariosRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
   AppDashboardsIdRoute: typeof AppDashboardsIdRoute
@@ -258,6 +278,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppBudgetsRoute: AppBudgetsRoute,
   AppJournalRoute: AppJournalRoute,
   AppReconcileRoute: AppReconcileRoute,
+  AppScenariosRoute: AppScenariosRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
   AppDashboardsIdRoute: AppDashboardsIdRoute,

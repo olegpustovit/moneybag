@@ -259,3 +259,15 @@ th { color:var(--text2); font-weight:600; }
 .reconcile-candidate { padding:.75rem 0; border-bottom:1px solid var(--border); }
 .reconcile-candidate a { text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
 @media (max-width:600px) { .reconcile-heading { flex-direction:column; } .reconcile-assert, .reconcile-resolve { flex-direction:column; align-items:stretch; } }
+.scenario-controls { display:flex; flex-wrap:wrap; align-items:end; gap:.75rem; margin-bottom:1.5rem; }
+.scenario-controls label, .scenario-editor label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }
+.scenario-controls input, .scenario-controls select, .scenario-editor select { border:1px solid var(--border); background:var(--background); min-height:2rem; padding:0 .5rem; }
+.scenario-panel { border:1px solid var(--border); padding:1.25rem; margin-bottom:1.5rem; }
+.scenario-panel h2 { font-size:1.05rem; font-weight:600; }
+.scenario-panel p { color:var(--muted-foreground); margin:.5rem 0; }
+.scenario-table { position:relative; }
+.scenario-item { display:flex; justify-content:space-between; padding:.5rem 0; }
+.scenario-dialog { max-width:44rem; max-height:90vh; overflow:auto; border-radius:0; }
+.scenario-editor { display:flex; flex-direction:column; gap:.75rem; }
+.scenario-editor h3 { font-weight:600; }
+.scenario-editor fieldset { display:grid; grid-template-columns:repeat(auto-fit,minmax(10rem,1fr)); gap:.75rem; border:1px solid var(--border); padding:.75rem; }
