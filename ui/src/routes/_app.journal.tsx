@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { AccountLabel } from '../components/account-label'
+import type { Account } from '../components/account-picker'
 import { Amount } from '../components/amount'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
 import { EntryForm } from '../features/journal/entry-form'
@@ -55,7 +56,7 @@ function Journal() {
     <Sheet open={!!search.entry || !!search.new} onOpenChange={(open) => { if (!open) void navigate({search:(old) => ({...old,entry:undefined,new:undefined})}) }}><SheetContent className="journal-sheet"><SheetHeader><SheetTitle>{search.new ? "New entry" : "Entry"}</SheetTitle><SheetDescription>Postings, links and history</SheetDescription></SheetHeader>{search.new ? <div className="journal-detail"><EntryForm session={session} accounts={accounts} onDone={() => void navigate({search:(old) => ({...old,new:undefined})})} onCancel={() => void navigate({search:(old) => ({...old,new:undefined})})}/></div> : search.entry && <EntryDetail key={search.entry} session={session} id={search.entry} names={names} accounts={accounts}/>}</SheetContent></Sheet>
   </>
 }
-function EntryDetail({ session, id, names, accounts }: { session:Session; id:string; names:Map<string,string>; accounts:{id:string;name:string}[] }) {
+function EntryDetail({ session, id, names, accounts }: { session:Session; id:string; names:Map<string,string>; accounts:Account[] }) {
   const queryClient = useQueryClient()
   const [reason,setReason] = useState('')
   const [confirm,setConfirm] = useState(false)

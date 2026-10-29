@@ -30,6 +30,15 @@ body { margin:0; min-width:320px; }
 .readable-account button { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; flex:none; border:0; background:none; color:var(--text2); cursor:pointer; }
 .readable-account button:hover { background:var(--hover); color:var(--text); }
 .account-groups .readable-account > span:first-child { font-weight:600; }
+.account-picker-trigger { width:100%; justify-content:space-between; }
+.account-picker-popover { padding:0; }
+.account-picker-search { width:100%; padding:8px 10px; border:0; border-bottom:1px solid var(--bd); background:var(--paper); color:var(--text); outline-offset:-2px; }
+.account-picker-list { max-height:240px; overflow:auto; }
+.account-picker-list [cmdk-group-heading] { padding:8px 10px 3px; color:var(--text2); font-size:11px; text-transform:capitalize; }
+.account-picker-option { display:flex; flex-direction:column; gap:2px; padding:7px 10px; cursor:pointer; }
+.account-picker-option[data-selected="true"] { background:var(--sel); }
+.account-picker-option small { color:var(--text2); font-family:var(--font-mono); }
+.account-picker-empty { padding:10px; color:var(--text2); }
 .workspace-shell { min-height:100vh; display:grid; grid-template-columns:248px minmax(0,1fr); }
 .desktop-sidebar { position:sticky; top:0; height:100vh; overflow-y:auto; border-right:1px solid var(--bd); background:var(--sunk); }
 .navigation { display:flex; flex-direction:column; min-height:100%; background:var(--sunk); }
