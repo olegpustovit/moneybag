@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '../components/ui/button'
 import { FormulaInput } from '../components/formula/input'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { DataTable } from '../features/dashboard/data-table'
 import { tableSort } from '../features/dashboard/table-sort'
@@ -15,7 +16,12 @@ import type { DbQueryOutput, DbUpdateCellsInput } from '../lib/tools'
 
 const schema=z.object({where:z.string().max(10000).optional().catch(undefined),sort:tableSort})
 const gridQuery=(session:Session,id:string,where:string|undefined) => queryOptions({queryKey:['database',session.user.id,id,where],queryFn:() => tool(session,'db_query',{db:id,where})})
-export const Route=createFileRoute('/_app/databases/$id')({validateSearch:schema,loaderDeps:({search}) => ({where:search.where}),loader:async ({context,params,deps}) => {await Promise.all([context.queryClient.query({...tablesQuery(context.session),staleTime:'static'}),context.queryClient.query({...gridQuery(context.session,params.id,deps.where),staleTime:'static'})])},pendingComponent:() => <section aria-busy="true"><h1>Database</h1><p>Loading rows…</p></section>,errorComponent:DatabaseError,component:Database})
+export const Route=createFileRoute('/_app/databases/$id')({validateSearch:schema,loaderDeps:({search}) => ({where:search.where}),loader:async ({context,params,deps}) => {await Promise.all([context.queryClient.query({...tablesQuery(context.session),staleTime:'static'}),context.queryClient.query({...gridQuery(context.session,params.id,deps.where),staleTime:'static'})])},pendingMs:150,pendingMinMs:300,pendingComponent:DatabasePending,errorComponent:DatabaseError,component:Database})
+function DatabasePending() {
+ const {id}=Route.useParams(),{session}=Route.useRouteContext(),{data}=useSuspenseQuery(tablesQuery(session)),table=data.items?.find(item => item.id===id)
+ const columns=[{label:'Select',numeric:false},{label:'Row ID',numeric:false},...(table?.columns ?? []).map(column => ({label:`${column.id}${column.formula ? ' ƒ' : ''}`,numeric:column.type==='number'}))]
+ return <section role="status" aria-busy="true"><span className="sr-only">Loading database rows…</span><header className="page-header"><div><p className="breadcrumb">DATABASES / {id}</p><h1>{table?.name || id}</h1><p className="description">Edit rows and computed columns.</p></div><div className="setting-actions"><Skeleton className="skeleton-bar journal-loading-action"/><Skeleton className="skeleton-bar journal-loading-action"/></div></header><div aria-hidden="true"><div className="grid-filter grid-loading-filter"><div><span>Where expression</span><Skeleton className="skeleton-bar"/></div><Skeleton className="skeleton-bar"/></div><div className="skeleton-table grid-loading-table"><table style={{minWidth:`${Math.max(4,columns.length)*140}px`}}><thead><tr>{columns.map(column => <th key={column.label}>{column.label}</th>)}</tr></thead><tbody>{Array.from({length:8},(_,row) => <tr key={row}>{columns.map(column => <td key={column.label}><Skeleton className={`skeleton-bar ${column.numeric ? 'numeric' : ''}`}/></td>)}</tr>)}</tbody></table></div></div></section>
+}
 function DatabaseError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load this database</h1><p>{error instanceof Error ? error.message : String(error)}</p><div className="setting-actions"><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button><a href={window.location.pathname}>Clear filter</a></div></section>}
 function Database() {const {id}=Route.useParams(),{where}=Route.useSearch();return <DatabaseGrid key={`${id}:${where ?? ''}`} id={id}/>}
 function DatabaseGrid({id}:{id:string}) {
