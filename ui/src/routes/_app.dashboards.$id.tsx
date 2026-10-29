@@ -51,7 +51,7 @@ function Dashboard() {
   const pages = dashboard.spec.pages ?? []
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
   const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
-  const tableCount=(page?.layout ?? []).flatMap(row => row.cols ?? []).filter(item => {const type=components.get(item.component)?.type;return type==='table' || type==='scenario_compare'}).length
+  const tableCount=(page?.layout ?? []).flatMap(row => row.cols ?? []).filter(item => {const type=components.get(item.component)?.type;return type==='table' || type==='scenario_compare' || type==='chart'}).length
   const reads={data:dashboard.spec.data,computed:dashboard.spec.computed,components:dashboard.spec.components}
   const range = readsParam(reads,'from') || readsParam(reads,'to')
   const month = readsParam(reads,'month')
