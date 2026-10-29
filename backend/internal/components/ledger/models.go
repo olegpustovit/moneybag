@@ -2,12 +2,14 @@ package ledger
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"math/big"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -104,7 +106,16 @@ func (d Decimal) Rat() *big.Rat {
 	}
 	return r
 }
-func (d Decimal) Float() float64 { v, _ := d.Rat().Float64(); return v }
+func (d Decimal) Float() float64 {
+	if !d.IsNaN() && d.IsInf() == 0 {
+		v, err := strconv.ParseFloat(d.Decimal128.String(), 64)
+		if v != 0 && (err == nil || errors.Is(err, strconv.ErrRange)) {
+			return v
+		}
+	}
+	v, _ := d.Rat().Float64()
+	return v
+}
 func (d Decimal) Negate() Decimal {
 	h, l := d.Decimal128.GetBytes()
 	return Decimal{bson.NewDecimal128(h^(uint64(1)<<63), l)}

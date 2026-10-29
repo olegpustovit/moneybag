@@ -2,8 +2,11 @@ package ledger
 
 import (
 	"encoding/json"
+	"fmt"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"math"
 	"math/big"
+	"math/rand"
 	"strings"
 	"testing"
 )
@@ -54,5 +57,24 @@ func TestExactBalanceAndSerialization(t *testing.T) {
 	var v bson.Raw = raw
 	if v.Lookup("v").Type != bson.TypeDecimal128 {
 		t.Fatal("money not stored as Decimal128")
+	}
+}
+
+func TestDecimalFloatMatchesRational(t *testing.T) {
+	values := []string{"0", "-0.00", "1E-6176", "-1E-6176", "1E+6144", "-1E+6144", "NaN", "Infinity", "-Infinity", "0.1000000000000000000000000000000001", "9007199254740993"}
+	rng := rand.New(rand.NewSource(42))
+	for range 10000 {
+		values = append(values, fmt.Sprintf("%dE%+d", rng.Int63()-rng.Int63(), rng.Intn(700)-350))
+	}
+	for _, value := range values {
+		v, err := bson.ParseDecimal128(value)
+		if err != nil {
+			t.Fatal(value, err)
+		}
+		d := Decimal{v}
+		want, _ := d.Rat().Float64()
+		if got := d.Float(); math.Float64bits(got) != math.Float64bits(want) {
+			t.Fatalf("%s: got %g, want %g", value, got, want)
+		}
 	}
 }
