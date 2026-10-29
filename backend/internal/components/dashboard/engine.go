@@ -461,7 +461,7 @@ func (x *execution) evalAt(field, expr string, row map[string]any) (any, error) 
 }
 
 func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) (Rendered, error) {
-	ctx = WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // sources, quotes and accounts are read once per request
+	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
 	ctx = context.WithValue(ctx, paramsKey{}, spec.Params)
@@ -736,7 +736,7 @@ func (x *execution) load(data map[string]Query, computedExprs map[string]string,
 }
 
 func (e *Engine) Evaluate(ctx context.Context, p principal.Principal, expr string, data map[string]Query, params map[string]any) (expressions.Result, error) {
-	ctx = WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // sources, quotes and accounts are read once per request
+	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
 	ctx = context.WithValue(ctx, paramsKey{}, params)

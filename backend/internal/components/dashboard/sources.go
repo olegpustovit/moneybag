@@ -11,10 +11,10 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"maps"
 	"math/big"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -29,46 +29,29 @@ type Sources struct {
 	Expr   *expressions.Engine
 }
 
-type rowCacheKey struct{}
-
-// rowCache keeps each source's rows for one request, so views and queries over the same source build it once.
-type rowCache struct {
-	mu   sync.Mutex
-	rows map[string][]map[string]any
-}
-
-// WithRowCache scopes a row cache to ctx; use it only around reads.
-func WithRowCache(ctx context.Context) context.Context {
-	if _, ok := ctx.Value(rowCacheKey{}).(*rowCache); ok {
-		return ctx
-	}
-	return context.WithValue(ctx, rowCacheKey{}, &rowCache{rows: map[string][]map[string]any{}})
-}
-
 func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
-	c, ok := ctx.Value(rowCacheKey{}).(*rowCache)
-	if !ok {
-		return s.rows(ctx, p, source)
+	if strings.HasPrefix(source, "view:") {
+		id := strings.TrimPrefix(source, "view:")
+		stack, _ := ctx.Value(viewStackKey{}).([]string)
+		for _, seen := range stack {
+			if seen == id {
+				return nil, fmt.Errorf("view cycle: %s -> %s", strings.Join(stack, " -> "), id)
+			}
+		}
+		if len(stack) >= maxViewDepth {
+			return nil, fmt.Errorf("views nest deeper than %d", maxViewDepth)
+		}
 	}
 	params, _ := json.Marshal(ctx.Value(paramsKey{}))
-	key := p.UserID + "|" + source + "|" + string(params)
-	c.mu.Lock()
-	cached, hit := c.rows[key]
-	c.mu.Unlock()
-	if !hit {
-		rows, e := s.rows(ctx, p, source)
-		if e != nil {
-			return nil, e
-		}
-		c.mu.Lock()
-		c.rows[key] = rows
-		c.mu.Unlock()
-		cached = rows
+	rows, err := reqcache.Do(ctx, "rows|"+p.UserID+"|"+source+"|"+string(params), func() ([]map[string]any, error) {
+		return s.rows(ctx, p, source)
+	})
+	if err != nil {
+		return nil, err
 	}
-	// Queries derive in place, so every caller gets its own row maps.
-	out := make([]map[string]any, len(cached))
-	for i, r := range cached {
-		out[i] = maps.Clone(r)
+	out := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		out[i] = maps.Clone(row)
 	}
 	return out, nil
 }

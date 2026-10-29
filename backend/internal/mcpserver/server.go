@@ -130,7 +130,7 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 			return nil, zero, e
 		}
 		if readOnly {
-			ctx = dashboard.WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // reads only: sources, quotes and accounts load once per call
+			ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // reads only: sources, quotes and accounts load once per call
 		}
 		out, e := fn(ctx, p, in)
 		if e != nil {

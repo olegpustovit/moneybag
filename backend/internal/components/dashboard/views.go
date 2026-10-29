@@ -99,14 +99,6 @@ func (s *Service) UpsertView(ctx context.Context, p principal.Principal, in View
 // viewRows runs a saved view; the context carries the chain so a cycle (or runaway nesting) fails instead of recursing.
 func (s *Sources) viewRows(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error) {
 	stack, _ := ctx.Value(viewStackKey{}).([]string)
-	for _, seen := range stack {
-		if seen == id {
-			return nil, fmt.Errorf("view cycle: %s -> %s", strings.Join(stack, " -> "), id)
-		}
-	}
-	if len(stack) >= maxViewDepth {
-		return nil, fmt.Errorf("views nest deeper than %d", maxViewDepth)
-	}
 	v, e := s.Views.View(ctx, p, id)
 	if e != nil {
 		return nil, e

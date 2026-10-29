@@ -149,7 +149,7 @@ func (s *Service) known(ctx context.Context, p principal.Principal) (map[string]
 const runTimeout = 30 * time.Second
 
 func (s *Service) Run(ctx context.Context, p principal.Principal) (Result, error) {
-	ctx = dashboard.WithRowCache(ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx)))) // sources, quotes and accounts are read once per request
+	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	if e := p.Require("ledger:read"); e != nil {
 		return Result{}, e
 	}

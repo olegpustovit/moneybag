@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"strings"
 	"testing"
 )
@@ -141,5 +142,29 @@ func TestSourceReadOncePerExecutionAndRowsNotShared(t *testing.T) {
 	out, e := engine.Execute(context.Background(), principal.Principal{}, spec)
 	if e != nil || !out.Validation.OK || reader.calls != 1 {
 		t.Fatal(out.Validation, e, reader.calls)
+	}
+}
+
+func TestFailedSourceIsMemoized(t *testing.T) {
+	ctx := reqcache.With(context.Background())
+	sources := &Sources{}
+	var first error
+	for range 5 {
+		_, err := sources.Rows(ctx, principal.Principal{UserID: "test"}, "missing")
+		if err == nil {
+			t.Fatal("expected source failure")
+		}
+		if first != nil && err != first {
+			t.Fatal("source failure was rebuilt")
+		}
+		first = err
+	}
+}
+
+func TestCachedViewCycleFailsBeforeWaiting(t *testing.T) {
+	ctx := context.WithValue(reqcache.With(context.Background()), viewStackKey{}, []string{"loop"})
+	_, err := (&Sources{}).Rows(ctx, principal.Principal{UserID: "test"}, "view:loop")
+	if err == nil || !strings.Contains(err.Error(), "view cycle") {
+		t.Fatalf("expected view cycle, got %v", err)
 	}
 }

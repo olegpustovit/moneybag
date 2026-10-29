@@ -37,3 +37,10 @@ Production deploy and subsequent upgrade both passed their release-version healt
 Finish review disposition: **ship**, scoped to the three scored accessibility fixes (mobile chart lettering, exact chart-data alternatives, and labelled keyboard scrolling); all three were resolved and recaptured. DESIGN.md and the schema-v2 design sidecar document the finished CSS. Every public screenshot has embedded capture provenance. Targeted race checks pass for previews, OAuth, dashboard rendering, audit and HTTP packages.
 
 Public repository: https://github.com/olegpustovit/moneybag. GitHub CI passed on application/deployment commit `27a6bbb6b2075b439a36c382120f6177e04604ff`: https://github.com/olegpustovit/moneybag/actions/runs/40755489538. It covers formatting, Go tests/vet/build, real standalone MongoDB 7.0 integration and Chromium browser workflows. Production uses the same tested application code in release `27a6bbb6b207-20261028193419`; the subsequent handoff commit changes only documentation and a deployment-script comment.
+
+## SPA redesign performance work (2026-10-29)
+
+The new proposal's P0–P6 gates remain open; the earlier completion ledger above describes the previous release, not the SPA redesign.
+
+- B5: production duplicate checks found no duplicate keys for entry tags, rows, tables, views, dashboards, budgets, or scenarios. The requested indexes were deployed and their keys and uniqueness verified in MongoDB. Startup now initializes them for existing users. Release `ed1140bd16ad-20261029170023` passed its version health check.
+- B5 profile: each of the seven published dashboards was previewed twice, sequentially, with `values_only`; all returned `validation.ok=false`. Client elapsed times ranged from 2.0 to 12.2 seconds. The profile recorded 1,636 journal sequence-index operations (50,068 ms total) and 1,416 reversal-index operations (738 ms total). Rows and views used the new indexes. `rate_sync` still showed two collection scans. Profiling was restored to level 0. These are aggregate profile totals and client timings, not per-render server-span measurements.
