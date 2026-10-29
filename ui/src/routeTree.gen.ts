@@ -16,6 +16,7 @@ import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
 import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
+import { Route as AppDatabasesIdRouteImport } from './routes/_app.databases.$id'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -51,6 +52,11 @@ const AppDashboardsIdRoute = AppDashboardsIdRouteImport.update({
   path: '/dashboards/$id',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDatabasesIdRoute = AppDatabasesIdRouteImport.update({
+  id: '/databases/$id',
+  path: '/databases/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -59,6 +65,7 @@ export interface FileRoutesByFullPath {
   '/journal': typeof AppJournalRoute
   '/settings': typeof AppSettingsRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
+  '/databases/$id': typeof AppDatabasesIdRoute
 }
 export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
@@ -67,6 +74,7 @@ export interface FileRoutesByTo {
   '/settings': typeof AppSettingsRoute
   '/': typeof AppIndexRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
+  '/databases/$id': typeof AppDatabasesIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -77,6 +85,7 @@ export interface FileRoutesById {
   '/_app/settings': typeof AppSettingsRoute
   '/_app/': typeof AppIndexRoute
   '/_app/dashboards/$id': typeof AppDashboardsIdRoute
+  '/_app/databases/$id': typeof AppDatabasesIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -87,6 +96,7 @@ export interface FileRouteTypes {
     | '/journal'
     | '/settings'
     | '/dashboards/$id'
+    | '/databases/$id'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/accounts'
@@ -95,6 +105,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/'
     | '/dashboards/$id'
+    | '/databases/$id'
   id:
     | '__root__'
     | '/_app'
@@ -104,6 +115,7 @@ export interface FileRouteTypes {
     | '/_app/settings'
     | '/_app/'
     | '/_app/dashboards/$id'
+    | '/_app/databases/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -161,6 +173,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardsIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/databases/$id': {
+      id: '/_app/databases/$id'
+      path: '/databases/$id'
+      fullPath: '/databases/$id'
+      preLoaderRoute: typeof AppDatabasesIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -171,6 +190,7 @@ interface AppRouteChildren {
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
   AppDashboardsIdRoute: typeof AppDashboardsIdRoute
+  AppDatabasesIdRoute: typeof AppDatabasesIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -180,6 +200,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
   AppDashboardsIdRoute: AppDashboardsIdRoute,
+  AppDatabasesIdRoute: AppDatabasesIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
