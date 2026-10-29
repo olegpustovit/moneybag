@@ -579,10 +579,18 @@ export interface BudgetGetOutput {
         accounts: null | string[];
         actual: number;
         avg6: number;
+        group_ref?: null | {
+          dimension: string;
+          value: string;
+          [k: string]: unknown;
+        };
         id: string;
         limit: number;
+        limit_exact?: string;
+        literal_accounts: null | string[];
         name: string;
         status: string;
+        synthetic?: boolean;
         [k: string]: unknown;
       }[];
   month: string;
@@ -590,10 +598,18 @@ export interface BudgetGetOutput {
     accounts: null | string[];
     actual: number;
     avg6: number;
+    group_ref?: null | {
+      dimension: string;
+      value: string;
+      [k: string]: unknown;
+    };
     id: string;
     limit: number;
+    limit_exact?: string;
+    literal_accounts: null | string[];
     name: string;
     status: string;
+    synthetic?: boolean;
     [k: string]: unknown;
   };
   unmapped: null | string[];

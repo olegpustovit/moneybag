@@ -131,7 +131,8 @@ func testSingleSource(t *testing.T, ctx context.Context, p principal.Principal, 
 	}
 
 	ref := &budget.GroupRef{Dimension: "category", Value: "Food"}
-	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "ws2food", GroupRef: ref}); e != nil {
+	exactLimit := ledger.MustDecimal("123.456789")
+	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "ws2food", GroupRef: ref, Limit: &exactLimit}); e != nil {
 		t.Fatal(e)
 	}
 	status, e := budgets.GetWindow(ctx, p, "2025-03", budget.Window{Months: 2, IncludeCurrent: true})
@@ -139,7 +140,7 @@ func testSingleSource(t *testing.T, ctx context.Context, p principal.Principal, 
 		t.Fatal("budget window", status.Window, e)
 	}
 	for _, l := range status.Lines {
-		if l.ID == "ws2food" && (math.Abs(l.Actual-17) > 0.001 || !slices.Contains(l.Accounts, "expenses:ws2b")) {
+		if l.ID == "ws2food" && (math.Abs(l.Actual-17) > 0.001 || !slices.Contains(l.Accounts, "expenses:ws2b") || len(l.LiteralAccounts) != 0 || l.GroupRef == nil || l.GroupRef.Dimension != "category" || l.LimitExact != "123.456789") {
 			t.Fatal("group_ref line", l)
 		}
 	}

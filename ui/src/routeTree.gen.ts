@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
+import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
 import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
@@ -28,6 +29,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountsRoute = AppAccountsRouteImport.update({
   id: '/accounts',
   path: '/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBudgetsRoute = AppBudgetsRouteImport.update({
+  id: '/budgets',
+  path: '/budgets',
   getParentRoute: () => AppRoute,
 } as any)
 const AppJournalRoute = AppJournalRouteImport.update({
@@ -49,12 +55,14 @@ const AppDashboardsIdRoute = AppDashboardsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/accounts': typeof AppAccountsRoute
+  '/budgets': typeof AppBudgetsRoute
   '/journal': typeof AppJournalRoute
   '/settings': typeof AppSettingsRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
 }
 export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
+  '/budgets': typeof AppBudgetsRoute
   '/journal': typeof AppJournalRoute
   '/settings': typeof AppSettingsRoute
   '/': typeof AppIndexRoute
@@ -64,6 +72,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/accounts': typeof AppAccountsRoute
+  '/_app/budgets': typeof AppBudgetsRoute
   '/_app/journal': typeof AppJournalRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/': typeof AppIndexRoute
@@ -71,13 +80,26 @@ export interface FileRoutesById {
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/accounts' | '/journal' | '/settings' | '/dashboards/$id'
+  fullPaths:
+    | '/'
+    | '/accounts'
+    | '/budgets'
+    | '/journal'
+    | '/settings'
+    | '/dashboards/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/accounts' | '/journal' | '/settings' | '/' | '/dashboards/$id'
+  to:
+    | '/accounts'
+    | '/budgets'
+    | '/journal'
+    | '/settings'
+    | '/'
+    | '/dashboards/$id'
   id:
     | '__root__'
     | '/_app'
     | '/_app/accounts'
+    | '/_app/budgets'
     | '/_app/journal'
     | '/_app/settings'
     | '/_app/'
@@ -111,6 +133,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAccountsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/budgets': {
+      id: '/_app/budgets'
+      path: '/budgets'
+      fullPath: '/budgets'
+      preLoaderRoute: typeof AppBudgetsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/journal': {
       id: '/_app/journal'
       path: '/journal'
@@ -137,6 +166,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRoute
+  AppBudgetsRoute: typeof AppBudgetsRoute
   AppJournalRoute: typeof AppJournalRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
@@ -145,6 +175,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRoute,
+  AppBudgetsRoute: AppBudgetsRoute,
   AppJournalRoute: AppJournalRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,

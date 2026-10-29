@@ -185,3 +185,25 @@ th { color:var(--text2); font-weight:600; }
 .account-form { display:flex; flex-direction:column; gap:.75rem; }
 .account-form .account-close { flex-direction:row; align-items:center; }
 .account-groups .table-scroll { position:relative; }
+.budget-controls, .month-step { display:flex; flex-wrap:wrap; gap:.75rem; align-items:end; }
+.budget-controls { margin-bottom:1.5rem; }
+.budget-controls label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }
+.budget-controls select, .budget-warning select { border:1px solid var(--border); background:var(--background); min-height:2rem; padding:0 .5rem; }
+.budget-controls .budget-check { flex-direction:row; align-items:center; min-height:2rem; }
+.budget-summary { display:flex; flex-wrap:wrap; gap:2rem; padding:1.25rem; border:1px solid var(--border); }
+.budget-summary div { display:flex; flex-direction:column; gap:.25rem; }
+.budget-summary span { color:var(--muted-foreground); font-size:.8rem; }
+.budget-summary strong { font-size:1.3rem; font-variant-numeric:tabular-nums; }
+.budget-warning, .budget-panel { margin-top:1.5rem; padding:1.25rem; border:1px solid var(--border); }
+.budget-warning h2, .budget-panel h2 { font-weight:600; }
+.budget-warning p, .budget-panel p { color:var(--muted-foreground); margin:.5rem 0; }
+.budget-warning ul { list-style:none; padding:0; }
+.budget-warning li { display:flex; gap:1rem; align-items:center; justify-content:space-between; padding:.4rem 0; }
+.budget-chart-line { padding:.8rem 0; }
+.budget-chart-label { display:flex; justify-content:space-between; gap:1rem; margin-bottom:.5rem; font-size:.85rem; }
+.budget-account-links { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.5rem; font-size:.75rem; }
+.budget-account-links a { text-decoration:underline; text-underline-offset:3px; }
+.budget-table { min-width:760px; }
+.budget-table .budget-edit { text-align:inherit; text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px; }
+.budget-panel .table-scroll { position:relative; }
+@media (max-width:600px) { .budget-chart-label { flex-direction:column; gap:.25rem; } }

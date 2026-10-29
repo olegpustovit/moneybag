@@ -19,13 +19,15 @@ import (
 )
 
 type Line struct {
-	Archived bool           `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key      string         `json:"-" bson:"_id"`
-	UserID   string         `json:"-" bson:"user_id"`
-	ID       string         `json:"id" bson:"id"`
-	Name     string         `json:"name" bson:"name"`
-	Limit    ledger.Decimal `json:"limit" bson:"limit"`
-	Accounts []string       `json:"accounts" bson:"accounts"`
+	LiteralAccounts []string       `json:"-" bson:"-"`
+	Synthetic       bool           `json:"-" bson:"-"`
+	Archived        bool           `json:"archived,omitempty" bson:"archived,omitempty"`
+	Key             string         `json:"-" bson:"_id"`
+	UserID          string         `json:"-" bson:"user_id"`
+	ID              string         `json:"id" bson:"id"`
+	Name            string         `json:"name" bson:"name"`
+	Limit           ledger.Decimal `json:"limit" bson:"limit"`
+	Accounts        []string       `json:"accounts" bson:"accounts"`
 	// GroupRef maps every expense account whose groups[dimension] equals value, resolved on read.
 	GroupRef *GroupRef `json:"group_ref,omitempty" bson:"group_ref,omitempty"`
 	Order    int       `json:"order" bson:"order"`
@@ -48,13 +50,17 @@ type SetResult struct {
 	EventID string `json:"event_id"`
 }
 type StatusLine struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name"`
-	Limit    float64  `json:"limit"`
-	Actual   float64  `json:"actual"`
-	Avg6     float64  `json:"avg6"`
-	Status   string   `json:"status"`
-	Accounts []string `json:"accounts"`
+	LimitExact      string    `json:"limit_exact,omitempty"`
+	LiteralAccounts []string  `json:"literal_accounts"`
+	GroupRef        *GroupRef `json:"group_ref,omitempty"`
+	Synthetic       bool      `json:"synthetic,omitempty"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	Limit           float64   `json:"limit"`
+	Actual          float64   `json:"actual"`
+	Avg6            float64   `json:"avg6"`
+	Status          string    `json:"status"`
+	Accounts        []string  `json:"accounts"`
 }
 type Status struct {
 	Month  string       `json:"month"`
@@ -104,6 +110,7 @@ func (s *Service) Lines(ctx context.Context, p principal.Principal) ([]Line, err
 		return nil, fmt.Errorf("too many budget lines")
 	}
 	for i, l := range out {
+		out[i].LiteralAccounts = slices.Clone(l.Accounts)
 		if l.GroupRef == nil || e != nil {
 			continue
 		}
@@ -357,12 +364,12 @@ func (s *Service) GetWindow(ctx context.Context, p principal.Principal, month st
 	out := Status{Month: month, Window: w, Unmapped: []string{}, Lines: []StatusLine{}, Total: StatusLine{ID: "total", Name: "Total", Status: "within"}}
 	for _, m := range months {
 		if m.ByLine["unmapped"] != 0 {
-			lines = append(lines, Line{ID: "unmapped", Name: "Unmapped expenses", Limit: ledger.MustDecimal("0"), Accounts: []string{}})
+			lines = append(lines, Line{ID: "unmapped", Name: "Unmapped expenses", Limit: ledger.MustDecimal("0"), Accounts: []string{}, Synthetic: true})
 			break
 		}
 	}
 	for _, l := range lines {
-		r := StatusLine{ID: l.ID, Name: l.Name, Limit: l.Limit.Float(), Accounts: l.Accounts, Status: "within"}
+		r := StatusLine{ID: l.ID, Name: l.Name, Limit: l.Limit.Float(), LimitExact: l.Limit.String(), Accounts: l.Accounts, LiteralAccounts: l.LiteralAccounts, GroupRef: l.GroupRef, Synthetic: l.Synthetic, Status: "within"}
 		avg := new(big.Rat)
 		for _, m := range months {
 			if m.Month == month {
