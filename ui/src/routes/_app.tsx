@@ -14,6 +14,7 @@ export const Route = createFileRoute('/_app')({
     catch (error) { if (error instanceof ApiError && error.status === 401) throw redirect({ href: `/login?next=${encodeURIComponent(location.href)}` }); throw error }
   },
   loader: async ({ context }) => { await Promise.all([context.queryClient.query({ ...dashboardsQuery(context.session), staleTime: 'static' }), context.queryClient.query({ ...tablesQuery(context.session), staleTime: 'static' })]) },
+  pendingMs: Infinity,
   pendingComponent: () => <main className="loading" aria-busy="true">Loading workspace…</main>,
   errorComponent: WorkspaceError,
   component: Workspace,
