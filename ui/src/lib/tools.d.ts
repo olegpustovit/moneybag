@@ -2793,6 +2793,10 @@ export interface ModelGetOutput {
               month: number;
               [k: string]: unknown;
             }[];
+        /**
+         * optional revision from model_get; -1 requires a new scenario
+         */
+        expected_revision?: null | number;
         id: string;
         legacy?: null | {
           bufferUsd: number;
@@ -2829,6 +2833,7 @@ export interface ModelGetOutput {
               value?: null | number;
               [k: string]: unknown;
             }[];
+        revision?: number;
         [k: string]: unknown;
       }[];
   streams:
@@ -3355,6 +3360,10 @@ export interface ScenarioUpsertInput {
         amount: number;
         month: number;
       }[];
+  /**
+   * optional revision from model_get; -1 requires a new scenario
+   */
+  expected_revision?: null | number;
   id: string;
   legacy?: null | {
     bufferUsd: number;
@@ -3388,6 +3397,7 @@ export interface ScenarioUpsertInput {
         ref?: string;
         value?: null | number;
       }[];
+  revision?: number;
 }
 export interface ScenarioUpsertOutput {
   archived?: boolean;
@@ -3403,6 +3413,10 @@ export interface ScenarioUpsertOutput {
         month: number;
         [k: string]: unknown;
       }[];
+  /**
+   * optional revision from model_get; -1 requires a new scenario
+   */
+  expected_revision?: null | number;
   id: string;
   legacy?: null | {
     bufferUsd: number;
@@ -3439,6 +3453,7 @@ export interface ScenarioUpsertOutput {
         value?: null | number;
         [k: string]: unknown;
       }[];
+  revision?: number;
   [k: string]: unknown;
 }
 export interface SharedWithMeListInput {}

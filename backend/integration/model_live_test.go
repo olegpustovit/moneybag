@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
@@ -13,6 +14,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
 	"os"
 	"strings"
@@ -60,6 +62,36 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
+	if _, e = db.Collection("scenarios").InsertOne(ctx, bson.M{"_id": p.UserID + ":old", "user_id": p.UserID, "id": "old", "name": "Old", "overrides": bson.A{}}); e != nil {
+		t.Fatal(e)
+	}
+	zero, absent := 0, -1
+	old, e := models.Upsert(ctx, p, model.Scenario{ID: "old", Name: "Updated", ExpectedRevision: &zero})
+	if e != nil || old.Revision != 1 {
+		t.Fatal("upgrade old scenario", old, e)
+	}
+	if _, e = models.Upsert(ctx, p, model.Scenario{ID: "old", Name: "Duplicate", ExpectedRevision: &absent}); !errors.Is(e, principal.ErrConflict) {
+		t.Fatal("duplicate create", e)
+	}
+	revision := old.Revision
+	results := make(chan error, 2)
+	for _, name := range []string{"First", "Second"} {
+		go func() {
+			_, err := models.Upsert(ctx, p, model.Scenario{ID: "old", Name: name, ExpectedRevision: &revision})
+			results <- err
+		}()
+	}
+	first, second := <-results, <-results
+	if !((first == nil && errors.Is(second, principal.ErrConflict)) || (second == nil && errors.Is(first, principal.ErrConflict))) {
+		t.Fatal("concurrent scenario edits", first, second)
+	}
+	if e = models.Archive(ctx, p, "old", true, "test"); e != nil {
+		t.Fatal(e)
+	}
+	two := 2
+	if _, e = models.Upsert(ctx, p, model.Scenario{ID: "old", Name: "Stale", ExpectedRevision: &two}); !errors.Is(e, principal.ErrConflict) {
+		t.Fatal("archive did not invalidate revision", e)
+	}
 	for _, acc := range []ledger.Account{{ID: "assets:w", Type: "asset", Name: "W", Pot: "wise_usd", Commodities: []string{"USD"}}, {ID: "assets:k", Type: "asset", Name: "K", Pot: "cash_kyiv", Commodities: []string{"USD"}}, {ID: "equity:open", Type: "equity", Name: "Open", Commodities: []string{"USD"}}, {ID: "income:pay", Type: "income", Name: "Pay", Commodities: []string{"USD"}}, {ID: "assets:r", Type: "asset", Name: "Owed", Pot: "owed", Class: "receivable", Commodities: []string{"USD"}}} {
 		if _, e = book.CreateAccount(ctx, p, acc); e != nil {
 			t.Fatal(e)

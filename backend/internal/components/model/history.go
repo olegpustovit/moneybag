@@ -22,7 +22,7 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 		next := old
 		next.Archived = archived
 		_, e := s.audit.Write(tx, p, "scenario_archive", audit.Target{Collection: "scenarios", ID: id}, reason, old, next, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("scenarios").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}})
+			_, e := s.repo.db.Collection("scenarios").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}, "$inc": bson.M{"revision": 1}})
 			return e
 		})
 		return e

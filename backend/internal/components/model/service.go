@@ -49,14 +49,16 @@ type LegacyInputs struct {
 	YieldPct                 float64     `json:"yieldPct" bson:"yield_pct"`
 }
 type Scenario struct {
-	Archived  bool          `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key       string        `json:"-" bson:"_id"`
-	UserID    string        `json:"-" bson:"user_id"`
-	ID        string        `json:"id" bson:"id"`
-	Name      string        `json:"name" bson:"name"`
-	Overrides []Override    `json:"overrides" bson:"overrides"`
-	Events    []Event       `json:"events,omitempty" bson:"events,omitempty"`
-	Legacy    *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty"`
+	Archived         bool          `json:"archived,omitempty" bson:"archived,omitempty"`
+	Key              string        `json:"-" bson:"_id"`
+	UserID           string        `json:"-" bson:"user_id"`
+	ID               string        `json:"id" bson:"id"`
+	Name             string        `json:"name" bson:"name"`
+	Revision         int           `json:"revision,omitempty" bson:"revision"`
+	ExpectedRevision *int          `json:"expected_revision,omitempty" bson:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
+	Overrides        []Override    `json:"overrides" bson:"overrides"`
+	Events           []Event       `json:"events,omitempty" bson:"events,omitempty"`
+	Legacy           *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty"`
 	// DropLegacy removes a stored legacy block; omitting legacy otherwise keeps it.
 	DropLegacy bool `json:"drop_legacy,omitempty" bson:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
 }
@@ -217,20 +219,46 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 	in.Archived = false
 	in.UserID = p.UserID
 	in.Key = p.UserID + ":" + in.ID
-	var before Scenario
-	e := s.repo.db.Collection("scenarios").FindOne(ctx, bson.M{"user_id": p.UserID, "id": in.ID}).Decode(&before)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
-		return Scenario{}, e
-	}
-	if in.Legacy == nil && !in.DropLegacy {
-		in.Legacy = before.Legacy
-	}
-	in.DropLegacy = false
-	_, e = s.audit.Write(ctx, p, "scenario_upsert", audit.Target{Collection: "scenarios", ID: in.ID}, "", before, in, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("scenarios").ReplaceOne(tx, bson.M{"user_id": p.UserID, "id": in.ID}, in, options.Replace().SetUpsert(true))
-		return e
+	err := s.audit.Workflow(ctx, func(tx context.Context) error {
+		collection := s.repo.db.Collection("scenarios")
+		filter := bson.M{"user_id": p.UserID, "id": in.ID}
+		var before Scenario
+		err := collection.FindOne(tx, filter).Decode(&before)
+		exists := err == nil
+		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+			return err
+		}
+		if in.ExpectedRevision != nil && ((!exists && *in.ExpectedRevision != -1) || (exists && *in.ExpectedRevision != before.Revision)) {
+			return principal.ErrConflict
+		}
+		if in.Legacy == nil && !in.DropLegacy {
+			in.Legacy = before.Legacy
+		}
+		in.DropLegacy = false
+		in.ExpectedRevision = nil
+		in.Revision = before.Revision + 1
+		_, err = s.audit.Write(tx, p, "scenario_upsert", audit.Target{Collection: "scenarios", ID: in.ID}, "", before, in, func(tx context.Context) error {
+			if !exists {
+				_, err := collection.InsertOne(tx, in)
+				if mongo.IsDuplicateKeyError(err) {
+					return principal.ErrConflict
+				}
+				return err
+			}
+			if before.Revision == 0 {
+				filter["$or"] = []bson.M{{"revision": 0}, {"revision": bson.M{"$exists": false}}}
+			} else {
+				filter["revision"] = before.Revision
+			}
+			result, err := collection.ReplaceOne(tx, filter, in)
+			if err == nil && result.MatchedCount == 0 {
+				return principal.ErrConflict
+			}
+			return err
+		})
+		return err
 	})
-	return in, e
+	return in, err
 }
 func (s *Service) SetIncome(ctx context.Context, p principal.Principal, streams []Income) ([]Income, error) {
 	if e := p.Require("model:write"); e != nil {
