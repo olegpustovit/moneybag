@@ -345,3 +345,15 @@ th { color:var(--text2); font-weight:600; }
 .chart-tooltip { min-width:10rem; padding:.6rem .75rem; background:var(--paper); border:1px solid var(--bd); color:var(--text); box-shadow:0 4px 12px #0002; }
 .chart-tooltip > div { display:flex; justify-content:space-between; gap:1rem; margin-top:.25rem; font-variant-numeric:tabular-nums; }
 .chart-tooltip small { color:var(--text2); }
+.data-table-columns { margin:0 0 6px; color:var(--text2); font-size:12px; }
+.data-table-columns summary { cursor:pointer; }
+.data-table-columns label { display:inline-flex; align-items:center; gap:4px; margin:6px 12px 0 0; }
+.data-table-scroll { position:relative; }
+.data-table-scroll.virtual { max-height:352px; }
+.shared-data-table { table-layout:fixed; width:max-content; min-width:100%; }
+.shared-data-table th { position:sticky; top:0; z-index:2; background:var(--paper); }
+.shared-data-table th:first-child,.shared-data-table td:first-child { position:sticky; left:0; background:var(--paper); z-index:1; }
+.shared-data-table th:first-child { z-index:3; }
+.shared-data-table th button { border:0; background:none; color:inherit; font:inherit; cursor:pointer; padding:0; }
+.shared-data-table td { overflow:hidden; text-overflow:ellipsis; }
+.column-resize { position:absolute; right:-3px; top:0; width:8px; height:100%; cursor:col-resize; touch-action:none; }
