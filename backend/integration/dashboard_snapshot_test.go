@@ -11,6 +11,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/event"
@@ -52,7 +53,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
-	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write", "dash:write"}}
+	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write", "dash:write", "model:write"}}
 	a := audit.NewService(audit.NewMongoRepository(db))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
@@ -67,6 +68,37 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	reader.value.Store(1)
 	service := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	service.UseSnapshots(cache)
+	tableService := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	if _, err := tableService.CreateNamed(ctx, p, "catalog", tables.CreateInput{Name: "Catalog", Columns: []tables.Column{{ID: "value", Type: "number"}}}); err != nil {
+		t.Fatal(err)
+	}
+	firstCatalog, err := service.Catalog(ctx, p, tableService)
+	if err != nil || len(firstCatalog.Sources) == 0 {
+		t.Fatalf("catalog: %v", err)
+	}
+	firstCatalog.Sources[0].Fields["mutation"] = "bad"
+	reads.Store(0)
+	cachedCatalog, err := service.Catalog(ctx, p, tableService)
+	if err != nil || cachedCatalog.Sources[0].Fields["mutation"] != "" || reads.Load() > 1 {
+		t.Fatalf("catalog cache: %v, reads=%d", err, reads.Load())
+	}
+	if _, err := tableService.CreateNamed(ctx, p, "catalog-new", tables.CreateInput{Name: "New catalog", Columns: []tables.Column{{ID: "value", Type: "number"}}}); err != nil {
+		t.Fatal(err)
+	}
+	freshCatalog, err := service.Catalog(ctx, p, tableService)
+	if err != nil || freshCatalog.Revision <= cachedCatalog.Revision || len(freshCatalog.Sources) != len(cachedCatalog.Sources)+1 {
+		t.Fatalf("catalog invalidation: %v", err)
+	}
+	other := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Scopes: []string{"ledger:read"}}
+	otherCatalog, err := service.Catalog(ctx, other, tableService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range otherCatalog.Sources {
+		if source.Name == "table:catalog" || source.Name == "table:catalog-new" {
+			t.Fatal("catalog leaked another user's table")
+		}
+	}
 	spec := dashboard.Spec{ID: "sample", Title: "Synthetic", Version: 1, Data: map[string]dashboard.Query{"rows": {From: "journal"}}, Pages: []dashboard.Page{{ID: "main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 3, Component: "value"}, {Span: 3, Component: "table"}, {Span: 3, Component: "chart"}, {Span: 3, Component: "bars"}}}}}}, Components: []dashboard.Component{
 		{ID: "value", Type: "kpi", Value: "data.rows[0].value"},
 		{ID: "table", Type: "table", Rows: "rows", Columns: []dashboard.Column{{Label: "Value", Value: "row.value"}}},

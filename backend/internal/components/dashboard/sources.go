@@ -459,3 +459,23 @@ func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledge
 	v, e := rates.Apply(amount, r, target)
 	return v.Value, e
 }
+
+// sourceFields describes rows produced by the source cases above; dynamic fields use dyn.
+var sourceFields = map[string]map[string]string{
+	"journal":              {"id": "string", "seq": "double", "date": "string", "kind": "string", "payee": "string", "postings": "list", "tags": "list", "links": "list", "status": "string", "actor": "map", "created_at": "string"},
+	"effective_entries":    {"id": "string", "seq": "double", "date": "string", "kind": "string", "payee": "string", "postings": "list", "tags": "list", "links": "list", "status": "string", "actor": "map", "created_at": "string"},
+	"postings":             {"date": "string", "entry": "string", "seq": "double", "kind": "string", "payee": "string", "tags": "list", "account": "string", "class": "string", "groups": "map", "commodity": "string", "amount": "double", "value_eur": "double", "value_usd": "double"},
+	"accounts":             {"account": "string", "pot": "string", "name": "string", "kind": "string", "class": "string", "groups": "map", "commodity": "string", "amount": "double", "usd": "double"},
+	"budget_lines":         {"window_label": "string", "window_from": "string", "window_to": "string", "window_months": "double", "id": "string", "name": "string", "limit": "double", "avg": "double", "avg6": "double", "oct": "double", "actual": "double", "status": "string"},
+	"months":               {"month": "string", "byLine": "map", "total": "double"},
+	"range":                {"i": "double"},
+	"scenarios":            {"id": "string", "name": "string", "spendUsd": "double", "endNetUsd": "double", "runway": "dyn", "savings_usd_mo": "double", "kyiv_empty_month": "dyn", "runway_ex_gold": "dyn", "start_as_of": "string", "start_net_usd": "double", "journal_seq": "double"},
+	"scenario:<id>":        {"id": "string", "name": "string", "spendUsd": "double", "endNetUsd": "double", "runway": "dyn", "savings_usd_mo": "double", "kyiv_empty_month": "dyn", "runway_ex_gold": "dyn", "start_as_of": "string", "start_net_usd": "double", "journal_seq": "double"},
+	"income":               {"id": "string", "amount": "double", "currency": "string", "frequency": "string", "start": "string", "end": "string", "growth_pct": "double", "reimbursement": "bool", "kind": "string", "payer_match": "string", "lands_in": "string", "gross_or_net": "string"},
+	"rates:<pairs>":        {"pair": "string", "base": "string", "quote": "string", "at": "string", "value": "double", "source": "string"},
+	"rate_sync":            {"provider": "string", "status": "string", "last_attempt": "string", "last_success": "string", "error": "string", "consecutive_failures": "double", "newest_at": "string", "newest_value": "string"},
+	"rate_history:<pairs>": {"pair": "string", "at": "string", "value": "double", "source": "string"},
+	"balance_history":      {"month": "string", "date": "string", "assets": "double", "liabilities": "double", "net": "double"},
+	"forecast_series:<id>": {"m": "double", "net": "double", "cash": "double", "wise": "double", "kyiv": "double", "gold": "double"},
+	"income_actuals":       {"stream": "string", "month": "string", "currency": "string", "expected": "double", "actual": "double", "variance": "double", "entry_ids": "list"},
+}

@@ -6,6 +6,20 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 )
 
+func (h *Handler) apiExpressionCatalog(w http.ResponseWriter, r *http.Request) {
+	p, _, err := h.session(r)
+	if err != nil {
+		respond(w, http.StatusUnauthorized, map[string]string{"error": "sign in to continue"})
+		return
+	}
+	catalog, err := h.services.Dashboard.Catalog(r.Context(), p, h.services.Tables)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load expression catalog"})
+		return
+	}
+	respond(w, http.StatusOK, catalog)
+}
+
 func (h *Handler) apiExpressionCheck(w http.ResponseWriter, r *http.Request) {
 	var in struct {
 		Expr string `json:"expr"`

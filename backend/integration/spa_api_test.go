@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
 )
@@ -23,6 +25,12 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		t.Fatal(err)
 	}
 	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	if _, err := services.Tables.CreateNamed(ctx, p, "catalog-test", tables.CreateInput{Name: "Catalog test", Columns: []tables.Column{{ID: "amount", Type: "number"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := services.Dashboard.UpsertView(ctx, p, dashboard.ViewInput{ID: "catalog-test", Query: dashboard.Query{From: "table:catalog-test", Derive: map[string]string{"doubled": "row.amount * 2"}}}); err != nil {
+		t.Fatal(err)
+	}
 	request := func(method, path string, form url.Values, signed, csrf, jsonAccept bool) (int, map[string]any, http.Header) {
 		t.Helper()
 		req, err := http.NewRequestWithContext(ctx, method, endpoint+path, strings.NewReader(form.Encode()))
@@ -54,7 +62,7 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		}
 		return res.StatusCode, body, res.Header
 	}
-	for _, path := range []string{"/api/session", "/api/imports", "/api/settings"} {
+	for _, path := range []string{"/api/session", "/api/imports", "/api/settings", "/api/expr/catalog"} {
 		status, _, headers := request("GET", path, nil, false, false, true)
 		if status != 401 || headers.Get("Cache-Control") != "no-store" {
 			t.Fatalf("%s unauthenticated: %d", path, status)
@@ -78,6 +86,28 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			}
 			if _, ok := body["feeds"]; !ok {
 				t.Fatalf("settings: %v", body)
+			}
+		case "/api/expr/catalog":
+			if len(body["functions"].([]any)) == 0 || len(body["aggregates"].([]any)) == 0 {
+				t.Fatalf("catalog functions: %v", body)
+			}
+			found := map[string]bool{}
+			for _, item := range body["sources"].([]any) {
+				source := item.(map[string]any)
+				name := source["name"].(string)
+				fields := source["fields"].(map[string]any)
+				if name == "postings" && fields["value_eur"] == "double" {
+					found[name] = true
+				}
+				if name == "table:catalog-test" && fields["amount"] == "double" {
+					found[name] = true
+				}
+				if name == "view:catalog-test" && fields["amount"] == "double" && fields["doubled"] == "dyn" {
+					found[name] = true
+				}
+			}
+			if len(found) != 3 {
+				t.Fatalf("catalog sources: %v", found)
 			}
 		}
 	}
