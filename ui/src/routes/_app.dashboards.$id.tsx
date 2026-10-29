@@ -1,0 +1,72 @@
+import { Suspense, lazy } from 'react'
+import { keepPreviousData, useQuery, useSuspenseQuery } from '@tanstack/react-query'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { z } from 'zod'
+import { Button } from '../components/ui/button'
+import { componentValue } from '../features/dashboard/values'
+import type { ComponentValue } from '../features/dashboard/values'
+import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
+
+const DashboardChart = lazy(() => import('../features/dashboard/chart'))
+const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined)
+const searchSchema = z.object({ version: z.enum(['draft','published']).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, month: z.string().regex(/^\d{4}-\d{2}$/).optional().catch(undefined) })
+export const Route = createFileRoute('/_app/dashboards/$id')({
+  validateSearch: searchSchema,
+  loaderDeps: ({ search }) => ({ version: search.version }),
+  loader: async ({ context, params, deps }) => {
+    const heads = await context.queryClient.query({ ...dashboardsQuery(context.session), staleTime: 'static' })
+    const head = heads.items?.find((item) => item.id === params.id)
+    const version = deps.version ?? (head?.published_version ? 'published' : 'draft')
+    await context.queryClient.query({ ...dashboardSpecQuery(context.session, params.id, version), staleTime: 'static' })
+    return { version, head }
+  },
+  pendingComponent: () => <div className="dashboard-pending" aria-busy="true">Loading dashboard…</div>,
+  errorComponent: DashboardError,
+  component: Dashboard,
+})
+function DashboardError({ reset }: { reset: () => void }) {
+  const router = useRouter()
+  return <section className="dashboard-error"><h1>Could not load this dashboard</h1><p>It may have been removed or you may not have access.</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section>
+}
+function Dashboard() {
+  const { session } = Route.useRouteContext()
+  const { id } = Route.useParams()
+  const search = Route.useSearch()
+  const navigate = Route.useNavigate()
+  const { version, head } = Route.useLoaderData()
+  const { data: dashboard } = useSuspenseQuery(dashboardSpecQuery(session, id, version))
+  const params: Record<string, string> = {}
+  for (const key of ['from','to','month'] as const) if (search[key]) params[key] = search[key]
+  const preview = useQuery({ ...dashboardPreviewQuery(session, id, version, params), placeholderData: keepPreviousData })
+  const pages = dashboard.spec.pages ?? []
+  const page = pages.find((item) => item.id === search.page) ?? pages[0]
+  const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
+  const reads = JSON.stringify({data:dashboard.spec.data, computed:dashboard.spec.computed, components:dashboard.spec.components})
+  const range = reads.includes('params.from') || reads.includes('params.to')
+  const month = reads.includes('params.month')
+  return <>
+    <header className="page-header"><div><p className="breadcrumb"><a href="/">DASHBOARDS</a> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.author.kind === 'user' ? 'You' : dashboard.author.id}</>}</p></div>
+      <div className="dashboard-toolbar">{head && head.published_version > 0 && head.draft_version > 0 && <label>Version <select value={version} onChange={(event) => void navigate({ search: (old) => ({ ...old, version: event.target.value === 'draft' ? 'draft' : 'published' }) })}><option value="published">Published</option><option value="draft">Draft</option></select></label>}</div>
+    </header>
+    {(range || month) && <form key={`${search.from}-${search.to}-${search.month}`} className="range-bar" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void navigate({ search: (old) => ({ ...old, from: String(data.get('from') || '') || undefined, to: String(data.get('to') || '') || undefined, month: String(data.get('month') || '') || undefined }) }) }}>
+      {range && <><label>From <input name="from" type="date" defaultValue={search.from} /></label><label>To <input name="to" type="date" defaultValue={search.to} /></label></>}{month && <label>Month <input name="month" type="month" defaultValue={search.month} /></label>}<Button type="submit" variant="outline" size="sm">Apply</Button>
+    </form>}
+    {pages.length > 1 && <nav className="page-tabs" aria-label="Dashboard pages">{pages.map((item) => <button type="button" key={item.id} className={item.id === page?.id ? 'active' : ''} aria-current={item.id === page?.id ? 'page' : undefined} onClick={() => void navigate({ search: (old) => ({ ...old, page: item.id }) })}>{item.title || item.id}</button>)}</nav>}
+    {preview.isFetching && !preview.isPending && <div className="refresh-line" role="status" aria-label="Refreshing dashboard"/>}
+    {preview.isPending ? <div className="dashboard-pending" aria-busy="true">Loading dashboard values…</div> : preview.isError ? <div className="dashboard-error" role="alert"><p>Could not load dashboard values.</p><Button onClick={() => void preview.refetch()}>Try again</Button></div> : !preview.data.validation.ok ? <div className="dashboard-error" role="alert"><h2>Dashboard needs attention</h2><ul>{(preview.data.validation.errors ?? []).map((issue, index) => <li key={index}>{issue.msg}</li>)}</ul></div> : <div className="dashboard-grid">{(page?.layout ?? []).flatMap((row, rowIndex) => (row.cols ?? []).map((placement, colIndex) => {
+      const component = components.get(placement.component)
+      const parsed = componentValue.safeParse(preview.data.values[placement.component])
+      if (!component || !parsed.success) return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${placement.span}` }}><h2>{component?.title || placement.component}</h2><p className="muted">This component could not be displayed.</p></section>
+      return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${placement.span}` }}><h2>{parsed.data.title || component.title || component.id}</h2><Component value={parsed.data} /></section>
+    }))}</div>}
+  </>
+}
+function Component({ value }: { value: ComponentValue }) {
+  switch (value.type) {
+    case 'kpi': return <div className="kpi"><div className={`kpi-value ${value.tone}`}>{value.text}</div>{value.sub && <p>{value.sub}</p>}</div>
+    case 'text': return <div className="note" dangerouslySetInnerHTML={{ __html: value.html }} />
+    case 'table': case 'scenario_compare': return value.rows.length === 0 ? <p className="muted">No matching rows.</p> : <div className="table-scroll" tabIndex={0} role="region" aria-label={`${value.title || 'Dashboard'} table`}><table><thead><tr>{value.columns.map((column) => <th key={column.key} className={column.align === 'right' ? 'numeric' : ''}>{column.label}</th>)}</tr></thead><tbody>{value.rows.map((row, index) => <tr key={index}>{value.columns.map((column) => <td key={column.key} className={`${column.align === 'right' ? 'numeric ' : ''}${row[column.key]?.tone || ''}`}>{row[column.key]?.t ?? '—'}</td>)}</tr>)}</tbody></table></div>
+    case 'budget': return <div className="budget-bars">{value.rows.map((row, index) => { const max = Math.max(1, row.actual, row.limit); return <div className="budget-row" key={index}><span>{row.label}</span><span className="budget-track"><i className={row.status} style={{ width: `${row.actual / max * 100}%` }}/><b style={{ left: `${row.limit / max * 100}%` }}/></span><span className="numeric">{row.actual_text} / {row.limit_text}</span></div> })}</div>
+    case 'chart': return <Suspense fallback={<div className="dashboard-pending" aria-busy="true">Loading chart…</div>}><DashboardChart value={value} /></Suspense>
+  }
+}

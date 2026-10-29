@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
+import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -21,24 +22,32 @@ const AppIndexRoute = AppIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDashboardsIdRoute = AppDashboardsIdRouteImport.update({
+  id: '/dashboards/$id',
+  path: '/dashboards/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
+  '/dashboards/$id': typeof AppDashboardsIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
+  '/dashboards/$id': typeof AppDashboardsIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/_app': typeof AppRouteWithChildren
   '/_app/': typeof AppIndexRoute
+  '/_app/dashboards/$id': typeof AppDashboardsIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/dashboards/$id'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/_app' | '/_app/'
+  to: '/' | '/dashboards/$id'
+  id: '__root__' | '/_app' | '/_app/' | '/_app/dashboards/$id'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -61,15 +70,24 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppIndexRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/dashboards/$id': {
+      id: '/_app/dashboards/$id'
+      path: '/dashboards/$id'
+      fullPath: '/dashboards/$id'
+      preLoaderRoute: typeof AppDashboardsIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
 interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
+  AppDashboardsIdRoute: typeof AppDashboardsIdRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
+  AppDashboardsIdRoute: AppDashboardsIdRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)

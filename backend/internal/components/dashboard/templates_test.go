@@ -34,6 +34,9 @@ func TestTemplatedTextRowsExpressionAndHideZero(t *testing.T) {
 	if !out.Validation.OK {
 		t.Fatal(out.Validation)
 	}
+	if out.Values["k"].(map[string]any)["title"] != "Net €1,234.60" {
+		t.Fatalf("component title was not resolved: %#v", out.Values["k"])
+	}
 	for _, want := range []string{"Net €1,234.60", "ratio 26% on 2026-10-29", "Amt $1,235", "$20.00"} {
 		if !strings.Contains(out.HTML, want) {
 			t.Errorf("missing %q in %s", want, out.HTML)

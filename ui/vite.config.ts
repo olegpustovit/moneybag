@@ -8,6 +8,7 @@ import { tanstackRouter } from '@tanstack/router-plugin/vite'
 const target = 'http://127.0.0.1:6459'
 export default defineConfig({
   base: '/',
+  build: { rolldownOptions: { output: { codeSplitting: { groups: [{ name: 'chart-math', test: /node_modules\/(d3-|victory-vendor)/ }, { name: 'chart-utils', test: /node_modules\/es-toolkit/ }] } } } },
   plugins: [tanstackRouter({ target: 'react', autoCodeSplitting: true }), react(), babel({ presets: [reactCompilerPreset()] }), tailwindcss()],
   resolve: { alias: { '@': path.resolve(import.meta.dirname, 'src') } },
   server: { port: 5173, strictPort: true, proxy: Object.fromEntries(['/api', '/mcp', '/login', '/setup', '/register', '/oauth', '/logout', '/previews'].map((p) => [p, { target }])) },

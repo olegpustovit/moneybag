@@ -577,6 +577,9 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			continue
 		}
 		html[c.ID] = body
+		if typed, ok := value.(map[string]any); ok {
+			typed["title"] = c.Title
+		}
 		result.Values[c.ID] = value
 		if e := valuesBudget.spend(value); e != nil {
 			issue(path, e)
