@@ -292,6 +292,9 @@ func (x *execution) render(c Component) (string, any, error) {
 		type bar struct {
 			Label         string
 			Actual, Limit float64
+			Average       any
+			Window        any
+			Accounts      any
 		}
 		bars := []bar{}
 		maxValue := 1.0
@@ -316,7 +319,7 @@ func (x *execution) render(c Component) (string, any, error) {
 			if e != nil || a < 0 || limit < 0 {
 				return "", nil, fmt.Errorf("budget bars need nonnegative numbers")
 			}
-			bars = append(bars, bar{fmt.Sprint(l), a, limit})
+			bars = append(bars, bar{fmt.Sprint(l), a, limit, r["avg6"], r["window_months"], r["accounts"]})
 			maxValue = math.Max(maxValue, math.Max(a, limit))
 		}
 		var b strings.Builder
@@ -334,7 +337,33 @@ func (x *execution) render(c Component) (string, any, error) {
 			if bar.Actual > bar.Limit {
 				status = "over"
 			}
-			values = append(values, map[string]any{"label": bar.Label, "actual": bar.Actual, "limit": bar.Limit, "status": status, "actual_text": format(bar.Actual, "eur0"), "limit_text": format(bar.Limit, "eur0")})
+			value := map[string]any{"label": bar.Label, "actual": bar.Actual, "limit": bar.Limit, "status": status, "actual_text": format(bar.Actual, "eur0"), "limit_text": format(bar.Limit, "eur0")}
+			if avg, err := numeric(bar.Average); err == nil {
+				value["average_text"] = format(avg, "eur0")
+				if months, err := numeric(bar.Window); err == nil && months > 0 && months == math.Trunc(months) {
+					value["average_label"] = fmt.Sprintf("%g-month average", months)
+				}
+			}
+			switch accounts := bar.Accounts.(type) {
+			case []string:
+				if accounts != nil {
+					value["accounts"] = accounts
+				}
+			case []any:
+				ids := make([]string, 0, len(accounts))
+				for _, account := range accounts {
+					id, ok := account.(string)
+					if !ok {
+						ids = nil
+						break
+					}
+					ids = append(ids, id)
+				}
+				if ids != nil {
+					value["accounts"] = ids
+				}
+			}
+			values = append(values, value)
 		}
 		return b.String(), map[string]any{"type": "budget", "rows": values}, nil
 	case "chart":

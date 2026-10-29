@@ -17,7 +17,7 @@ func TestSharedOutputOnlyExposesPlacedRenderedValues(t *testing.T) {
 			"hidden": map[string]any{"type": "text", "html": "hidden-secret"},
 			"k":      map[string]any{"type": "kpi", "title": "K", "value": "raw-secret", "text": "$1", "tone": "", "sub": ""},
 			"t":      map[string]any{"type": "table", "title": "T", "columns": []any{map[string]any{"key": "c0", "label": "Visible", "format": "", "align": "left"}}, "rows": []any{map[string]any{"c0": map[string]any{"v": "cell-secret", "t": "shown", "tone": ""}}}},
-			"b":      map[string]any{"type": "budget", "rows": []any{map[string]any{"label": "B", "actual": 100.0, "limit": 200.0, "actual_text": "100", "limit_text": "200", "status": "within"}}},
+			"b":      map[string]any{"type": "budget", "rows": []any{map[string]any{"label": "B", "actual": 100.0, "limit": 200.0, "actual_text": "100", "limit_text": "200", "status": "within", "accounts": []string{"expenses:secret-account"}}}},
 			"c":      map[string]any{"type": "chart", "x": map[string]any{"field": "field-secret", "kind": "category"}, "mark": "bar", "series": []any{}, "points": []any{map[string]any{"x": "X", "y": 10.0}}, "y_format": ""},
 		},
 	}}}
@@ -29,7 +29,7 @@ func TestSharedOutputOnlyExposesPlacedRenderedValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, secret := range []string{"computed-secret", "hidden-secret", "raw-secret", "cell-secret", "field-secret", "error-secret", "expression-secret", "hint-secret", "hidden-error"} {
+	for _, secret := range []string{"computed-secret", "hidden-secret", "raw-secret", "cell-secret", "field-secret", "error-secret", "expression-secret", "hint-secret", "hidden-error", "expenses:secret-account"} {
 		if strings.Contains(string(raw), secret) {
 			t.Fatalf("exposed %s: %s", secret, raw)
 		}

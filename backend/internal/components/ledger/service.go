@@ -192,6 +192,14 @@ func (s *Service) Entries(ctx context.Context, p principal.Principal, in Entries
 	if in.Limit < 0 || in.Limit > 500 || len(in.Text) > 200 {
 		return EntriesPage{}, fmt.Errorf("limit at most 500 and text at most 200 characters")
 	}
+	if len(in.Accounts) > 1000 || (in.Account != "" && len(in.Accounts) > 0) {
+		return EntriesPage{}, fmt.Errorf("use either account or at most 1000 accounts")
+	}
+	for _, id := range in.Accounts {
+		if !accountID.MatchString(id) {
+			return EntriesPage{}, fmt.Errorf("invalid account ID")
+		}
+	}
 	if in.Sort != "" && in.Sort != "date" && in.Sort != "-date" && in.Sort != "amount" && in.Sort != "-amount" {
 		return EntriesPage{}, fmt.Errorf("sort must be date, -date, amount or -amount")
 	}

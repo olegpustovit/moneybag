@@ -207,7 +207,7 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 			return nil, e
 		}
 		for _, l := range status.Lines {
-			out = append(out, map[string]any{"window_label": status.Window.Label, "window_from": status.Window.From, "window_to": status.Window.To, "window_months": status.Window.Months, "id": l.ID, "name": l.Name, "limit": l.Limit, "avg": l.Avg6, "avg6": l.Avg6, "oct": l.Actual, "actual": l.Actual, "status": l.Status})
+			out = append(out, map[string]any{"window_label": status.Window.Label, "window_from": status.Window.From, "window_to": status.Window.To, "window_months": status.Window.Months, "id": l.ID, "name": l.Name, "limit": l.Limit, "avg": l.Avg6, "avg6": l.Avg6, "oct": l.Actual, "actual": l.Actual, "status": l.Status, "accounts": l.Accounts})
 		}
 	case source == "months":
 		now := time.Now()
@@ -498,7 +498,7 @@ var sourceFields = map[string]map[string]string{
 	"effective_entries":    {"id": "string", "seq": "double", "date": "string", "kind": "string", "payee": "string", "postings": "list", "tags": "list", "links": "list", "status": "string", "actor": "map", "created_at": "string"},
 	"postings":             {"date": "string", "entry": "string", "seq": "double", "kind": "string", "payee": "string", "tags": "list", "account": "string", "class": "string", "groups": "map", "commodity": "string", "amount": "double", "value_eur": "double", "value_usd": "double"},
 	"accounts":             {"account": "string", "pot": "string", "name": "string", "kind": "string", "class": "string", "groups": "map", "commodity": "string", "amount": "double", "usd": "double"},
-	"budget_lines":         {"window_label": "string", "window_from": "string", "window_to": "string", "window_months": "double", "id": "string", "name": "string", "limit": "double", "avg": "double", "avg6": "double", "oct": "double", "actual": "double", "status": "string"},
+	"budget_lines":         {"window_label": "string", "window_from": "string", "window_to": "string", "window_months": "double", "id": "string", "name": "string", "limit": "double", "avg": "double", "avg6": "double", "oct": "double", "actual": "double", "status": "string", "accounts": "list"},
 	"months":               {"month": "string", "byLine": "map", "total": "double"},
 	"range":                {"i": "double"},
 	"scenarios":            {"id": "string", "name": "string", "spendUsd": "double", "endNetUsd": "double", "runway": "dyn", "savings_usd_mo": "double", "kyiv_empty_month": "dyn", "runway_ex_gold": "dyn", "start_as_of": "string", "start_net_usd": "double", "journal_seq": "double"},

@@ -7,7 +7,7 @@ const base = { title: z.string().optional() }
 export const componentValue = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('kpi'), value: z.unknown(), text: z.string(), tone: z.string(), sub: z.string(), sub_text: z.string().optional(), delta: z.object({ text: z.string(), direction: z.enum(['up','down','unchanged','neutral']) }).optional() }),
   z.object({ ...base, type: z.enum(['table', 'scenario_compare']), columns: z.array(column), rows: z.array(z.record(z.string(), cell)) }),
-  z.object({ ...base, type: z.literal('budget'), rows: z.array(z.object({ label: z.string(), actual: z.number(), limit: z.number(), status: z.string(), actual_text: z.string(), limit_text: z.string() })) }),
+  z.object({ ...base, type: z.literal('budget'), rows: z.array(z.object({ label: z.string(), actual: z.number(), limit: z.number(), status: z.string(), actual_text: z.string(), limit_text: z.string(), average_text: z.string().optional(), average_label: z.string().optional(), accounts: z.array(z.string()).optional() })) }),
   z.object({ ...base, type: z.literal('text'), html: z.string() }),
   z.object({ ...base, type: z.literal('chart'), mark: z.enum(['bar','line','area','stack','donut']), x: z.object({ field: z.string(), kind: z.string() }), series: z.array(z.object({ name: z.string(), color_index: z.number() })), points: z.array(z.object({ x: z.string(), y: z.number(), series: z.string().optional().default('') })), rule: z.object({ y: z.number(), label: z.string() }).optional(), y_format: z.string() }),
 ])

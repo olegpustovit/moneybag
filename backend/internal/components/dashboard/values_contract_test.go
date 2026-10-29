@@ -80,3 +80,29 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 		}
 	}
 }
+
+type budgetFixtureReader struct{}
+
+func (budgetFixtureReader) Rows(context.Context, principal.Principal, string) ([]map[string]any, error) {
+	return []map[string]any{{"name": "Food", "amount": float64(20), "avg6": float64(15), "window_months": float64(3), "accounts": []string{"expenses:food", "expenses:groceries"}}, {"name": "Unmapped", "amount": float64(0), "accounts": []string(nil)}}, nil
+}
+
+func TestBudgetBarIncludesMappedAccountsAndAverage(t *testing.T) {
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := Spec{Data: map[string]Query{"lines": {From: "budget_lines"}}, Pages: []Page{{ID: "main"}}, Components: []Component{{ID: "bars", Type: "budget_bars", Rows: "lines", Label: "row.name", Actual: "row.amount", Limit: "30.0"}}}
+	out, err := (&Engine{Expr: expr, Reader: budgetFixtureReader{}}).Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || !out.Validation.OK {
+		t.Fatalf("render: %v %+v", err, out.Validation)
+	}
+	rows := out.Values["bars"].(map[string]any)["rows"].([]map[string]any)
+	accounts := rows[0]["accounts"].([]string)
+	if len(accounts) != 2 || accounts[0] != "expenses:food" || accounts[1] != "expenses:groceries" || rows[0]["average_text"] != "€15" || rows[0]["average_label"] != "3-month average" {
+		t.Fatal(rows[0])
+	}
+	if _, ok := rows[1]["accounts"]; ok {
+		t.Fatalf("nil account list should be omitted: %v", rows[1])
+	}
+}

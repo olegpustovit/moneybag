@@ -111,6 +111,9 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 			f[k] = v
 		}
 	}
+	if len(in.Accounts) > 0 {
+		f["postings.account"] = bson.M{"$in": in.Accounts}
+	}
 	if in.Effective {
 		reversed, e := r.reversed(ctx, p)
 		if e != nil {
@@ -147,6 +150,8 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 		postings := any("$postings")
 		if in.Account != "" {
 			postings = bson.M{"$filter": bson.M{"input": "$postings", "as": "posting", "cond": bson.M{"$eq": bson.A{"$$posting.account", in.Account}}}}
+		} else if len(in.Accounts) > 0 {
+			postings = bson.M{"$filter": bson.M{"input": "$postings", "as": "posting", "cond": bson.M{"$in": bson.A{"$$posting.account", in.Accounts}}}}
 		}
 		pipeline = append(pipeline, bson.M{"$set": bson.M{"_sort_posting": bson.M{"$arrayElemAt": bson.A{postings, 0}}}}, bson.M{"$set": bson.M{"_sort_amount": bson.M{"$ifNull": bson.A{"$_sort_posting.amount.v", nil}}}})
 		direction, op := 1, "$gt"
@@ -186,7 +191,7 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 		if amountSort {
 			out.NextCursorAmount = "null"
 			for _, posting := range out.Items[limit-1].Postings {
-				if in.Account == "" || posting.Account == in.Account {
+				if (in.Account == "" && len(in.Accounts) == 0) || posting.Account == in.Account || slices.Contains(in.Accounts, posting.Account) {
 					out.NextCursorAmount = posting.Amount.Value.String()
 					break
 				}

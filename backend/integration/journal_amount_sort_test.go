@@ -62,13 +62,16 @@ func TestJournalAmountPagination(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		sort, account, tag string
+		accounts           []string
 		want               []int64
 	}{
-		{"amount", "", "", []int64{6, 1, 3, 5, 4, 2}}, {"-amount", "", "", []int64{2, 4, 5, 3, 1, 6}},
-		{"amount", "expenses:food", "", []int64{5, 4, 3, 2, 1}}, {"-amount", "expenses:food", "", []int64{1, 2, 3, 4, 5}},
-		{"amount", "", "selected", []int64{3}},
+		{"amount", "", "", nil, []int64{6, 1, 3, 5, 4, 2}}, {"-amount", "", "", nil, []int64{2, 4, 5, 3, 1, 6}},
+		{"amount", "expenses:food", "", nil, []int64{5, 4, 3, 2, 1}}, {"-amount", "expenses:food", "", nil, []int64{1, 2, 3, 4, 5}},
+		{"amount", "", "selected", nil, []int64{3}},
+		{"amount", "", "", []string{"expenses:food", "income:salary"}, []int64{5, 4, 3, 2, 1}},
+		{"-amount", "", "", []string{"assets:cash", "expenses:food"}, []int64{2, 4, 5, 3, 1}},
 	} {
-		in := ledger.EntriesInput{Sort: tc.sort, Account: tc.account, Tag: tc.tag, Limit: 1}
+		in := ledger.EntriesInput{Sort: tc.sort, Account: tc.account, Accounts: tc.accounts, Tag: tc.tag, Limit: 1}
 		var got []int64
 		for {
 			page, err := service.Entries(ctx, p, in)
@@ -87,7 +90,7 @@ func TestJournalAmountPagination(t *testing.T) {
 			t.Fatalf("%+v: got %v", tc, got)
 		}
 	}
-	for _, in := range []ledger.EntriesInput{{Sort: "amount", Cursor: 1}, {Sort: "amount", Cursor: 1, CursorAmount: "NaN"}, {Sort: "date", Cursor: 1, CursorAmount: "1"}, {CursorAmount: "1"}} {
+	for _, in := range []ledger.EntriesInput{{Account: "assets:cash", Accounts: []string{"expenses:food"}}, {Accounts: []string{"invalid"}}, {Sort: "amount", Cursor: 1}, {Sort: "amount", Cursor: 1, CursorAmount: "NaN"}, {Sort: "date", Cursor: 1, CursorAmount: "1"}, {CursorAmount: "1"}} {
 		if _, err = service.Entries(ctx, p, in); err == nil {
 			t.Fatalf("accepted invalid cursor %+v", in)
 		}

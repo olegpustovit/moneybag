@@ -1817,6 +1817,10 @@ export interface DuplicatesFindOutput {
 }
 export interface EntriesListInput {
   account?: string;
+  /**
+   * match postings in any of these accounts; cannot be combined with account
+   */
+  accounts?: null | string[];
   cursor?: number;
   /**
    * amount returned with next_cursor when sorting by amount
