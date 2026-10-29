@@ -283,6 +283,9 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 		if snap.GrantHash != PermissionHash(g) {
 			return SharedView{}, fmt.Errorf("shared snapshot needs refresh")
 		}
+		for key, value := range snap.Rendered.Values {
+			snap.Rendered.Values[key] = snapshotValue(value)
+		}
 	} else {
 		owner := ownerPrincipal(g, p.Actor)
 		v, e := s.scoped(g).Get(ctx, owner, g.DashboardID, "published")
@@ -306,6 +309,31 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 		Version int `json:"version"`
 	}{snap.Version}, func(context.Context) error { return nil })
 	return SharedView{g, snap}, e
+}
+
+func snapshotValue(value any) any {
+	switch v := value.(type) {
+	case bson.D:
+		out := make(map[string]any, len(v))
+		for _, field := range v {
+			out[field.Key] = snapshotValue(field.Value)
+		}
+		return out
+	case bson.A:
+		out := make([]any, len(v))
+		for i, item := range v {
+			out[i] = snapshotValue(item)
+		}
+		return out
+	case bson.M:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = snapshotValue(item)
+		}
+		return out
+	default:
+		return value
+	}
 }
 func (s *Service) ListOwned(ctx context.Context, p principal.Principal, id string) ([]Grant, error) {
 	if e := p.Require("ledger:read"); e != nil {

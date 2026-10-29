@@ -39,7 +39,7 @@ func TestTemplatedTextRowsExpressionAndHideZero(t *testing.T) {
 			t.Errorf("missing %q in %s", want, out.HTML)
 		}
 	}
-	if v, _ := out.Values["t"].([]map[string]any); len(v) != 1 {
+	if v, _ := out.Values["t"].(map[string]any)["rows"].([]map[string]any); len(v) != 1 {
 		t.Fatal("rows expression", out.Values["t"])
 	}
 	// hide_zero drops the all-zero group row.

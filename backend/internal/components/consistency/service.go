@@ -276,7 +276,8 @@ func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error
 		}
 		for _, d := range dashes {
 			for _, c := range d.Spec.Components {
-				v, ok := d.Rendered.Values[c.ID].(float64)
+				value, _ := d.Rendered.Values[c.ID].(map[string]any)
+				v, ok := value["value"].(float64)
 				if !ok || !isNetWorth(c) {
 					continue
 				}

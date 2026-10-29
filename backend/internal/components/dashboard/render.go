@@ -205,7 +205,7 @@ func (x *execution) render(c Component) (string, any, error) {
 			}
 			sub += " · " + format(d, c.Format)
 		}
-		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div></div>`, v, nil
+		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div></div>`, map[string]any{"type": "kpi", "value": v, "text": format(v, c.Format), "tone": t, "sub": sub}, nil
 	case "text":
 		text, e := x.template("md", c.MD)
 		if e != nil {
@@ -214,7 +214,7 @@ func (x *execution) render(c Component) (string, any, error) {
 		safe := escape(text)
 		safe = bold.ReplaceAllString(safe, "<strong>$1</strong>")
 		safe = strings.ReplaceAll(safe, "\n", "<br>")
-		return `<div class="dashboard-note">` + safe + `</div>`, text, nil
+		return `<div class="dashboard-note">` + safe + `</div>`, map[string]any{"type": "text", "html": safe}, nil
 	case "table", "scenario_compare":
 		rows, e := x.rows(c)
 		if e != nil {
@@ -233,6 +233,14 @@ func (x *execution) render(c Component) (string, any, error) {
 			}
 		}
 		b.WriteString(`</tr></thead><tbody>`)
+		columns := []map[string]any{}
+		for i, col := range c.Columns {
+			align := "left"
+			if i > 0 {
+				align = "right"
+			}
+			columns = append(columns, map[string]any{"key": fmt.Sprintf("c%d", i), "label": col.Label, "format": col.Format, "align": align})
+		}
 		values := []map[string]any{}
 		for _, r := range rows {
 			b.WriteString(`<tr>`)
@@ -251,7 +259,7 @@ func (x *execution) render(c Component) (string, any, error) {
 					class += " r"
 				}
 				b.WriteString(`<td class="` + class + `">` + escape(format(v, col.Format)) + `</td>`)
-				row[col.Label] = v
+				row[fmt.Sprintf("c%d", i)] = map[string]any{"v": v, "t": format(v, col.Format), "tone": t}
 			}
 			values = append(values, row)
 			b.WriteString(`</tr>`)
@@ -260,7 +268,7 @@ func (x *execution) render(c Component) (string, any, error) {
 			b.WriteString(`<tr><td colspan="` + strconv.Itoa(len(c.Columns)) + `">No matching rows.</td></tr>`)
 		}
 		b.WriteString(`</tbody></table></div>`)
-		return b.String(), values, nil
+		return b.String(), map[string]any{"type": c.Type, "columns": columns, "rows": values}, nil
 	case "budget_bars":
 		rows, e := x.rows(c)
 		if e != nil {
@@ -305,7 +313,15 @@ func (x *execution) render(c Component) (string, any, error) {
 			fmt.Fprintf(&b, `<div class="bbar"><span>%s</span><span class="tr"><i class="%s" style="width:%.3f%%"></i><b style="left:calc(%.3f%% - 1px)"></b></span><span class="v">%s / %s</span></div>`, escape(r.Label), class, r.Actual/maxValue*100, r.Limit/maxValue*100, escape(format(r.Actual, "eur0")), escape(format(r.Limit, "eur0")))
 		}
 		b.WriteString(`<div class="legend"><span><i class="legend-ok"></i>within limit</span><span><i class="legend-neg"></i>over limit</span><span>│ limit</span></div>`)
-		return b.String(), bars, nil
+		values := make([]map[string]any, 0, len(bars))
+		for _, bar := range bars {
+			status := "within"
+			if bar.Actual > bar.Limit {
+				status = "over"
+			}
+			values = append(values, map[string]any{"label": bar.Label, "actual": bar.Actual, "limit": bar.Limit, "status": status, "actual_text": format(bar.Actual, "eur0"), "limit_text": format(bar.Limit, "eur0")})
+		}
+		return b.String(), map[string]any{"type": "budget", "rows": values}, nil
 	case "chart":
 		return x.chart(c)
 	default:
@@ -316,7 +332,41 @@ func (x *execution) render(c Component) (string, any, error) {
 type chartPoint struct {
 	X      string  `json:"x"`
 	Y      float64 `json:"y"`
-	Series string  `json:"series,omitempty"`
+	Series string  `json:"series"`
+}
+
+func chartValue(c Component, points []chartPoint, names []string, reference *float64, label string) map[string]any {
+	field := c.Encoding.X.Field
+	if field == "" {
+		field = c.Encoding.X.Expr
+	}
+	kind := "category"
+	if len(points) > 0 {
+		kind = "date"
+		for _, point := range points {
+			if _, err := time.Parse("2006-01-02", point.X); err != nil {
+				kind = "month"
+				break
+			}
+		}
+		if kind == "month" {
+			for _, point := range points {
+				if _, err := time.Parse("2006-01", point.X); err != nil {
+					kind = "category"
+					break
+				}
+			}
+		}
+	}
+	series := make([]map[string]any, 0, len(names))
+	for i, name := range names {
+		series = append(series, map[string]any{"name": name, "color_index": i % 5})
+	}
+	out := map[string]any{"type": "chart", "mark": c.Mark, "x": map[string]any{"field": field, "kind": kind}, "series": series, "points": points, "y_format": c.Format}
+	if reference != nil {
+		out["rule"] = map[string]any{"y": *reference, "label": label}
+	}
+	return out
 }
 
 func (x *execution) chart(c Component) (string, any, error) {
@@ -334,7 +384,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 		return "", nil, fmt.Errorf("chart exceeds 5000 points")
 	}
 	if len(rows) == 0 {
-		return `<p class="cap">No data for this chart.</p>`, []chartPoint{}, nil
+		return `<p class="cap">No data for this chart.</p>`, chartValue(c, []chartPoint{}, nil, nil, ""), nil
 	}
 	field := func(axis Axis, r map[string]any) (any, error) {
 		if axis.Expr != "" {
@@ -399,7 +449,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 			total += p.Y
 		}
 		if total <= 0 {
-			return `<p class="cap">No positive values to display.</p>`, points, nil
+			return `<p class="cap">No positive values to display.</p>`, chartValue(c, points, series, nil, ""), nil
 		}
 		offset := 0.0
 		for i, p := range points {
@@ -412,7 +462,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 		}
 		b.WriteString(`</svg></div>`)
 		b.WriteString(chartData(c.Title, points, nil, ""))
-		return b.String(), points, nil
+		return b.String(), chartValue(c, points, series, nil, ""), nil
 	}
 	low, high := 0.0, 1.0
 	totals := map[string]float64{}
@@ -540,7 +590,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 		reference = &rule
 	}
 	b.WriteString(chartData(c.Title, points, reference, ruleLabel))
-	return b.String(), points, nil
+	return b.String(), chartValue(c, points, series, reference, ruleLabel), nil
 }
 
 func chartData(title string, points []chartPoint, reference *float64, label string) string {

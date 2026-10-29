@@ -114,27 +114,27 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, err := service.Preview(ctx, p, "sample", "published", nil)
-	if err != nil || !first.Validation.OK || first.Values["value"] != float64(1) {
+	if err != nil || !first.Validation.OK || first.Values["value"].(map[string]any)["value"] != float64(1) {
 		t.Fatalf("first preview: %+v %v", first.Validation, err)
 	}
-	first.Values["value"] = float64(999)
-	first.Values["table"].([]map[string]any)[0]["Value"] = float64(999)
+	first.Values["value"].(map[string]any)["value"] = float64(999)
+	first.Values["table"].(map[string]any)["rows"].([]map[string]any)[0]["c0"].(map[string]any)["v"] = float64(999)
 	reads.Store(0)
 	second, err := service.Preview(ctx, p, "sample", "published", nil)
-	if err != nil || second.Values["value"] != float64(1) || second.Values["table"].([]map[string]any)[0]["Value"] != float64(1) || reader.calls.Load() != 1 || reads.Load() > 1 {
+	if err != nil || second.Values["value"].(map[string]any)["value"] != float64(1) || second.Values["table"].(map[string]any)["rows"].([]map[string]any)[0]["c0"].(map[string]any)["v"] != float64(1) || reader.calls.Load() != 1 || reads.Load() > 1 {
 		t.Fatalf("warm preview: %v, %v, builds=%d reads=%d", second.Values, err, reader.calls.Load(), reads.Load())
 	}
 	filtered := &snapshotReader{}
 	filtered.value.Store(2)
 	shared, err := service.WithReader(filtered).Preview(ctx, p, "sample", "published", nil)
-	if err != nil || shared.Values["value"] != float64(2) {
+	if err != nil || shared.Values["value"].(map[string]any)["value"] != float64(2) {
 		t.Fatalf("reader isolation: %v, %v", shared.Values, err)
 	}
 	if err := a.Mutation(ctx, p, func(context.Context) error { reader.value.Store(3); return nil }); err != nil {
 		t.Fatal(err)
 	}
 	fresh, err := service.Preview(ctx, p, "sample", "published", nil)
-	if err != nil || fresh.Values["value"] != float64(3) || reader.calls.Load() != 2 {
+	if err != nil || fresh.Values["value"].(map[string]any)["value"] != float64(3) || reader.calls.Load() != 2 {
 		t.Fatalf("post-write preview: %v, %v, builds=%d", fresh.Values, err, reader.calls.Load())
 	}
 	bookRepo := ledger.NewMongoRepository(db)
@@ -161,7 +161,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	journal := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
 	journal.UseSnapshots(cache)
 	beforePost, err := journal.Preview(ctx, p, "journal-count", "published", nil)
-	if err != nil || beforePost.Values["count"] != float64(0) {
+	if err != nil || beforePost.Values["count"].(map[string]any)["value"] != float64(0) {
 		t.Fatalf("initial journal: %v, %v", beforePost.Values, err)
 	}
 	_, err = book.Post(ctx, p, ledger.EntryInput{Date: "2026-10-01", Payee: "Synthetic", Commit: true, Postings: []ledger.Posting{
@@ -172,7 +172,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 		t.Fatal(err)
 	}
 	afterPost, err := journal.Preview(ctx, p, "journal-count", "published", nil)
-	if err != nil || afterPost.Values["count"] != float64(1) {
+	if err != nil || afterPost.Values["count"].(map[string]any)["value"] != float64(1) {
 		t.Fatalf("journal after post: %v, %v", afterPost.Values, err)
 	}
 }

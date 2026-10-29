@@ -31,7 +31,7 @@ func TestServerRenderAndValidation(t *testing.T) {
 	if e != nil || !out.Validation.OK {
 		t.Fatal(out.Validation, e)
 	}
-	if out.Values["total"] != float64(30) || !strings.Contains(out.HTML, "€30") || strings.Contains(out.HTML, "<script>") {
+	if out.Values["total"].(map[string]any)["value"] != float64(30) || !strings.Contains(out.HTML, "€30") || strings.Contains(out.HTML, "<script>") {
 		t.Fatal("render or escaping failed", out)
 	}
 	spec.Components[0].Value = "missing.reference"

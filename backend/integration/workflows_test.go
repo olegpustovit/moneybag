@@ -268,7 +268,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal(e)
 	}
 	view, e := shares.View(ctx, pb, snap.ShareID)
-	if e != nil || view.Snapshot.Rendered.Values["value"] != float64(42) {
+	if e != nil || view.Snapshot.Rendered.Values["value"].(map[string]any)["value"] != float64(42) {
 		t.Fatal("snapshot share", view, e)
 	}
 	if _, e = shares.Access(ctx, pb, snap.ShareID, true); !errors.Is(e, principal.ErrForbidden) {
@@ -286,7 +286,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal(e)
 	}
 	view, e = shares.View(ctx, pb, live.ShareID)
-	if e != nil || view.Snapshot.Rendered.Values["value"] != float64(20) {
+	if e != nil || view.Snapshot.Rendered.Values["value"].(map[string]any)["value"] != float64(20) {
 		t.Fatal("live share used wrong owner or stale values", view, e)
 	}
 	access, e := shares.Access(ctx, pb, live.ShareID, true)
