@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -104,38 +105,15 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 		}
 	}
 	if in.Effective {
-		cur, e := db.Collection("journal").Find(ctx, bson.M{"user_id": p.UserID, "kind": "reversal", "status": "posted"}, options.Find().SetProjection(bson.M{"links": 1}))
+		reversed, e := r.reversed(ctx, p)
 		if e != nil {
 			return EntriesPage{}, e
 		}
-		var revs []Entry
-		if e := cur.All(ctx, &revs); e != nil {
-			return EntriesPage{}, e
+		ids := make([]string, 0, len(reversed))
+		for id := range reversed {
+			ids = append(ids, id)
 		}
-		reversedBy, isReversal := map[string]string{}, map[string]bool{}
-		for _, r := range revs {
-			isReversal[r.ID] = true
-			for _, l := range r.Links {
-				if l.Rel == "reverses" {
-					reversedBy[l.ID] = r.ID
-				}
-			}
-		}
-		// Undo/redo builds chains (original ← reversal ← reversal …); an odd chain length nets the original to zero.
-		reversed := []string{}
-		for id := range reversedBy {
-			if isReversal[id] {
-				continue
-			}
-			n := 0
-			for cur, ok := reversedBy[id]; ok && n <= len(revs); cur, ok = reversedBy[cur] {
-				n++
-			}
-			if n%2 == 1 {
-				reversed = append(reversed, id)
-			}
-		}
-		f["_id"] = bson.M{"$nin": reversed}
+		f["_id"] = bson.M{"$nin": ids}
 		if in.Kind == "" {
 			f["kind"] = bson.M{"$ne": "reversal"}
 		}
@@ -169,6 +147,110 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	}
 	return out, e
 }
+
+// reversed returns original entries cancelled by an odd reversal chain.
+func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (map[string]bool, error) {
+	return reqcache.Do(ctx, "reversed|"+p.UserID, func() (map[string]bool, error) {
+		db, err := r.db(p)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := db.Collection("journal").Find(ctx, bson.M{"user_id": p.UserID, "kind": "reversal", "status": "posted"}, options.Find().SetProjection(bson.M{"links": 1}))
+		if err != nil {
+			return nil, err
+		}
+		defer cur.Close(ctx)
+		var revs []Entry
+		if err := cur.All(ctx, &revs); err != nil {
+			return nil, err
+		}
+		reversedBy, isReversal := map[string]string{}, map[string]bool{}
+		for _, r := range revs {
+			isReversal[r.ID] = true
+			for _, l := range r.Links {
+				if l.Rel == "reverses" {
+					reversedBy[l.ID] = r.ID
+				}
+			}
+		}
+		reversed := map[string]bool{}
+		for id := range reversedBy {
+			if isReversal[id] {
+				continue
+			}
+			n := 0
+			for cur, ok := reversedBy[id]; ok && n <= len(revs); cur, ok = reversedBy[cur] {
+				n++
+			}
+			if n%2 == 1 {
+				reversed[id] = true
+			}
+		}
+		return reversed, nil
+	})
+}
+
+// PostedStream reads posted journal entries without paging or joining tags.
+func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principal, from, to string, fn func(Entry) error) error {
+	db, err := r.db(p)
+	if err != nil {
+		return err
+	}
+	filter := bson.M{"user_id": p.UserID, "status": "posted"}
+	dates := bson.M{}
+	if from != "" {
+		dates["$gte"] = from
+	}
+	if to != "" {
+		dates["$lte"] = to
+	}
+	if len(dates) > 0 {
+		filter["date"] = dates
+	}
+	pipeline := bson.A{bson.M{"$match": filter}, bson.M{"$project": bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}}}
+	cur, err := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(250000))
+	if err != nil {
+		return err
+	}
+	defer cur.Close(ctx)
+	for cur.Next(ctx) {
+		var entry Entry
+		if err := cur.Decode(&entry); err != nil {
+			return err
+		}
+		if err := fn(entry); err != nil {
+			return err
+		}
+	}
+	return cur.Err()
+}
+
+func (r *MongoRepository) tagOverlays(ctx context.Context, p principal.Principal) (map[string][]string, error) {
+	return reqcache.Do(ctx, "entry-tags|"+p.UserID, func() (map[string][]string, error) {
+		db, err := r.db(p)
+		if err != nil {
+			return nil, err
+		}
+		cur, err := db.Collection("entry_tags").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetProjection(bson.M{"entry_id": 1, "tags": 1}).SetBatchSize(250000))
+		if err != nil {
+			return nil, err
+		}
+		defer cur.Close(ctx)
+		tags := map[string][]string{}
+		for cur.Next(ctx) {
+			var item struct {
+				ID   string   `bson:"entry_id"`
+				Tags []string `bson:"tags"`
+			}
+			if err := cur.Decode(&item); err != nil {
+				return nil, err
+			}
+			tags[item.ID] = item.Tags
+		}
+		return tags, cur.Err()
+	})
+}
+
 func (r *MongoRepository) Accounts(ctx context.Context, p principal.Principal, in AccountsInput) (AccountsPage, error) {
 	db, e := r.db(p)
 	if e != nil {

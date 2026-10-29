@@ -168,3 +168,27 @@ func TestCachedViewCycleFailsBeforeWaiting(t *testing.T) {
 		t.Fatalf("expected view cycle, got %v", err)
 	}
 }
+
+type largeReader struct{}
+
+func (largeReader) Rows(context.Context, principal.Principal, string) ([]map[string]any, error) {
+	rows := make([]map[string]any, 6000)
+	for i := range rows {
+		rows[i] = map[string]any{"value": float64(i), "padding": strings.Repeat("x", 1600)}
+	}
+	return rows, nil
+}
+
+func TestLargeSourceCanBeAggregatedWithinResultBudget(t *testing.T) {
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := Engine{Expr: expr, Reader: largeReader{}}
+	result, err := engine.Evaluate(context.Background(), principal.Principal{}, "data.summary[0].count", map[string]Query{
+		"summary": {From: "postings", Agg: map[string]string{"count": "count()"}},
+	}, nil)
+	if err != nil || result.Value != float64(6000) {
+		t.Fatalf("aggregate: %+v, %v", result, err)
+	}
+}

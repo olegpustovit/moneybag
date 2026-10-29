@@ -126,11 +126,8 @@ func (x *execution) query(q Query) (any, error) {
 			rows[i] = maps.Clone(r)
 		}
 	}
-	if e := boundedData(rows); e != nil {
-		return nil, e
-	}
-	if len(rows) > 5000 {
-		return nil, fmt.Errorf("source exceeds 5000 rows")
+	if len(rows) > 250000 {
+		return nil, fmt.Errorf("source exceeds 250000 rows")
 	}
 	out := []map[string]any{}
 	for _, r := range rows {

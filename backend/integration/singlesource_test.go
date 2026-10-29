@@ -112,6 +112,23 @@ func testSingleSource(t *testing.T, ctx context.Context, p principal.Principal, 
 	if page, e := book.Entries(ctx, p, ledger.EntriesInput{Tag: "trip:x"}); e != nil || len(page.Items) != 1 {
 		t.Fatal("namespaced tag", page, e)
 	}
+	rows, e = sources.Rows(ctx, p, "postings")
+	if e != nil {
+		t.Fatal(e)
+	}
+	tagged := 0
+	for _, row := range rows {
+		if row["payee"] == "WS2 B" {
+			for _, tag := range row["tags"].([]any) {
+				if tag == "trip:x" {
+					tagged++
+				}
+			}
+		}
+	}
+	if tagged != 2 {
+		t.Fatalf("tag overlay on both postings: got %d", tagged)
+	}
 
 	ref := &budget.GroupRef{Dimension: "category", Value: "Food"}
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "ws2food", GroupRef: ref}); e != nil {

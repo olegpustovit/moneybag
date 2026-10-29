@@ -14,6 +14,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"maps"
 	"math/big"
+	"sort"
 	"strings"
 	"time"
 )
@@ -62,56 +63,44 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 	out := []map[string]any{}
 	switch {
 	case source == "journal" || source == "effective_entries" || source == "postings":
-		in := ledger.EntriesInput{Status: "posted", Limit: 500, Effective: source != "journal"}
+		from, to := "", ""
 		if source == "postings" {
-			in.From, _ = params["from"].(string)
-			in.To, _ = params["to"].(string)
+			from, _ = params["from"].(string)
+			to, _ = params["to"].(string)
 		}
 		cache := map[string]*big.Rat{}
 		var accounts map[string]ledger.Account
 		if source == "postings" {
-			var e error
-			if accounts, e = s.accountMap(ctx, p); e != nil {
-				return nil, e
+			var err error
+			if accounts, err = s.accountMap(ctx, p); err != nil {
+				return nil, err
 			}
 		}
-		bytes := 0
-		for {
-			page, e := s.Ledger.Entries(ctx, p, in)
-			if e != nil {
-				return nil, e
-			}
-			for _, entry := range page.Items {
-				encoded, e := json.Marshal(entry)
-				if e != nil {
-					return nil, e
+		err := s.Ledger.PostedStream(ctx, p, from, to, source != "journal", func(entry ledger.Entry) error {
+			if source == "postings" {
+				rows, err := s.postingRows(ctx, p, entry, accounts, cache)
+				if err != nil {
+					return err
 				}
-				bytes += len(encoded)
-				if bytes > 8*1024*1024 {
-					return nil, fmt.Errorf("journal source exceeds 8 MiB")
+				out = append(out, rows...)
+			} else {
+				row, err := native(entry)
+				if err != nil {
+					return err
 				}
-				if source == "postings" {
-					rows, e := s.postingRows(ctx, p, entry, accounts, cache)
-					if e != nil {
-						return nil, e
-					}
-					out = append(out, rows...)
-					continue
-				}
-				r, e := native(entry)
-				if e != nil {
-					return nil, e
-				}
-				out = append(out, r)
+				out = append(out, row)
 			}
-			if page.NextCursor == 0 {
-				break
+			if len(out) > 250000 {
+				return fmt.Errorf("journal source exceeds 250000 rows")
 			}
-			if len(out) > 5000 {
-				return nil, fmt.Errorf("journal source exceeds 5000 rows; use a date-filtered report")
-			}
-			in.Cursor = page.NextCursor
+			return nil
+		})
+		if err != nil {
+			return nil, err
 		}
+		// Preserve the paged journal's descending sequence order for order-sensitive queries.
+		sort.SliceStable(out, func(i, j int) bool { return out[i]["seq"].(float64) > out[j]["seq"].(float64) })
+
 	case source == "accounts":
 		balances, e := s.Ledger.Balances(ctx, p, ledger.BalancesInput{}, nil)
 		if e != nil {

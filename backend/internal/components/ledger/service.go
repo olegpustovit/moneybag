@@ -201,6 +201,41 @@ func (s *Service) Entries(ctx context.Context, p principal.Principal, in Entries
 	}
 	return s.repo.Entries(ctx, p, in)
 }
+
+// PostedStream provides the effective or full posted journal with tag overlays.
+func (s *Service) PostedStream(ctx context.Context, p principal.Principal, from, to string, effective bool, fn func(Entry) error) error {
+	if err := p.Require("ledger:read"); err != nil {
+		return err
+	}
+	for _, date := range []string{from, to} {
+		if date != "" {
+			if _, err := time.Parse("2006-01-02", date); err != nil {
+				return fmt.Errorf("dates must be YYYY-MM-DD")
+			}
+		}
+	}
+	var reversed map[string]bool
+	var err error
+	if effective {
+		reversed, err = s.repo.reversed(ctx, p)
+		if err != nil {
+			return fmt.Errorf("read reversals: %w", err)
+		}
+	}
+	tags, err := s.repo.tagOverlays(ctx, p)
+	if err != nil {
+		return fmt.Errorf("read entry tags: %w", err)
+	}
+	return s.repo.PostedStream(ctx, p, from, to, func(entry Entry) error {
+		if effective && (entry.Kind == "reversal" || reversed[entry.ID]) {
+			return nil
+		}
+		if overlay, ok := tags[entry.ID]; ok && overlay != nil {
+			entry.Tags = overlay
+		}
+		return fn(entry)
+	})
+}
 func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Entry, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return Entry{}, e
