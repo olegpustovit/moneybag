@@ -225,9 +225,19 @@ func (r *MongoRepository) Init(ctx context.Context, p principal.Principal) error
 	}
 	for name, models := range map[string][]mongo.IndexModel{
 		"accounts":           {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"journal":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "postings.account", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "tags", Value: 1}}}},
+		"journal":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "postings.account", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "tags", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "kind", Value: 1}, {Key: "status", Value: 1}}}},
+		"entry_tags":         {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "entry_id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"rows":               {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "table_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"tables":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"views":              {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"dashboards":         {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"budgets":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"scenarios":          {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"discrepancies":      {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "status", Value: 1}}}},
+		"balance_assertions": {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "date", Value: -1}}}},
+		"import_batches":     {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "created_at", Value: -1}}}},
 		"events":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "target.id", Value: 1}}}},
-		"import_rows":        {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "dedupe_key", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"import_rows":        {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "dedupe_key", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "batch_id", Value: 1}, {Key: "seq", Value: 1}}}},
 		"prices":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "pair", Value: 1}, {Key: "at", Value: 1}}, Options: options.Index().SetUnique(true)}},
 		"dashboard_versions": {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "dashboard_id", Value: 1}, {Key: "version", Value: 1}}, Options: options.Index().SetUnique(true)}},
 	} {
