@@ -3,6 +3,7 @@ package expressions
 import (
 	"context"
 	"regexp"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -53,7 +54,7 @@ func Expiry(ctx context.Context) time.Time {
 	return time.Time{}
 }
 func markVolatile(ctx context.Context, src string) {
-	if nowCall.MatchString(src) {
+	if strings.Contains(src, "now") && nowCall.MatchString(src) {
 		MarkVolatile(ctx)
 	}
 }

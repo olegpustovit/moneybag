@@ -91,6 +91,16 @@ func TestPreparedEvaluationMatchesEvaluation(t *testing.T) {
 	}
 }
 
+func TestVolatilityPrefilterMatchesOriginal(t *testing.T) {
+	for _, src := range []string{"", "today()", "row.amount > 0", "now()", "now ()", "unknown", "snow now!", "'now'", "_now", "now_", "é now 日本", "now\n", "NOW()"} {
+		ctx := WithVolatility(context.Background())
+		markVolatile(ctx, src)
+		if got, want := Volatile(ctx), nowCall.MatchString(src); got != want {
+			t.Fatalf("%q: got %t, want %t", src, got, want)
+		}
+	}
+}
+
 func TestRowActivationMatchesCopiedBindings(t *testing.T) {
 	e, err := New()
 	if err != nil {
