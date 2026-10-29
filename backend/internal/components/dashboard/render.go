@@ -198,14 +198,29 @@ func (x *execution) render(c Component) (string, any, error) {
 			}
 			sub = fmt.Sprint(s)
 		}
+		values := map[string]any{"type": "kpi", "value": v, "text": format(v, c.Format), "tone": t}
 		if c.Delta != "" {
 			d, e := x.evalAt("delta", c.Delta, nil)
 			if e != nil {
 				return "", nil, e
 			}
+			direction := "neutral"
+			if n, err := numeric(d); err == nil {
+				switch {
+				case n > 0:
+					direction = "up"
+				case n < 0:
+					direction = "down"
+				default:
+					direction = "unchanged"
+				}
+			}
+			values["delta"] = map[string]any{"text": format(d, c.Format), "direction": direction}
+			values["sub_text"] = sub
 			sub += " · " + format(d, c.Format)
 		}
-		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div></div>`, map[string]any{"type": "kpi", "value": v, "text": format(v, c.Format), "tone": t, "sub": sub}, nil
+		values["sub"] = sub
+		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div></div>`, values, nil
 	case "text":
 		text, e := x.template("md", c.MD)
 		if e != nil {

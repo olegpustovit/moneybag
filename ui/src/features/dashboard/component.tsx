@@ -1,11 +1,12 @@
 import { Suspense, lazy } from 'react'
+import { ArrowDown, ArrowUp } from 'lucide-react'
 import type { ComponentValue } from './values'
 import { DataTable } from './data-table'
 const DashboardChart = lazy(() => import('./chart'))
 
 export function Component({ value, drilldown = false, tableId = value.title || 'dashboard', sort, onSortChange }: { value: ComponentValue; drilldown?: boolean; tableId?: string; sort?:string; onSortChange?:(sort:string|undefined)=>void }) {
   switch (value.type) {
-    case 'kpi': return <div className="kpi"><div className={`kpi-value ${value.tone}`}>{value.text}</div>{value.sub && <p>{value.sub}</p>}</div>
+    case 'kpi': { const sub=value.sub_text ?? value.sub,delta=value.delta;return <div className="kpi"><div className="kpi-heading"><div className={`kpi-value ${value.tone}`}>{value.text}</div>{delta && <span role="img" className="kpi-delta" aria-label={delta.direction==='neutral' ? delta.text : `${delta.direction==='unchanged' ? 'No change' : delta.direction} ${delta.text}`}>{delta.direction==='up' ? <ArrowUp aria-hidden="true"/> : delta.direction==='down' ? <ArrowDown aria-hidden="true"/> : null}<span aria-hidden="true">{delta.text}</span></span>}</div>{sub && <p>{sub}</p>}</div> }
     case 'text': return <div className="note" dangerouslySetInnerHTML={{ __html: value.html }} />
     case 'table': case 'scenario_compare': return value.rows.length === 0 ? <p className="muted">No matching rows.</p> : <DataTable key={tableId} value={value} storageKey={tableId} sort={sort} onSortChange={onSortChange}/>
     case 'budget': { const max = Math.max(1, ...value.rows.flatMap((row) => [row.actual, row.limit])); return <div className="budget-bars">{value.rows.map((row, index) => { return <div className="budget-row" key={index}><span>{row.label}</span><span className="budget-track" role="img" tabIndex={0} aria-label={`${row.label}: ${row.actual_text} actual, ${row.limit_text} limit, ${row.status}`} title={`${row.label}: ${row.actual_text} actual, ${row.limit_text} limit, ${row.status}`}><i className={row.status} style={{ width: `${row.actual / max * 100}%` }}/><b style={{ left: `${row.limit / max * 100}%` }}/></span><span className="numeric">{row.actual_text} / {row.limit_text}</span></div> })}</div> }

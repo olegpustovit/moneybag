@@ -12,7 +12,10 @@ import (
 
 func TestTemplateComponentValuesContract(t *testing.T) {
 	components := []Component{
-		{ID: "k", Type: "kpi", Value: "1234.0", Format: "eur0", Tone: "'neg'", Sub: "'sub'"},
+		{ID: "k", Type: "kpi", Value: "1234.0", Format: "eur0", Tone: "'neg'", Sub: "'sub'", Delta: "-5.0"},
+		{ID: "kup", Type: "kpi", Value: "1", Delta: "2"},
+		{ID: "kzero", Type: "kpi", Value: "1", Delta: "0"},
+		{ID: "ktext", Type: "kpi", Value: "1", Delta: "'steady'"},
 		{ID: "t", Type: "table", Rows: "items", Columns: []Column{{Label: "Amount", Value: "row.amount", Format: "eur0", Tone: "'ok'"}, {Label: "Amount", Value: "row.amount"}}},
 		{ID: "s", Type: "scenario_compare", Rows: "items", Columns: []Column{{Label: "Name", Value: "row.name"}}},
 		{ID: "b", Type: "budget_bars", Rows: "items", Label: "row.name", Actual: "row.amount", Limit: "15.0"},
@@ -49,8 +52,13 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 	if err := json.Unmarshal(encoded, &values); err != nil {
 		t.Fatal(err)
 	}
-	if values["k"]["type"] != "kpi" || values["k"]["value"] != float64(1234) || values["k"]["text"] != "€1,234" || values["k"]["tone"] != "neg" {
+	if values["k"]["sub"] != "sub · €−5" || values["k"]["sub_text"] != "sub" || values["k"]["delta"].(map[string]any)["direction"] != "down" || values["k"]["type"] != "kpi" || values["k"]["value"] != float64(1234) || values["k"]["text"] != "€1,234" || values["k"]["tone"] != "neg" {
 		t.Fatal(values["k"])
+	}
+	for id, want := range map[string]string{"kup": "up", "kzero": "unchanged", "ktext": "neutral"} {
+		if got := values[id]["delta"].(map[string]any)["direction"]; got != want {
+			t.Fatalf("%s direction = %v, want %s", id, got, want)
+		}
 	}
 	table := values["t"]
 	cols := table["columns"].([]any)
