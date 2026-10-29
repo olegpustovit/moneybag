@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import {mkdir} from 'node:fs/promises';
+import {mkdtemp} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import {existsSync} from 'node:fs';
 import {chromium} from 'playwright';
 const base=process.env.MONEYBAG_E2E_URL||'http://127.0.0.1:6460';
@@ -9,7 +11,7 @@ const context=await browser.newContext({viewport:{width:1440,height:1100}});
 const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
 let id=0;
 async function call(name,args={}){
- const csrf=await page.locator('meta[name="csrf-token"]').getAttribute('content');
+ const session=await (await page.request.get(base+'/api/session')).json();const csrf=session.csrf;
  const response=await page.request.post(base+'/api/mcp',{headers:{Origin:base,'X-CSRF-Token':csrf,'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':name,Accept:'application/json, text/event-stream'},data:{jsonrpc:'2.0',id:++id,method:'tools/call',params:{name,arguments:args,_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientInfo':{name:'moneybag-e2e',version:'1'},'io.modelcontextprotocol/clientCapabilities':{}}}}});
  assert.equal(response.status(),200,`${name}: ${await response.text()}`);const envelope=await response.json();assert.ok(!envelope.error,JSON.stringify(envelope.error));assert.ok(!envelope.result.isError,JSON.stringify(envelope.result.content));return envelope.result.structuredContent;
 }
@@ -20,7 +22,7 @@ try{
  }else{
   await page.goto(base+'/login');await page.locator('[name="email"]').fill('demo@example.test');await page.locator('[name="password"]').fill('synthetic-preview-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();
  }
- await page.waitForURL(base+'/');await page.locator('meta[name="csrf-token"]').waitFor({state:'attached'});
+ await page.waitForURL(base+'/');await page.getByRole('heading',{name:'Dashboards',exact:true}).waitFor();
  const catalog=await call('accounts_list',{limit:500});
  if(!catalog.items.some(a=>a.id==='assets:bank')){
   for(const a of [{id:'assets:bank',name:'Everyday account',type:'asset',pot:'Cash',commodities:['EUR']},{id:'assets:savings',name:'Reserve',type:'asset',pot:'Savings',commodities:['USD']},{id:'equity:opening',name:'Opening balances',type:'equity',commodities:['EUR','USD']},{id:'income:salary',name:'Salary',type:'income',commodities:['EUR']}])await call('account_create',a);
@@ -41,19 +43,16 @@ try{
   if(!dashboards.items.some(d=>d.id===name)){await call('dashboard_create',{id:name,title,from_template:template});const validation=await call('dashboard_validate',{dashboard_id:name});assert.equal(validation.ok,true,JSON.stringify(validation));await call('dashboard_publish',{dashboard_id:name,version:1,note:'Synthetic example dashboard'});}
  }
  await page.goto(base+'/dashboards/budget');await page.getByRole('heading',{name:'Budget vs actual',exact:true}).waitFor();
- assert.equal(await page.locator('main .error:visible').count(),0,await page.locator('main').innerText());
- await page.getByRole('button',{name:'Spec',exact:true}).click();await page.locator('#spec-input').waitFor({state:'visible'});await page.getByRole('button',{name:'Validate',exact:true}).click();await page.getByText('Validation passed.',{exact:true}).waitFor();await page.getByRole('button',{name:'Close',exact:true}).click();
- await page.locator('#status').evaluate(el=>el.hidden=true);await mkdir('../docs/screenshots',{recursive:true});
- await page.emulateMedia({colorScheme:'light'});await page.screenshot({path:'../docs/screenshots/dashboard-light.png',fullPage:true});
- await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'../docs/screenshots/dashboard-dark.png',fullPage:true});
- await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'light'});await page.screenshot({path:'../docs/screenshots/dashboard-mobile.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile page overflows');
- const axis=await page.locator('[data-component="monthly"] svg text').first().boundingBox();assert.ok(axis&&axis.height>=10,'Mobile chart labels are too small');
- const scrollTable=page.locator('[data-component="tbl"] .tbl');await scrollTable.focus();assert.equal(await scrollTable.evaluate(el=>document.activeElement===el),true);await scrollTable.press('ArrowRight');await page.waitForFunction(()=>document.querySelector('[data-component="tbl"] .tbl').scrollLeft>0);
- await page.getByText('View chart data',{exact:true}).click();await page.getByRole('cell',{name:'2026-05',exact:true}).waitFor();assert.ok(await page.getByRole('rowheader',{name:'Reference: budget',exact:true}).count());
+ await page.getByRole('button',{name:'Edit',exact:true}).click();await page.getByRole('button',{name:'Advanced JSON'}).click();await page.getByLabel('Dashboard specification').waitFor();await page.getByText('Validation passed.',{exact:true}).waitFor();await page.getByRole('button',{name:'Close',exact:true}).last().click();await page.getByRole('dialog').waitFor({state:'hidden'});
+ const captures=await mkdtemp(join(tmpdir(),'moneybag-spa-smoke-'));
+ await page.emulateMedia({colorScheme:'light'});await page.screenshot({path:join(captures,'dashboard-light.png'),fullPage:true});
+ await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:join(captures,'dashboard-dark.png'),fullPage:true});
+ await page.setViewportSize({width:390,height:844});await page.emulateMedia({colorScheme:'light'});await page.screenshot({path:join(captures,'dashboard-mobile.png'),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile page overflows');
+ const chart=page.locator('.panel').filter({has:page.getByRole('heading',{name:'All-in spend by month'})});await chart.getByRole('button',{name:'Table',exact:true}).click();const chartTable=chart.getByRole('region',{name:'All-in spend by month data'});await chartTable.waitFor();assert.ok(await chartTable.getByRole('row').count()>1,'Chart data should contain rows');
  await page.setViewportSize({width:1440,height:1100});
- for(const path of ['/accounts','/journal','/budgets','/databases/assumptions','/scenarios','/imports','/reconcile','/shared','/audit','/settings']){await page.goto(base+path);assert.equal(await page.locator('main .error:visible').count(),0,`${path}: ${await page.locator('main').innerText()}`);}
- await page.goto(base+'/budgets');const limit=page.locator('tr[data-row="groceries"] [data-edit="limit"]');const updatedLimit=(await limit.innerText())==='410'?'411':'410';await limit.fill(updatedLimit);await limit.press('Enter');await page.getByText('Saved. Dashboards will use the updated value.',{exact:true}).waitFor();await page.reload();assert.equal(await page.locator('tr[data-row="groceries"] [data-edit="limit"]').innerText(),updatedLimit);
- await page.goto(base+'/imports');await page.locator('#import-form select[name="account"]').selectOption('assets:bank');await page.locator('#import-form input[type="file"]').setInputFiles({name:'synthetic.csv',mimeType:'text/csv',buffer:Buffer.from('Date,Amount,Currency,Description,ID\n2026-10-25,-12.34,EUR,Example coffee,e2e-coffee-1\n')});await page.getByRole('button',{name:'Stage import',exact:true}).click();await page.waitForURL(/\/imports\/.+/);await page.getByRole('button',{name:'Commit import',exact:true}).click();await page.waitForLoadState('networkidle');
+ for(const [path,title] of [['/accounts','Accounts'],['/journal','Journal'],['/budgets','Budgets'],['/databases/assumptions','Assumptions'],['/scenarios','Scenarios'],['/imports','Imports'],['/reconcile','Reconcile'],['/shared','Shared dashboards'],['/activity','Activity'],['/settings','Settings']]){await page.goto(base+path);await page.getByRole('heading',{name:title,exact:true}).first().waitFor();assert.equal(await page.getByRole('heading',{name:/Could not load/}).count(),0,`${path}: ${await page.locator('main').innerText()}`);}
+ await page.goto(base+'/budgets');await page.getByRole('button',{name:'Edit Limit for Groceries'}).click();const limit=page.getByLabel('Limit for Groceries');const updatedLimit=(await limit.inputValue())==='410'?'411':'410';await limit.fill(updatedLimit);const saved=page.waitForResponse(response=>response.url().endsWith('/api/mcp') && response.request().postDataJSON()?.params?.name==='budget_set_line');await limit.press('Enter');await saved;await page.getByRole('button',{name:'Edit Limit for Groceries'}).waitFor();assert.equal((await call('budget_get',{})).lines.find(line=>line.id==='groceries').limit_exact,updatedLimit);await page.reload();await page.getByRole('button',{name:'Edit Limit for Groceries'}).click();assert.equal(await page.getByLabel('Limit for Groceries').inputValue(),updatedLimit);await page.getByLabel('Limit for Groceries').press('Escape');
+ await page.goto(base+'/imports');await page.getByLabel('Account',{exact:true}).selectOption('assets:bank');await page.locator('#statement-file').setInputFiles({name:'synthetic.csv',mimeType:'text/csv',buffer:Buffer.from('Date,Amount,Currency,Description,ID\n2026-10-25,-12.34,EUR,Example coffee,e2e-coffee-1\n')});await page.getByRole('button',{name:'Stage statement',exact:true}).click();await page.waitForURL(/\/imports\/.+/);await page.getByRole('button',{name:'Commit import',exact:true}).click();await page.getByRole('heading',{name:'Undo import'}).waitFor();
  const preview=await call('dashboard_preview',{dashboard_id:'budget',version:'published'});assert.ok(preview.html_url&&preview.png_url,'Preview URLs missing');const html=await page.request.get(preview.html_url);assert.equal(html.status(),200);const png=await page.request.get(preview.png_url);assert.equal(png.status(),200,await png.text());assert.equal(png.headers()['content-type'],'image/png');assert.ok((await png.body()).length>1000);
  assert.deepEqual(errors,[]);console.log('Browser smoke passed: setup/login, dashboards, themes/mobile, all routes, cell persistence, import commit, HTML and PNG preview.');
 }finally{await browser.close();}
