@@ -172,6 +172,7 @@ th { color:var(--text2); font-weight:600; }
 .console-result { overflow: auto; max-height: 30rem; background: var(--muted); padding: 1rem; border-radius: .5rem; }
 @media (max-width: 600px) { .setting-inline, .endpoint { align-items: flex-start; flex-direction: column; } .settings-form { align-items: stretch; flex-direction: column; } }
 
+.journal-loading-action { width:90px; height:32px; }.journal-loading-filters > div { display:grid; gap:4px; min-width:8rem; font-size:.8rem; }.journal-loading-filters .skeleton-bar { height:32px; }.journal-loading-table table { min-width:720px; table-layout:fixed; }
 .journal-filters { display:flex; flex-wrap:wrap; gap:.75rem; align-items:end; margin-bottom:1.5rem; }
 .journal-filters label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }
 .journal-filters input, .journal-filters select { min-width:8rem; }

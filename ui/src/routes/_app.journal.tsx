@@ -4,6 +4,7 @@ import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
 import { AccountLabel } from '../components/account-label'
 import type { Account } from '../components/account-picker'
 import { Amount } from '../components/amount'
@@ -26,11 +27,17 @@ export const Route = createFileRoute('/_app/journal')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({ text:search.text, account:search.account, accounts:search.account ? undefined : search.accounts, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:serverSort(search.sort) }),
   loader: async ({ context, deps }) => { await Promise.all([context.queryClient.infiniteQuery({ ...journalQuery(context.session, deps), staleTime:'static' }), context.queryClient.query({ ...accountsQuery(context.session), staleTime:'static' })]) },
-  pendingComponent: () => <section aria-busy="true"><h1>Journal</h1><p>Loading entries…</p></section>,
+  pendingMs: 150,
+  pendingMinMs: 300,
+  pendingComponent: JournalPending,
   errorComponent: JournalError,
   component: Journal,
 })
-function JournalError({ reset }: { reset: () => void }) { const router = useRouter(); return <section className="dashboard-error"><h1>Could not load the journal</h1><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section> }
+function JournalPending() {
+  const columns = ['Date','Payee','Accounts','Posting amount','Status','Tags']
+  return <section role="status" aria-busy="true"><span className="sr-only">Loading journal…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / JOURNAL</p><h1>Journal</h1><p className="description">Entries and their postings.</p></div><Skeleton className="skeleton-bar journal-loading-action"/></header><div aria-hidden="true"><div className="journal-filters journal-loading-filters">{['Search','Account or accounts','Tag','From','To','Status'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}</div><div className="table-scroll skeleton-table journal-loading-table"><table><thead><tr>{columns.map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{Array.from({length:8},(_,row) => <tr key={row}>{columns.map((label,index) => <td key={label}><Skeleton className={`skeleton-bar ${index===3 ? 'numeric' : ''}`}/></td>)}</tr>)}</tbody></table></div></div></section>
+}
+function JournalError({ error, reset }: { error: unknown; reset: () => void }) { const router = useRouter(); return <section className="dashboard-error" role="alert"><h1>Could not load the journal</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section> }
 function Journal() {
   const { session } = Route.useRouteContext()
   const search = Route.useSearch()
