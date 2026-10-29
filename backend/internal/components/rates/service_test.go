@@ -45,3 +45,14 @@ func TestWeekdaysSinceIgnoresWeekends(t *testing.T) {
 		t.Fatal(n)
 	}
 }
+
+func TestParseECBData(t *testing.T) {
+	csv := "KEY,FREQ,CURRENCY,CURRENCY_DENOM,EXR_TYPE,EXR_SUFFIX,TIME_PERIOD,OBS_VALUE,OBS_STATUS\nEXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-10-20,1.1215,A\nEXR.D.USD.EUR.SP00.A,D,USD,EUR,SP00,A,2026-10-21,,M\n"
+	q, e := parseECBData("EUR/USD", []byte(csv))
+	if e != nil || len(q) != 1 || q[0] != (ecbQuote{"EUR/USD", "2026-10-20T16:00:00Z", "1.1215"}) {
+		t.Fatal(q, e)
+	}
+	if _, e = parseECBData("EUR/USD", []byte("a,b\n1,2\n")); e == nil {
+		t.Fatal("csv without ECB columns accepted")
+	}
+}

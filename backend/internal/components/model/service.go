@@ -56,6 +56,8 @@ type Scenario struct {
 	Overrides []Override    `json:"overrides" bson:"overrides"`
 	Events    []Event       `json:"events,omitempty" bson:"events,omitempty"`
 	Legacy    *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty"`
+	// DropLegacy removes a stored legacy block; omitting legacy otherwise keeps it.
+	DropLegacy bool `json:"drop_legacy,omitempty" bson:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
 }
 type Income struct {
 	ID        string  `json:"id" bson:"id"`
@@ -211,9 +213,10 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
 		return Scenario{}, e
 	}
-	if in.Legacy == nil {
+	if in.Legacy == nil && !in.DropLegacy {
 		in.Legacy = before.Legacy
 	}
+	in.DropLegacy = false
 	_, e = s.audit.Write(ctx, p, "scenario_upsert", audit.Target{Collection: "scenarios", ID: in.ID}, "", before, in, func(tx context.Context) error {
 		_, e := s.repo.db.Collection("scenarios").ReplaceOne(tx, bson.M{"user_id": p.UserID, "id": in.ID}, in, options.Replace().SetUpsert(true))
 		return e
@@ -338,7 +341,14 @@ func (s *Service) Forecast(ctx context.Context, p principal.Principal, in Foreca
 				vars[o.Assumption] = v
 			}
 		}
-		for _, key := range []string{"start_net_usd", "income_usd", "spend_eur", "eurusd"} {
+		required := []string{"start_net_usd", "eurusd"}
+		if sc.Legacy == nil {
+			required = append(required, "spend_eur")
+			if len(state.Streams) == 0 {
+				required = append(required, "income_usd")
+			}
+		}
+		for _, key := range required {
 			if _, ok := vars[key]; !ok {
 				return nil, fmt.Errorf("missing assumption %s", key)
 			}
@@ -374,7 +384,7 @@ func ptr(v float64) *float64  { return &v }
 func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, start time.Time) (Projection, error) {
 	spend := a["spend_eur"] * a["eurusd"]
 	income := a["income_usd"]
-	reimb, extra, yield, buffer := 0.0, 0.0, 0.0, 0.0
+	reimb, extra, yield, buffer := 0.0, a["kyiv_extra_drain_usd"], a["yield_pct"], a["buffer_usd"]
 	if sc.Legacy != nil {
 		l := sc.Legacy
 		spend = 0
@@ -395,6 +405,12 @@ func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, s
 		case "income_usd":
 			income = a["income_usd"]
 			incomeOverride = true
+		case "kyiv_extra_drain_usd":
+			extra = a["kyiv_extra_drain_usd"]
+		case "yield_pct":
+			yield = a["yield_pct"]
+		case "buffer_usd":
+			buffer = a["buffer_usd"]
 		}
 	}
 	gold := a["gold_g"] * a["gold_usd_g"]

@@ -27,7 +27,7 @@ func TestScanText(t *testing.T) {
 }
 
 func TestSpecLiteralsAndOrphans(t *testing.T) {
-	spec := dashboard.Spec{ID: "d", Title: "Plan 77", Data: map[string]dashboard.Query{"used": {From: "journal"}, "idle": {From: "journal"}}, Computed: map[string]string{"c": "data.used.size()"},
+	spec := dashboard.Spec{ID: "d", Title: "Plan 77", Data: map[string]dashboard.Query{"base": {From: "journal"}, "used": {From: "query:base"}, "idle": {From: "journal"}}, Computed: map[string]string{"c": "data.used.size()"},
 		Components: []dashboard.Component{{ID: "k_n", Type: "kpi", Value: "computed.c", Sub: "'6 pots'", Rows: "gone"}}}
 	lits := SpecLiterals(spec)
 	if len(lits) != 2 {
@@ -48,7 +48,7 @@ func TestSpecLiteralsAndOrphans(t *testing.T) {
 			t.Errorf("missing %q in %s", want, got)
 		}
 	}
-	if strings.Contains(got, "data.used is") || strings.Contains(got, "computed.c is") {
+	if strings.Contains(got, "data.used is") || strings.Contains(got, "data.base is") || strings.Contains(got, "computed.c is") {
 		t.Errorf("false orphan: %s", got)
 	}
 }

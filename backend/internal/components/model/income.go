@@ -94,7 +94,13 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 				if st.LandsIn != "" && po.Account != st.LandsIn || st.LandsIn == "" && accounts[po.Account].Type != "income" {
 					continue
 				}
-				v := po.Amount.Value.Float()
+				// Income accounts are credits and a settlement credits the receivable it repays: both flip to money received.
+				settles := st.LandsIn != "" && (st.IsReimbursement() || accounts[st.LandsIn].Class == "receivable")
+				sign := 1.0
+				if st.LandsIn == "" || settles {
+					sign = -1
+				}
+				v := po.Amount.Value.Float() * sign
 				if st.LandsIn != "" && st.PayerMatch == "" && v <= 0 {
 					continue // without a payer match only inflows to the account count
 				}
@@ -106,10 +112,7 @@ func (s *Service) IncomeReconcile(ctx context.Context, p principal.Principal, in
 					if e != nil {
 						return nil, e
 					}
-					v = c.Value.Float()
-				}
-				if st.LandsIn == "" {
-					v = -v
+					v = c.Value.Float() * sign
 				}
 				sum, hit = sum+v, true
 			}

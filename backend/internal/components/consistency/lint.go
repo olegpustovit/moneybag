@@ -113,7 +113,7 @@ func SpecOrphans(spec dashboard.Spec, tables, scenarios map[string]bool) []strin
 		for _, v := range q.Derive {
 			add(v)
 		}
-		usedFrom[q.From] = true
+		usedFrom[strings.TrimPrefix(q.From, "query:")] = true
 		switch {
 		case strings.HasPrefix(q.From, "table:") && !tables[strings.TrimPrefix(q.From, "table:")]:
 			out = append(out, fmt.Sprintf("data %s reads missing table %s", k, q.From))

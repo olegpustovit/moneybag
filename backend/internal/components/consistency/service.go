@@ -317,15 +317,20 @@ func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error
 		}
 		blob += fmt.Sprint(d.Spec)
 	}
+	streamIDs := map[string]bool{}
+	for _, st := range state.Streams {
+		streamIDs[st.ID] = true
+	}
 	for _, x := range state.Scenarios {
 		for _, o := range x.Overrides {
-			if !assumptions[o.Assumption] {
+			// Stream-id overrides and ref overrides are valid without a stored assumption.
+			if !assumptions[o.Assumption] && !streamIDs[o.Assumption] && o.Ref == "" {
 				bad = append(bad, fmt.Sprintf("scenario %s overrides missing assumption %s", x.ID, o.Assumption))
 			}
-			blob += o.Assumption + " " + o.Expr + " "
+			blob += o.Assumption + " " + o.Expr + " " + o.Ref + " "
 		}
 	}
-	// shortcut: assumption use is a substring search; scenarios cannot reference streams or budget lines by id today.
+	// shortcut: assumption use is a substring search, so engine-internal names (horizon) can still show as unused.
 	for k := range assumptions {
 		if !strings.Contains(blob, k) {
 			bad = append(bad, "assumption "+k+" is never referenced")

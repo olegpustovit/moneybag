@@ -594,6 +594,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	}
 	result.Validation.Cost = x.cost
 	result.HTML = output.String()
+	result.Computed = x.vars["computed"].(map[string]any)
 	if ctx.Err() != nil {
 		issue("/", fmt.Errorf("dashboard exceeded 10 second evaluation budget"))
 	}

@@ -28,11 +28,14 @@ const (
 	maxFeedBytes = 1024 * 1024
 )
 
-type endpoints struct{ ecb, gold, swiss string }
+type endpoints struct{ ecb, gold, swiss, ecbData string }
 
 // SetHTTPClient and SetEndpoints let tests serve the providers locally.
-func (s *Service) SetHTTPClient(c *http.Client)         { s.http = c }
-func (s *Service) SetEndpoints(ecb, gold, swiss string) { s.urls = endpoints{ecb, gold, swiss} }
+func (s *Service) SetHTTPClient(c *http.Client) { s.http = c }
+func (s *Service) SetEndpoints(ecb, gold, swiss string) {
+	s.urls = endpoints{ecb, gold, swiss, s.urls.ecbData}
+}
+func (s *Service) SetECBDataURL(base string) { s.urls.ecbData = base }
 
 // ProviderState is the persisted outcome of the latest sync for one user and provider.
 type ProviderState struct {

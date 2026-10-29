@@ -59,7 +59,7 @@ func NewMongoRepository(db *mongo.Database) *MongoRepository {
 	return &MongoRepository{db}
 }
 func NewService(r *MongoRepository, a *audit.Service) *Service {
-	return &Service{r, a, safefetch.Client(), endpoints{ecbURL, goldAPIURL, swissURL}}
+	return &Service{r, a, safefetch.Client(), endpoints{ecbURL, goldAPIURL, swissURL, ecbDataURL}}
 }
 
 var pairPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,19}/[A-Za-z][A-Za-z0-9_]{0,19}$`)

@@ -76,6 +76,7 @@ type PreviewInput struct {
 	DashboardID string         `json:"dashboard_id"`
 	Version     any            `json:"version,omitempty"`
 	Params      map[string]any `json:"params,omitempty"`
+	ValuesOnly  bool           `json:"values_only,omitempty" jsonschema:"true omits html and preview links and returns only validation, per-component values and computed values"`
 }
 
 func versionRef(v any) (string, error) {
@@ -225,9 +226,15 @@ func New(s Services, opts Options) *mcp.Server {
 		Providers []rates.ProviderState `json:"providers"`
 	}
 	// updated keeps its original shape (newest ECB day); gold quotes written are included in full.
-	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX or gold quotes are stale. Runs the daily sync now: backfills ECB daily reference rates for the last 90 days and fetches spot gold (gold-api.com, else Swissquote) as XAU/USD and XAU_g/USD. Returns the newest ECB day plus gold quotes written, and per-provider status. Corrected or archived quotes are never overwritten. sources may limit it to ecb and/or gold. Manual security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
-		Sources []string `json:"sources,omitempty"`
+	add(r, "rates_refresh", "rates", "ledger:write", "Use this when FX or gold quotes are stale. Runs the daily sync now: backfills ECB daily reference rates for the last 90 days and fetches spot gold (gold-api.com, else Swissquote) as XAU/USD and XAU_g/USD. Returns the newest ECB day plus gold quotes written, and per-provider status. Corrected or archived quotes are never overwritten. sources may limit it to ecb and/or gold. backfill_from (YYYY-MM-DD, up to 10 years back) instead loads ECB daily history for pairs (default EUR/USD) from that date and returns every quote written; free gold history is not available. Manual security prices use rate_set.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+		Sources      []string `json:"sources,omitempty"`
+		BackfillFrom string   `json:"backfill_from,omitempty" jsonschema:"YYYY-MM-DD; loads ECB daily history from this date instead of running the sync"`
+		Pairs        []string `json:"pairs,omitempty" jsonschema:"EUR/<CCY> pairs for backfill_from; default EUR/USD"`
 	}) (refreshed, error) {
+		if in.BackfillFrom != "" {
+			written, e := s.Rates.BackfillECB(ctx, p, in.BackfillFrom, in.Pairs)
+			return refreshed{Updated: append([]rates.Quote{}, written...), Providers: []rates.ProviderState{}}, e
+		}
 		ecb, gold := len(in.Sources) == 0, len(in.Sources) == 0
 		for _, source := range in.Sources {
 			switch source {
@@ -279,7 +286,7 @@ func New(s Services, opts Options) *mcp.Server {
 	add(r, "model_get", "model", "ledger:read", "Use this when you need assumptions, income streams and scenarios before forecasting.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (model.State, error) {
 		return s.Model.Get(ctx, p)
 	})
-	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override may instead carry ref (budget_line:<id>, budget_lines.total or income_stream:<id>) with optional factor; the assumption must end in _usd or _eur and the referenced value is converted with the live EUR/USD rate. An override named after an income stream id replaces that stream amount (0 disables it). Events change cash in a specified future month.", false, false, s.Model.Upsert)
+	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override may instead carry ref (budget_line:<id>, budget_lines.total or income_stream:<id>) with optional factor; the assumption must end in _usd or _eur and the referenced value is converted with the live EUR/USD rate. An override named after an income stream id replaces that stream amount (0 disables it); overriding income_usd replaces all streams with that monthly total. kyiv_extra_drain_usd, yield_pct and buffer_usd are assumptions or overrides; a legacy block supplies them otherwise, and drop_legacy: true removes it. income_usd is required only when there are no income streams. Events change cash in a specified future month.", false, false, s.Model.Upsert)
 	add(r, "forecast_run", "model", "ledger:read", "Use this when projecting scenarios. Supply 1..20 scenario IDs and horizon_months 1..600. value_in is USD or EUR; the original tracker projection engine is preserved for migrated scenarios. The starting state (net worth, wise and kyiv cash, gold grams, EUR/USD and XAU_g/USD rates) is computed from the live ledger as of as_of (default today, Europe/Zagreb); wise cash is accounts whose pot starts with wise (wise_usd, wise_eur), kyiv cash is pots containing kyiv (cash_kyiv), excluding gold; gold is the XAU_g commodity. Stored assumptions are used only when the ledger cannot be valued, and a scenario override still wins. Each series item reports start_as_of, start_source, start_net_usd, journal_seq, rates_used and resolved_inputs, plus savings_usd_mo, kyivEmptyMonth and runway_ex_gold.", true, false, func(ctx context.Context, p principal.Principal, in model.ForecastInput) (struct {
 		Series []model.Projection `json:"series"`
 	}, error) {
@@ -389,7 +396,7 @@ func New(s Services, opts Options) *mcp.Server {
 		r, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, nil)
 		return r.Validation, e
 	})
-	add(r, "dashboard_preview", "dashboard", "ledger:read", "Use this to inspect the exact server-rendered dashboard and computed values. Does not publish or execute browser code.", true, false, func(ctx context.Context, p principal.Principal, in PreviewInput) (dashboard.Rendered, error) {
+	add(r, "dashboard_preview", "dashboard", "ledger:read", "Use this to read back a dashboard as rendered: values (per component id), computed (every computed value) and validation, plus html and preview links unless values_only is true. version is a number, draft or published. Does not publish or execute browser code.", true, false, func(ctx context.Context, p principal.Principal, in PreviewInput) (dashboard.Rendered, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return dashboard.Rendered{}, e
@@ -399,6 +406,10 @@ func New(s Services, opts Options) *mcp.Server {
 			return dashboard.Rendered{}, e
 		}
 		rendered, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, in.Params)
+		if in.ValuesOnly {
+			rendered.HTML = ""
+			return rendered, e
+		}
 		if e == nil && rendered.Validation.OK && s.Previews != nil {
 			rendered.HTMLURL, rendered.PNGURL, e = s.Previews.Create(p, rendered.HTML, access.Grant)
 		}

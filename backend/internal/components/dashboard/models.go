@@ -133,5 +133,6 @@ type Rendered struct {
 	PNGURL     string         `json:"png_url,omitempty"`
 	HTML       string         `json:"html"`
 	Values     map[string]any `json:"values"`
+	Computed   map[string]any `json:"computed,omitempty"`
 	Validation Validation     `json:"validation"`
 }

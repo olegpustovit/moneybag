@@ -55,9 +55,10 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	expr, _ := expressions.New()
 	prices := rates.NewService(rates.NewMongoRepository(db), a)
 	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
-	models := model.NewService(model.NewMongoRepository(db), tables.NewService(tables.NewMongoRepository(db), a, expr), a, expr)
+	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
-	for _, acc := range []ledger.Account{{ID: "assets:w", Type: "asset", Name: "W", Pot: "wise_usd", Commodities: []string{"USD"}}, {ID: "assets:k", Type: "asset", Name: "K", Pot: "cash_kyiv", Commodities: []string{"USD"}}, {ID: "equity:open", Type: "equity", Name: "Open", Commodities: []string{"USD"}}, {ID: "income:pay", Type: "income", Name: "Pay", Commodities: []string{"USD"}}} {
+	for _, acc := range []ledger.Account{{ID: "assets:w", Type: "asset", Name: "W", Pot: "wise_usd", Commodities: []string{"USD"}}, {ID: "assets:k", Type: "asset", Name: "K", Pot: "cash_kyiv", Commodities: []string{"USD"}}, {ID: "equity:open", Type: "equity", Name: "Open", Commodities: []string{"USD"}}, {ID: "income:pay", Type: "income", Name: "Pay", Commodities: []string{"USD"}}, {ID: "assets:r", Type: "asset", Name: "Owed", Pot: "owed", Class: "receivable", Commodities: []string{"USD"}}} {
 		if _, e = book.CreateAccount(ctx, p, acc); e != nil {
 			t.Fatal(e)
 		}
@@ -103,6 +104,28 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	if e != nil || refs[0].SpendUSD != 75 || len(refs[0].Inputs) != 1 || refs[0].Inputs[0].Value != 50 { // 100 EUR * 0.5 = 50 EUR; spend 50 * 1.5 USD
 		t.Fatal("ref not resolved", refs, e)
 	}
+	// Drain and buffer are plain overrides; drop_legacy removes a stored legacy block.
+	drain := 100.0
+	if _, e = models.Upsert(ctx, p, model.Scenario{ID: "drain", Name: "Drain", Legacy: &model.LegacyInputs{KyivExtraDrainMonthlyUSD: 1}}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = models.Upsert(ctx, p, model.Scenario{ID: "drain", Name: "Drain", DropLegacy: true, Overrides: []model.Override{{Assumption: "kyiv_extra_drain_usd", Value: &drain}}}); e != nil {
+		t.Fatal(e)
+	}
+	dr, e := models.Forecast(ctx, p, model.ForecastInput{ScenarioIDs: []string{"drain"}, HorizonMonths: 1, AsOf: "2026-10-31"})
+	if e != nil || dr[0].Months[1].Kyiv != dr[0].Months[0].Kyiv-100 {
+		t.Fatal("kyiv drain override", dr, e)
+	}
+	if st, _ := models.Get(ctx, p); func() bool {
+		for _, x := range st.Scenarios {
+			if x.ID == "drain" {
+				return x.Legacy != nil
+			}
+		}
+		return true
+	}() {
+		t.Fatal("drop_legacy kept the legacy block")
+	}
 	if _, e = models.Compare(ctx, p, model.CompareInput{ScenarioIDs: []string{"base"}, Metrics: []string{"nope"}}); e == nil || !strings.Contains(e.Error(), "runway_ex_gold") {
 		t.Fatal("unknown metric must list valid ones", e)
 	}
@@ -114,5 +137,22 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	rec, e := models.IncomeReconcile(ctx, p, model.ReconcileInput{StreamID: "pay", From: "2026-10-01", To: "2026-10-31"})
 	if e != nil || len(rec) != 1 || rec[0].Actual != 80 || rec[0].Variance != -20 || len(rec[0].EntryIDs) != 1 {
 		t.Fatal("income reconcile", rec, e)
+	}
+	// With streams set, income_usd is no longer a required assumption.
+	if _, e = tab.DeleteRows(ctx, p, tables.DeleteInput{DB: "assumptions", RowIDs: []string{"income_usd"}}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = models.Forecast(ctx, p, model.ForecastInput{ScenarioIDs: []string{"base"}, HorizonMonths: 1, AsOf: "2026-10-31"}); e != nil {
+		t.Fatal("income_usd still required with streams", e)
+	}
+	// A reimbursement settles the receivable: its credit there is money received.
+	if _, e = models.SetIncome(ctx, p, []model.Income{{ID: "back", Amount: 40, Currency: "USD", Frequency: "monthly", Kind: "reimbursement", PayerMatch: `row.payee == "Employer"`, LandsIn: "assets:r"}}); e != nil {
+		t.Fatal(e)
+	}
+	post("2026-10-07", "Tools", "assets:r", "assets:w", "40")
+	post("2026-10-20", "Employer", "assets:w", "assets:r", "40")
+	back, e := models.IncomeReconcile(ctx, p, model.ReconcileInput{StreamID: "back", From: "2026-10-01", To: "2026-10-31"})
+	if e != nil || len(back) != 1 || back[0].Actual != 40 {
+		t.Fatal("reimbursement settlement sign", back, e)
 	}
 }
