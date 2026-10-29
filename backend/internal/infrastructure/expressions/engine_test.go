@@ -2,6 +2,7 @@ package expressions
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -29,6 +30,27 @@ func TestCEL(t *testing.T) {
 	for _, expr := range []string{"missing + 1", strings.Repeat("1", 2001), "row.__proto__", "sum(['x'])"} {
 		if _, err = e.Eval(context.Background(), expr, nil); err == nil {
 			t.Fatalf("accepted %s", expr)
+		}
+	}
+}
+
+func TestDataReferences(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		expr    string
+		refs    []string
+		dynamic bool
+	}{
+		{`data.foo + data["bar"][0] + size("data.fake")`, []string{"bar", "foo"}, false},
+		{`data[params.key]`, nil, true},
+		{`data.items.map(x, x.value)`, []string{"items"}, false},
+	} {
+		refs, dynamic, err := e.DataReferences(tc.expr)
+		if err != nil || !slices.Equal(refs, tc.refs) || dynamic != tc.dynamic {
+			t.Fatalf("%s: refs=%v dynamic=%v err=%v", tc.expr, refs, dynamic, err)
 		}
 	}
 }

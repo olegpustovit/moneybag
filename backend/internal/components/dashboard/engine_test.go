@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -245,5 +248,150 @@ func TestEvaluationStopsWhenRequestExpires(t *testing.T) {
 	case <-done:
 	default:
 		t.Fatal("source did not stop")
+	}
+}
+
+type graphReader struct {
+	calls   atomic.Int64
+	active  atomic.Int64
+	started chan struct{}
+	once    sync.Once
+	fail    bool
+}
+
+func (r *graphReader) Rows(ctx context.Context, _ principal.Principal, source string) ([]map[string]any, error) {
+	r.calls.Add(1)
+	if r.fail {
+		return nil, fmt.Errorf("synthetic source failure")
+	}
+	if r.active.Add(1) == 4 {
+		r.once.Do(func() { close(r.started) })
+	}
+	defer r.active.Add(-1)
+	select {
+	case <-r.started:
+		return []map[string]any{{"value": float64(1)}}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func TestQueryGraphRunsIndependentSourcesInParallel(t *testing.T) {
+	expr, _ := expressions.New()
+	reader := &graphReader{started: make(chan struct{})}
+	engine := Engine{Expr: expr, Reader: reader}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	result, err := engine.Evaluate(ctx, principal.Principal{}, "data.e[0].value", map[string]Query{
+		"a": {From: "a"}, "b": {From: "b"}, "c": {From: "c"}, "d": {From: "d"},
+		"e": {From: "query:a", Where: "row.value == data.b[0].value"},
+	}, nil)
+	if err != nil || result.Value != float64(1) || reader.calls.Load() != 4 {
+		t.Fatalf("parallel graph: %+v, %v, calls %d", result, err, reader.calls.Load())
+	}
+}
+
+func TestQueryGraphPropagatesFailureOnce(t *testing.T) {
+	expr, _ := expressions.New()
+	reader := &graphReader{fail: true}
+	engine := Engine{Expr: expr, Reader: reader}
+	data := map[string]Query{"source": {From: "broken"}}
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		data[name] = Query{From: "query:source"}
+	}
+	spec := Spec{Data: data, Pages: []Page{{ID: "main"}}}
+	result, err := engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || result.Validation.OK || reader.calls.Load() != 1 {
+		t.Fatalf("failed source: %+v, %v, calls %d", result.Validation, err, reader.calls.Load())
+	}
+	for _, issue := range result.Validation.Errors {
+		if issue.Path != "/data/source" && !strings.Contains(issue.Msg, "dependency source failed") {
+			t.Fatalf("unexpected failure: %+v", issue)
+		}
+	}
+	if len(result.Validation.Errors) != 6 {
+		t.Fatalf("expected source and five dependency errors: %+v", result.Validation.Errors)
+	}
+}
+
+func TestQueryGraphReportsCyclesAndMissingDependencies(t *testing.T) {
+	expr, _ := expressions.New()
+	engine := Engine{Expr: expr, Reader: fixtureReader{}}
+	for _, tc := range []struct {
+		data map[string]Query
+		want string
+	}{
+		{map[string]Query{"a": {From: "query:b"}, "b": {From: "query:a"}}, "cyclic query dependencies"},
+		{map[string]Query{"a": {From: "query:missing"}}, "dependency missing not found"},
+	} {
+		_, err := engine.Evaluate(context.Background(), principal.Principal{}, "1", tc.data, nil)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("expected %q: %v", tc.want, err)
+		}
+	}
+}
+
+func TestDynamicQueryDependencyUsesSerialResolver(t *testing.T) {
+	expr, _ := expressions.New()
+	engine := Engine{Expr: expr, Reader: fixtureReader{}}
+	result, err := engine.Evaluate(context.Background(), principal.Principal{}, "data.range[0].i", map[string]Query{
+		"base":  {From: "journal"},
+		"range": {From: "range", N: `size(data[params.key])`},
+	}, map[string]any{"key": "base"})
+	if err != nil || result.Value != float64(0) {
+		t.Fatalf("dynamic dependency: %+v, %v", result, err)
+	}
+}
+
+type deadlineReader struct{ active atomic.Int64 }
+
+func (r *deadlineReader) Rows(ctx context.Context, _ principal.Principal, _ string) ([]map[string]any, error) {
+	r.active.Add(1)
+	defer r.active.Add(-1)
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+func TestParallelQueriesFinishAtDeadline(t *testing.T) {
+	expr, _ := expressions.New()
+	reader := &deadlineReader{}
+	engine := Engine{Expr: expr, Reader: reader}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := engine.Evaluate(ctx, principal.Principal{}, "1", map[string]Query{"a": {From: "a"}, "b": {From: "b"}, "c": {From: "c"}, "d": {From: "d"}, "e": {From: "e"}}, nil)
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > time.Second || reader.active.Load() != 0 {
+		t.Fatalf("deadline: %v after %v, %d readers active", err, time.Since(start), reader.active.Load())
+	}
+}
+
+func TestParallelQueriesMemoizeFailedSource(t *testing.T) {
+	expr, _ := expressions.New()
+	reader := &graphReader{fail: true}
+	engine := Engine{Expr: expr, Reader: reader}
+	data := map[string]Query{}
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		data[name] = Query{From: "broken"}
+	}
+	result, err := engine.Execute(context.Background(), principal.Principal{}, Spec{Data: data, Pages: []Page{{ID: "main"}}})
+	if err != nil || result.Validation.OK || reader.calls.Load() != 1 || len(result.Validation.Errors) != 5 {
+		t.Fatalf("failed source: %+v, %v, calls %d", result.Validation, err, reader.calls.Load())
+	}
+}
+
+type valueReader float64
+
+func (r valueReader) Rows(context.Context, principal.Principal, string) ([]map[string]any, error) {
+	return []map[string]any{{"value": float64(r)}}, nil
+}
+func TestSourceMemoDoesNotCrossReaderBoundaries(t *testing.T) {
+	expr, _ := expressions.New()
+	ctx := reqcache.With(context.Background())
+	data := map[string]Query{"rows": {From: "journal"}}
+	for _, want := range []float64{1, 2} {
+		engine := Engine{Expr: expr, Reader: valueReader(want)}
+		result, err := engine.Evaluate(ctx, principal.Principal{UserID: "same-owner"}, "data.rows[0].value", data, nil)
+		if err != nil || result.Value != want {
+			t.Fatalf("reader isolation: %+v, %v; want %v", result, err, want)
+		}
 	}
 }

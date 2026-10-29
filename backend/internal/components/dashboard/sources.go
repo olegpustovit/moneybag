@@ -44,9 +44,16 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		}
 	}
 	params, _ := json.Marshal(ctx.Value(paramsKey{}))
-	rows, err := reqcache.Do(ctx, "rows|"+p.UserID+"|"+source+"|"+string(params), func() ([]map[string]any, error) {
-		return s.rows(ctx, p, source)
-	})
+	read := func() ([]map[string]any, error) { return s.rows(ctx, p, source) }
+	var rows []map[string]any
+	var err error
+	stack, _ := ctx.Value(viewStackKey{}).([]string)
+	// shortcut: nested views bypass shared memoization to prevent cross-root cycle deadlocks; replace with cycle-aware scheduling to cache them.
+	if len(stack) > 0 && strings.HasPrefix(source, "view:") {
+		rows, err = read()
+	} else {
+		rows, err = reqcache.Do(ctx, "rows|"+p.UserID+"|"+source+"|"+string(params), read)
+	}
 	if err != nil {
 		return nil, err
 	}

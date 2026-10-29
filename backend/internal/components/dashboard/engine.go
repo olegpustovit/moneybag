@@ -38,7 +38,8 @@ type execution struct {
 	cost       uint64
 	count      int
 	source     map[string][]map[string]any // rows already read from each source in this execution
-	dataBudget *byteBudget                 // all query results of this execution share 8 MiB
+	memo       *sourceMemo
+	dataBudget *byteBudget // all query results of this execution share 8 MiB
 }
 
 func (x *execution) eval(expr string, row map[string]any) (any, error) {
@@ -118,7 +119,13 @@ func (x *execution) query(q Query) (any, error) {
 	default:
 		cached, ok := x.source[q.From]
 		if !ok {
-			if cached, e = x.engine.Reader.Rows(x.ctx, x.p, q.From); e != nil {
+			if x.memo == nil {
+				x.memo = &sourceMemo{}
+			}
+			cached, e = x.memo.read(q.From, func() ([]map[string]any, error) {
+				return x.engine.Reader.Rows(x.ctx, x.p, q.From)
+			})
+			if e != nil {
 				return nil, e
 			}
 			if x.source == nil {
@@ -634,7 +641,7 @@ func walkExpressions(s Spec, fn func(string, string)) {
 		for f, v := range q.Agg {
 			if op, args, err := parseAgg(v); err == nil && op != "count" {
 				emit(base+"/agg/"+f, args[0])
-				if op == "linear_slope" {
+				if op == "linear_slope" || op == "percentile" {
 					emit(base+"/agg/"+f, args[1])
 				}
 			}
@@ -690,41 +697,44 @@ func walkExpressions(s Spec, fn func(string, string)) {
 }
 
 func (x *execution) load(data map[string]Query, computedExprs map[string]string, issue func(string, error)) {
-	pending := map[string]Query{}
-	for k, q := range data {
-		pending[k] = q
-	}
-	for len(pending) > 0 {
-		progress := false
-		errs := map[string]error{}
-		for k, q := range pending {
-			if err := x.ctx.Err(); err != nil {
-				issue("/data/"+k, err)
-				return
-			}
-			v, err := x.query(q)
-			if err != nil {
-				errs[k] = err
-				continue
-			}
-			x.vars["data"].(map[string]any)[k] = v
-			if x.dataBudget == nil {
-				x.dataBudget = &byteBudget{8 * 1024 * 1024}
-			}
-			if e := x.dataBudget.spend(v); e != nil {
-				issue("/data", e)
-				return
-			}
-			delete(pending, k)
-			progress = true
+	if !x.loadQueries(data, issue) {
+		pending := map[string]Query{}
+		for k, q := range data {
+			pending[k] = q
 		}
-		if !progress {
-			for k, err := range errs {
-				issue("/data/"+k, err)
+		for len(pending) > 0 {
+			progress := false
+			errs := map[string]error{}
+			for k, q := range pending {
+				if err := x.ctx.Err(); err != nil {
+					issue("/data/"+k, err)
+					return
+				}
+				v, err := x.query(q)
+				if err != nil {
+					errs[k] = err
+					continue
+				}
+				x.vars["data"].(map[string]any)[k] = v
+				if x.dataBudget == nil {
+					x.dataBudget = &byteBudget{8 * 1024 * 1024}
+				}
+				if e := x.dataBudget.spend(v); e != nil {
+					issue("/data", e)
+					return
+				}
+				delete(pending, k)
+				progress = true
 			}
-			break
+			if !progress {
+				for k, err := range errs {
+					issue("/data/"+k, err)
+				}
+				break
+			}
 		}
 	}
+
 	computed := map[string]string{}
 	for k, v := range computedExprs {
 		computed[k] = v
