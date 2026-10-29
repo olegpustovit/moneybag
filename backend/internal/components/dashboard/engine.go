@@ -480,6 +480,7 @@ func (x *execution) evalAt(field, expr string, row map[string]any) (any, error) 
 }
 
 func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) (Rendered, error) {
+	ctx = expressions.WithVolatility(ctx)
 	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()

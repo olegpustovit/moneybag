@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 )
 
@@ -166,5 +168,33 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	fresh, e := prices.Stale(ctx, p, time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC))
 	if e != nil || len(fresh) != 0 {
 		t.Fatal("fresh rates reported stale", fresh, e)
+	}
+	future := time.Now().UTC().Add(4 * time.Second).Truncate(time.Second)
+	if _, e = prices.Set(ctx, p, rates.SetInput{Pair: "EUR/USD", Value: ledger.MustDecimal("2"), At: future.Format(time.RFC3339), Source: "Synthetic future quote"}); e != nil {
+		t.Fatal(e)
+	}
+	tracked := expressions.WithVolatility(ctx)
+	if _, e = prices.Get(tracked, p, []string{"EUR/USD"}, ""); e != nil || !expressions.Expiry(tracked).Equal(future) {
+		t.Fatalf("future quote expiry: %v, %v", expressions.Expiry(tracked), e)
+	}
+	cache, e := dashboard.NewSnapshots(revisions)
+	if e != nil {
+		t.Fatal(e)
+	}
+	sources := dashboard.Sources{Rates: prices, Snapshots: cache}
+	beforeRate, e := sources.Rows(ctx, p, "rates:EUR/USD")
+	if e != nil || beforeRate[0]["value"] != 9.9999 {
+		t.Fatalf("rate before scheduled quote: %v, %v", beforeRate, e)
+	}
+	timer := time.NewTimer(time.Until(future) + 100*time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	case <-timer.C:
+	}
+	afterRate, e := sources.Rows(ctx, p, "rates:EUR/USD")
+	if e != nil || afterRate[0]["value"] != float64(2) {
+		t.Fatalf("rate after scheduled quote: %v, %v", afterRate, e)
 	}
 }

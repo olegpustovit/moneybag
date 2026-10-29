@@ -49,8 +49,10 @@ func (s *Service) RestorePublication(ctx context.Context, p principal.Principal,
 		if e != nil || h.DraftVersion != 0 || old.DraftVersion == 0 {
 			return e
 		}
-		_, e = s.repo.db.Collection("dashboards").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"draft_version": old.DraftVersion}})
-		return e
+		return s.audit.Mutation(ctx, p, func(tx context.Context) error {
+			_, err := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"draft_version": old.DraftVersion}})
+			return err
+		})
 	}
 	h, e := s.head(ctx, p, id)
 	if e != nil {

@@ -320,7 +320,7 @@ func (r *MongoRepository) Init(ctx context.Context, p principal.Principal) error
 		"import_batches":     {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "created_at", Value: -1}}}},
 		"events":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "target.id", Value: 1}}}},
 		"import_rows":        {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "dedupe_key", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "batch_id", Value: 1}, {Key: "seq", Value: 1}}}},
-		"prices":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "pair", Value: 1}, {Key: "at", Value: 1}}, Options: options.Index().SetUnique(true)}},
+		"prices":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "pair", Value: 1}, {Key: "at", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "at", Value: 1}}}},
 		"dashboard_versions": {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "dashboard_id", Value: 1}, {Key: "version", Value: 1}}, Options: options.Index().SetUnique(true)}},
 	} {
 		if _, e = db.Collection(name).Indexes().CreateMany(ctx, models); e != nil {

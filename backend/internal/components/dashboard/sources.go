@@ -20,17 +20,19 @@ import (
 )
 
 type Sources struct {
-	Ledger *ledger.Service
-	Budget *budget.Service
-	Model  *model.Service
-	Tables *tables.Service
-	Valuer ledger.Valuer
-	Rates  *rates.Service
-	Views  *Service // saved views (view:<id>); set once the dashboard service exists
-	Expr   *expressions.Engine
+	Ledger    *ledger.Service
+	Budget    *budget.Service
+	Model     *model.Service
+	Tables    *tables.Service
+	Valuer    ledger.Valuer
+	Rates     *rates.Service
+	Views     *Service // saved views (view:<id>); set once the dashboard service exists
+	Expr      *expressions.Engine
+	Snapshots *Snapshots
 }
 
 func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
+	ctx = expressions.WithVolatility(ctx)
 	if strings.HasPrefix(source, "view:") {
 		id := strings.TrimPrefix(source, "view:")
 		stack, _ := ctx.Value(viewStackKey{}).([]string)
@@ -45,9 +47,19 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	}
 	params, _ := json.Marshal(ctx.Value(paramsKey{}))
 	read := func() ([]map[string]any, error) { return s.rows(ctx, p, source) }
+	stack, _ := ctx.Value(viewStackKey{}).([]string)
+	if s.Snapshots != nil && !(len(stack) > 0 && strings.HasPrefix(source, "view:")) {
+		build := read
+		read = func() ([]map[string]any, error) {
+			value, err := s.Snapshots.read(ctx, p, "source", source, json.RawMessage(params), func() (any, error) { return build() }, nil)
+			if err != nil {
+				return nil, err
+			}
+			return value.([]map[string]any), nil
+		}
+	}
 	var rows []map[string]any
 	var err error
-	stack, _ := ctx.Value(viewStackKey{}).([]string)
 	// shortcut: nested views bypass shared memoization to prevent cross-root cycle deadlocks; replace with cycle-aware scheduling to cache them.
 	if len(stack) > 0 && strings.HasPrefix(source, "view:") {
 		rows, err = read()
@@ -59,9 +71,36 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	}
 	out := make([]map[string]any, len(rows))
 	for i, row := range rows {
-		out[i] = maps.Clone(row)
+		out[i] = cloneSourceValue(row).(map[string]any)
 	}
 	return out, nil
+}
+
+func cloneSourceValue(v any) any {
+	switch value := v.(type) {
+	case map[string]any:
+		copy := maps.Clone(value)
+		for key, item := range copy {
+			copy[key] = cloneSourceValue(item)
+		}
+		return copy
+	case []any:
+		copy := make([]any, len(value))
+		for i, item := range value {
+			copy[i] = cloneSourceValue(item)
+		}
+		return copy
+	case []map[string]any:
+		copy := make([]map[string]any, len(value))
+		for i, item := range value {
+			copy[i] = cloneSourceValue(item).(map[string]any)
+		}
+		return copy
+	case []string:
+		return append([]string(nil), value...)
+	default:
+		return v
+	}
 }
 
 func (s *Sources) rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
@@ -337,6 +376,7 @@ func (s *Service) WithReader(reader Reader) *Service {
 	engine := *s.engine
 	engine.Reader = reader
 	copy.engine = &engine
+	copy.snapshots = nil
 	return &copy
 }
 

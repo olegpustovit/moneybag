@@ -7,7 +7,11 @@ import (
 	"fmt"
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
+	"github.com/tiendc/go-deepcopy"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
@@ -21,9 +25,10 @@ var dashboardID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 
 type MongoRepository struct{ db *mongo.Database }
 type Service struct {
-	repo   *MongoRepository
-	engine *Engine
-	audit  *audit.Service
+	repo      *MongoRepository
+	engine    *Engine
+	audit     *audit.Service
+	snapshots *Snapshots
 	// Lint, when set, returns report-only consistency findings that Publish attaches as warnings.
 	// It is a hook because the consistency component imports dashboard.
 	Lint func(context.Context, principal.Principal, Spec) ([]string, error)
@@ -69,7 +74,33 @@ type GetResult struct {
 	Note    string          `json:"note"`
 }
 
+func (s *Service) UseSnapshots(cache *Snapshots) { s.snapshots = cache }
+
 func (s *Service) Get(ctx context.Context, p principal.Principal, id, ref string) (GetResult, error) {
+	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+		return s.get(ctx, p, id, ref)
+	}
+	if err := p.Require("ledger:read"); err != nil {
+		return GetResult{}, err
+	}
+	value, err := s.snapshots.read(ctx, p, "dashboard", id, ref, func() (any, error) {
+		result, err := s.get(ctx, p, id, ref)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(result)
+	}, nil)
+	if err != nil {
+		return GetResult{}, err
+	}
+	var result GetResult
+	if err := json.Unmarshal(value.([]byte), &result); err != nil {
+		return GetResult{}, err
+	}
+	return result, nil
+}
+
+func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string) (GetResult, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return GetResult{}, e
 	}
@@ -385,6 +416,31 @@ func (s *Service) Patch(ctx context.Context, p principal.Principal, id string, o
 	})
 }
 func (s *Service) Preview(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {
+	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+		return s.preview(ctx, p, id, version, params)
+	}
+	if err := p.Require("ledger:read"); err != nil {
+		return Rendered{}, err
+	}
+	ctx = expressions.WithVolatility(reqcache.With(ctx))
+	key := struct {
+		Version string
+		Params  map[string]any
+	}{version, params}
+	value, err := s.snapshots.read(ctx, p, "render", id, key, func() (any, error) {
+		return s.preview(ctx, p, id, version, params)
+	}, func(v any) bool { return v.(Rendered).Validation.OK })
+	if err != nil {
+		return Rendered{}, err
+	}
+	var result Rendered
+	if err := deepcopy.Copy(&result, value); err != nil {
+		return Rendered{}, fmt.Errorf("copy dashboard snapshot: %w", err)
+	}
+	return result, nil
+}
+
+func (s *Service) preview(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {
 	v, e := s.Get(ctx, p, id, version)
 	if e != nil {
 		return Rendered{}, e

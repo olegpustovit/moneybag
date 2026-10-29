@@ -123,6 +123,15 @@ func run() error {
 	if len(os.Args) > 1 && os.Args[1] == "verify" {
 		return ids.EachUser(ctx, func(p principal.Principal) error { return book.Verify(ctx, p) })
 	}
+	snapshots, e := dashboard.NewSnapshots(a)
+	if e != nil {
+		return e
+	}
+	sources.Snapshots = snapshots
+	dash.UseSnapshots(snapshots)
+	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log)
+	a.OnChange = onChange
+	defer stopPrewarm()
 	stopJobs := startJobs(ctx, services, log)
 	defer stopJobs()
 	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)

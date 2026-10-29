@@ -8,7 +8,9 @@ import (
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -114,6 +116,26 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, pairs []string
 	}
 	if at == "" {
 		at = time.Now().UTC().Format(time.RFC3339)
+		if expressions.Tracking(ctx) {
+			next, err := reqcache.Do(ctx, "next-rate-change|"+p.UserID, func() (time.Time, error) {
+				var q struct {
+					At string `bson:"at"`
+				}
+				err := s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "at": bson.M{"$gt": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: 1}}).SetProjection(bson.M{"at": 1})).Decode(&q)
+				if errors.Is(err, mongo.ErrNoDocuments) {
+					return time.Time{}, nil
+				}
+				if err != nil {
+					return time.Time{}, err
+				}
+				return time.Parse(time.RFC3339, q.At)
+			})
+			if err != nil {
+				expressions.MarkVolatile(ctx)
+			} else {
+				expressions.ExpireAt(ctx, next)
+			}
+		}
 	}
 	if _, e := time.Parse(time.RFC3339, at); e != nil {
 		return nil, fmt.Errorf("at must be RFC3339")
