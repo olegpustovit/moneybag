@@ -135,6 +135,14 @@ th { color:var(--text2); font-weight:600; }
 .budget-track { position:relative; height:8px; background:var(--sunk); }
 .budget-track i { display:block; height:100%; background:var(--ok); }.budget-track i.over { background:var(--neg); }
 .budget-track b { position:absolute; top:-3px; height:14px; width:2px; background:var(--ink); }
+.skeleton-bar { display:block; height:9px; background:var(--sunk); animation:skeleton-pulse 1.4s ease-in-out infinite; }
+.skeleton-kpi .skeleton-bar:first-child { width:60%; height:30px; }
+.skeleton-kpi .skeleton-bar:last-child { width:35%; margin-top:10px; }
+.skeleton-lines { display:grid; gap:12px; }.skeleton-lines .skeleton-bar:nth-child(even) { width:70%; }
+.skeleton-table { overflow:hidden; }.skeleton-table table { width:100%; border-collapse:collapse; }.skeleton-table th,.skeleton-table td { padding:5px 8px; text-align:left; font-size:11px; }.skeleton-table th { color:var(--text2); }.skeleton-table .skeleton-bar { width:75%; }.skeleton-table .skeleton-bar.numeric { width:45%; margin-left:auto; }
+.skeleton-chart { width:100%; height:180px; fill:none; stroke:var(--bd); stroke-width:1; }.skeleton-chart-line { stroke:var(--text3); opacity:.3; stroke-width:2; }
+@keyframes skeleton-pulse { 50% { opacity:.45; } }
+@media (prefers-reduced-motion:reduce) { .skeleton-bar { animation:none; } }
 .dashboard-pending, .dashboard-error { padding:24px 0; color:var(--text2); font-size:13px; }
 .dashboard-error h1,.dashboard-error h2 { color:var(--text); }
 .refresh-line { height:2px; background:var(--c0); }

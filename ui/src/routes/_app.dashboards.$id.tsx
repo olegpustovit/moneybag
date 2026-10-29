@@ -9,6 +9,7 @@ import { DashboardEditor } from '../features/dashboard/editor'
 import { DateRange } from '../features/dashboard/date-range'
 import { componentValue } from '../features/dashboard/values'
 import { Component } from '../features/dashboard/component'
+import { DashboardSkeleton, useDashboardSkeleton } from '../features/dashboard/skeleton'
 import { tableSort } from '../features/dashboard/table-sort'
 import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
 
@@ -26,6 +27,8 @@ export const Route = createFileRoute('/_app/dashboards/$id')({
     await context.queryClient.query({ ...dashboardSpecQuery(context.session, params.id, version), staleTime: 'static' })
     return { version, head }
   },
+  pendingMs: 150,
+  pendingMinMs: 300,
   pendingComponent: () => <div className="dashboard-pending" aria-busy="true">Loading dashboard…</div>,
   errorComponent: DashboardError,
   component: Dashboard,
@@ -48,6 +51,7 @@ function Dashboard() {
   for (const key of ['from','to','month'] as const) if (search[key] !== undefined) params[key] = search[key]
   if(search.all){params.from='';params.to=''}
   const preview = useQuery({ ...dashboardPreviewQuery(session, id, version, params), placeholderData: keepPreviousData })
+  const showSkeleton = useDashboardSkeleton(preview.isPending)
   const pages = dashboard.spec.pages ?? []
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
   const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
@@ -62,7 +66,7 @@ function Dashboard() {
     {(range || month) && <DateRange range={range} month={month} values={search} defaults={{from:typeof dashboard.spec.params?.from==='string' && validDate(dashboard.spec.params.from) ? dashboard.spec.params.from : undefined,to:typeof dashboard.spec.params?.to==='string' && validDate(dashboard.spec.params.to) ? dashboard.spec.params.to : undefined,month:typeof dashboard.spec.params?.month==='string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dashboard.spec.params.month) ? dashboard.spec.params.month : undefined}} onChange={value => void navigate({search:old => ({...old,from:value.from,to:value.to,month:value.month,all:value.all || undefined})})}/>}
     {pages.length > 1 && <nav className="page-tabs" aria-label="Dashboard pages">{pages.map((item) => <button type="button" key={item.id} className={item.id === page?.id ? 'active' : ''} aria-current={item.id === page?.id ? 'page' : undefined} onClick={() => void navigate({ search: (old) => ({ ...old, page: item.id }) })}>{item.title || item.id}</button>)}</nav>}
     {preview.isFetching && !preview.isPending && <div className="refresh-line" role="status" aria-label="Refreshing dashboard"/>}
-    {preview.isPending ? <div className="dashboard-pending" aria-busy="true">Loading dashboard values…</div> : preview.isError ? <div className="dashboard-error" role="alert"><p>Could not load dashboard values.</p><Button onClick={() => void preview.refetch()}>Try again</Button></div> : <>{!preview.data.validation.ok && <div className="dashboard-error" role="alert"><h2>Dashboard needs attention</h2><ul>{(preview.data.validation.errors ?? []).map((issue,index) => <li key={index}>{issue.msg}</li>)}</ul></div>}<div className="dashboard-grid">{(page?.layout ?? []).flatMap((row, rowIndex) => (row.cols ?? []).map((placement, colIndex) => {
+    {preview.isPending || showSkeleton ? <div role="status" aria-busy="true"><span className="sr-only">Loading dashboard values…</span>{showSkeleton && <DashboardSkeleton page={page} components={components}/>}</div> : preview.isError ? <div className="dashboard-error" role="alert"><p>Could not load dashboard values.</p><Button onClick={() => void preview.refetch()}>Try again</Button></div> : <>{!preview.data.validation.ok && <div className="dashboard-error" role="alert"><h2>Dashboard needs attention</h2><ul>{(preview.data.validation.errors ?? []).map((issue,index) => <li key={index}>{issue.msg}</li>)}</ul></div>}<div className="dashboard-grid">{(page?.layout ?? []).flatMap((row, rowIndex) => (row.cols ?? []).map((placement, colIndex) => {
       const component = components.get(placement.component)
       const parsed = componentValue.safeParse(preview.data.values[placement.component])
       const issues=(preview.data.validation.errors ?? []).filter(issue => issue.component_id===placement.component)
