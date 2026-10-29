@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"maps"
 	"math"
 	"regexp"
 	"sort"
@@ -14,6 +15,9 @@ import (
 )
 
 type paramsKey struct{}
+
+// evalBudget bounds all queries of one dashboard; journal queries page through the ledger, so 1s fit only one.
+const evalBudget = 10 * time.Second
 
 type Reader interface {
 	Rows(context.Context, principal.Principal, string) ([]map[string]any, error)
@@ -29,6 +33,7 @@ type execution struct {
 	vars   map[string]any
 	cost   uint64
 	count  int
+	source map[string][]map[string]any // rows already read from each source in this execution
 }
 
 func (x *execution) eval(expr string, row map[string]any) (any, error) {
@@ -100,9 +105,20 @@ func (x *execution) query(q Query) (any, error) {
 			return nil, fmt.Errorf("query source must be rows")
 		}
 	default:
-		rows, e = x.engine.Reader.Rows(x.ctx, x.p, q.From)
-		if e != nil {
-			return nil, e
+		cached, ok := x.source[q.From]
+		if !ok {
+			if cached, e = x.engine.Reader.Rows(x.ctx, x.p, q.From); e != nil {
+				return nil, e
+			}
+			if x.source == nil {
+				x.source = map[string][]map[string]any{}
+			}
+			x.source[q.From] = cached
+		}
+		// Queries derive in place, so each gets its own copy of the shared rows.
+		rows = make([]map[string]any, len(cached))
+		for i, r := range cached {
+			rows[i] = maps.Clone(r)
 		}
 	}
 	if e := boundedData(rows); e != nil {
@@ -286,7 +302,7 @@ func (x *execution) query(q Query) (any, error) {
 var aggPattern = regexp.MustCompile(`^(sum|avg|min|max|count|last)\((.*)\)$`)
 
 func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) (Rendered, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
 	ctx = context.WithValue(ctx, paramsKey{}, spec.Params)
 	result := Rendered{Values: map[string]any{}, Validation: Validation{OK: true, Errors: []Issue{}, Warnings: []Issue{}}}
@@ -402,7 +418,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	result.Validation.Cost = x.cost
 	result.HTML = output.String()
 	if ctx.Err() != nil {
-		issue("/", fmt.Errorf("dashboard exceeded 1 second evaluation budget"))
+		issue("/", fmt.Errorf("dashboard exceeded 10 second evaluation budget"))
 	}
 	return result, nil
 }
@@ -510,7 +526,7 @@ func (x *execution) load(data map[string]Query, computedExprs map[string]string,
 }
 
 func (e *Engine) Evaluate(ctx context.Context, p principal.Principal, expr string, data map[string]Query, params map[string]any) (expressions.Result, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Second)
+	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
 	ctx = context.WithValue(ctx, paramsKey{}, params)
 	spec := Spec{Data: data, Computed: map[string]string{"result": expr}, Params: params}

@@ -49,3 +49,17 @@ func TestScenarioEventUsesSelectedCashPot(t *testing.T) {
 		t.Fatal(out, e)
 	}
 }
+
+func TestStreamReimbursementNetsAndZeroOverrideWins(t *testing.T) {
+	a := map[string]float64{"start_net_usd": 1000, "wise_usd": 500, "kyiv_usd": 500, "eurusd": 1}
+	streams := []Income{{ID: "reimb", Amount: 100, Currency: "USD", Frequency: "monthly", Reimbursement: true}, {ID: "side", Amount: 50, Currency: "USD", Frequency: "monthly"}}
+	out, e := Project(Scenario{ID: "s"}, a, streams, 2, time.Now())
+	if e != nil || out.EndNetUSD != 1100 || out.Months[2].Kyiv != 300 {
+		t.Fatal("reimbursement must move Kyiv to Wise, not add wealth", out, e)
+	}
+	a["side"] = 0
+	out, e = Project(Scenario{ID: "s"}, a, streams, 2, time.Now())
+	if e != nil || out.EndNetUSD != 1000 {
+		t.Fatal("zero stream override ignored", out, e)
+	}
+}

@@ -2,10 +2,12 @@ package tables
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 func (s *Service) Archive(ctx context.Context, p principal.Principal, id string, archived bool, reason string) error {
@@ -67,4 +69,47 @@ func (s *Service) RestoreRows(ctx context.Context, p principal.Principal, tableI
 		return nil
 	})
 	return e
+}
+
+type DeleteInput struct {
+	DB     string   `json:"db"`
+	RowIDs []string `json:"row_ids"`
+}
+
+// DeleteRows archives rows, so db_update_cells can recreate one and undo restores it.
+func (s *Service) DeleteRows(ctx context.Context, p principal.Principal, in DeleteInput) (UpdateResult, error) {
+	if e := p.Require("model:write"); e != nil {
+		return UpdateResult{}, e
+	}
+	if len(in.RowIDs) < 1 || len(in.RowIDs) > 500 {
+		return UpdateResult{}, fmt.Errorf("1..500 row ids required")
+	}
+	if _, e := s.Get(ctx, p, in.DB); e != nil {
+		return UpdateResult{}, e
+	}
+	result := UpdateResult{Rows: []Row{}, DependentsRecomputed: []string{}}
+	before := []Row{}
+	id, e := s.audit.Write(ctx, p, "db_update_cells", audit.Target{Collection: "tables", ID: in.DB}, "", &before, &result.Rows, func(tx context.Context) error {
+		before, result.Rows = []Row{}, []Row{}
+		for _, rowID := range in.RowIDs {
+			var r Row
+			filter := bson.M{"user_id": p.UserID, "table_id": in.DB, "id": rowID, "archived": bson.M{"$ne": true}}
+			if e := s.repo.db.Collection("rows").FindOne(tx, filter).Decode(&r); e != nil {
+				if errors.Is(e, mongo.ErrNoDocuments) {
+					return principal.ErrNotFound
+				}
+				return e
+			}
+			before = append(before, r)
+			r.Archived = true
+			r.Version++
+			if _, e := s.repo.db.Collection("rows").ReplaceOne(tx, bson.M{"user_id": p.UserID, "table_id": in.DB, "id": rowID}, r); e != nil {
+				return e
+			}
+			result.Rows = append(result.Rows, r)
+		}
+		return nil
+	})
+	result.EventID = id
+	return result, e
 }

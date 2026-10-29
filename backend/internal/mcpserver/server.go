@@ -242,10 +242,11 @@ func New(s Services, opts Options) *mcp.Server {
 	add(r, "db_query", "tables", "ledger:read", "Use this when reading your database rows. db is a logical table ID from db_list, where is CEL over row, sort uses +/-column names, limit 1..5000.", true, false, s.Tables.Query)
 	add(r, "db_create", "tables", "model:write", "Use this when you need a new user database. Columns have unique id and type number/string/bool/date/formula. Formula columns require CEL and are read-only cells.", false, false, s.Tables.Create)
 	add(r, "db_update_cells", "tables", "model:write", "Use this when editing assumptions or cells. Row IDs may create rows; updates are type-checked and formulas recomputed. Optional version rejects stale edits.", false, false, s.Tables.Update)
+	add(r, "db_delete_rows", "tables", "model:write", "Use this to delete rows from a data table by row id (1..500). Rows are archived, so undo restores them. To change a row, use db_update_cells with its row_id.", false, true, s.Tables.DeleteRows)
 	add(r, "model_get", "model", "ledger:read", "Use this when you need assumptions, income streams and scenarios before forecasting.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (model.State, error) {
 		return s.Model.Get(ctx, p)
 	})
-	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. Events change cash in a specified future month.", false, false, s.Model.Upsert)
+	add(r, "scenario_upsert", "model", "model:write", "Use this when defining a what-if scenario. Overrides each name an assumption with either numeric value or CEL expr over params. An override named after an income stream id replaces that stream amount (0 disables it). Events change cash in a specified future month.", false, false, s.Model.Upsert)
 	add(r, "forecast_run", "model", "ledger:read", "Use this when projecting scenarios. Supply 1..20 scenario IDs and horizon_months 1..600. value_in is USD or EUR; the original tracker projection engine is preserved for migrated scenarios.", true, false, func(ctx context.Context, p principal.Principal, in model.ForecastInput) (struct {
 		Series []model.Projection `json:"series"`
 	}, error) {
@@ -443,6 +444,18 @@ func New(s Services, opts Options) *mcp.Server {
 			}
 		}
 		return v, e
+	})
+	add(r, "dashboard_delete", "dashboard", "dash:write", "Use this to delete (archive) a dashboard you own; it disappears from lists and its public link. Owner only; shared editors cannot delete. Reversible with undo.", false, true, func(ctx context.Context, p principal.Principal, in struct {
+		DashboardID string `json:"dashboard_id"`
+		Reason      string `json:"reason,omitempty"`
+	}) (struct {
+		Deleted string `json:"deleted"`
+	}, error) {
+		// Archive filters by the caller's own user id, so only the owner can delete.
+		e := s.Dashboard.Archive(ctx, p, in.DashboardID, true, in.Reason)
+		return struct {
+			Deleted string `json:"deleted"`
+		}{in.DashboardID}, e
 	})
 	add(r, "expr_eval", "dashboard", "ledger:read", "Use this to test a bounded CEL expression on your own data. vars.data maps query names to declared source queries; vars.params supplies parameters. Shared-owner data is never accepted.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		Expr string `json:"expr"`

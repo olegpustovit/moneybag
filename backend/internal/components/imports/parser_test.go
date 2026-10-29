@@ -86,3 +86,14 @@ func TestAmbiguousStatementDatesRequireMapping(t *testing.T) {
 		t.Fatal(rows, e)
 	}
 }
+
+func TestMappedAccount(t *testing.T) {
+	for in, want := range map[string]string{"equity:transfers": "equity:transfers", "expenses:food": "expenses:food", "Groceries": "", "": ""} {
+		if got, e := mappedAccount(in); e != nil || got != want {
+			t.Fatal(in, got, e)
+		}
+	}
+	if _, e := mappedAccount("equty:transfers"); e == nil {
+		t.Fatal("unknown account type accepted silently")
+	}
+}

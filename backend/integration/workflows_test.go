@@ -51,7 +51,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
-	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices}
+	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
 	engine := &dashboard.Engine{Expr: expr, Reader: sources}
@@ -270,8 +270,12 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if bad.Validation.OK {
 		t.Fatal("editor read outside granted sources")
 	}
-	if _, e = access.Dashboard.Publish(ctx, access.Principal, access.ID, bad.DraftVersion, "Forbidden source"); e == nil {
-		t.Fatal("invalid editor draft published")
+	if _, e = access.Dashboard.Publish(ctx, access.Principal, access.ID, bad.DraftVersion, "Forbidden source"); e == nil || !strings.Contains(e.Error(), "/data/raw") {
+		t.Fatal("invalid editor draft published or gate hid the reason", e)
+	}
+	fixed, e := access.Dashboard.Patch(ctx, access.Principal, access.ID, json.RawMessage(`[{"op":"remove","path":"/data/raw"}]`))
+	if e != nil || !fixed.Validation.OK {
+		t.Fatal("removed query still executes", fixed, e)
 	}
 	if _, e = shares.Share(ctx, pb, sharing.ShareInput{DashboardID: "live", Grantee: pa.UserID, Role: "viewer"}); e == nil {
 		t.Fatal("editor reshared owner data")

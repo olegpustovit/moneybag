@@ -7,6 +7,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/model"
+	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"strings"
@@ -19,6 +20,7 @@ type Sources struct {
 	Model  *model.Service
 	Tables *tables.Service
 	Valuer ledger.Valuer
+	Rates  *rates.Service
 }
 
 func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
@@ -169,8 +171,54 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			}
 			out = append(out, map[string]any{"id": proj.Scenario, "name": proj.Name, "spendUsd": proj.SpendUSD, "endNetUsd": proj.EndNetUSD, "runway": runway})
 		}
+	case source == "income":
+		state, e := s.Model.Get(ctx, p)
+		if e != nil {
+			return nil, e
+		}
+		for _, v := range state.Streams {
+			r, e := native(v)
+			if e != nil {
+				return nil, e
+			}
+			out = append(out, r)
+		}
+	case strings.HasPrefix(source, "rates:"):
+		quotes, e := s.Rates.Get(ctx, p, strings.Split(strings.TrimPrefix(source, "rates:"), ","), "")
+		if e != nil {
+			return nil, e
+		}
+		for _, q := range quotes {
+			out = append(out, map[string]any{"pair": q.Pair, "base": q.Base, "quote": q.Quote, "at": q.At, "value": q.Value.Float(), "source": q.Source})
+		}
+	case source == "balance_history":
+		// Month-end USD totals for the last 12 months (today for the current month).
+		today := time.Now()
+		for i := 11; i >= 0; i-- {
+			end := time.Date(today.Year(), today.Month()-time.Month(i)+1, 0, 0, 0, 0, 0, time.UTC)
+			if i == 0 {
+				end = today
+			}
+			res, e := s.Ledger.Balances(ctx, p, ledger.BalancesInput{At: end.Format("2006-01-02"), GroupBy: "type", ValueIn: "USD"}, s.Valuer)
+			if e != nil {
+				return nil, e
+			}
+			assets, liabilities := 0.0, 0.0
+			for _, r := range res.Rows {
+				if r.Value == nil {
+					continue
+				}
+				switch r.Key {
+				case "asset":
+					assets = r.Value.Value.Float()
+				case "liability":
+					liabilities = r.Value.Value.Float()
+				}
+			}
+			out = append(out, map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
+		}
 	default:
-		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, scenarios, scenario:<id> or table:<id>", source)
+		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, income, balance_history, rates:<PAIR[,PAIR]>, scenarios, scenario:<id> or table:<id>", source)
 	}
 	return out, nil
 }

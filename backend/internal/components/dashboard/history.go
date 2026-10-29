@@ -2,10 +2,12 @@ package dashboard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"strconv"
 )
@@ -20,6 +22,9 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 		}
 		filter := bson.M{"user_id": p.UserID, "id": id}
 		if e := s.repo.db.Collection("dashboards").FindOne(tx, filter).Decode(&old); e != nil {
+			if errors.Is(e, mongo.ErrNoDocuments) {
+				return principal.ErrNotFound
+			}
 			return e
 		}
 		next := old

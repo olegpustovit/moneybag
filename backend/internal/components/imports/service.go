@@ -231,8 +231,10 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 					if row.Amount.Rat().Sign() > 0 {
 						counterpart, name, kind = "income:unclassified", "Unclassified income", "income"
 					}
-					if strings.HasPrefix(row.Category, "expenses:") || strings.HasPrefix(row.Category, "income:") || strings.HasPrefix(row.Category, "assets:") || strings.HasPrefix(row.Category, "liabilities:") {
-						counterpart = row.Category
+					if mapped, e := mappedAccount(row.Category); e != nil {
+						return e
+					} else if mapped != "" {
+						counterpart = mapped
 					}
 					if counterpart == "expenses:unclassified" || counterpart == "income:unclassified" {
 						if e = s.ensureAccount(tx, writer, counterpart, name, kind, row.Currency); e != nil {
@@ -558,4 +560,16 @@ func (s *Service) List(ctx context.Context, p principal.Principal) ([]Batch, err
 	out := []Batch{}
 	e = cur.All(ctx, &out)
 	return out, e
+}
+
+// mappedAccount returns the account a CSV category names, "" for free-text categories, and an error for account-shaped values of an unknown type.
+func mappedAccount(category string) (string, error) {
+	prefix, _, found := strings.Cut(category, ":")
+	switch {
+	case !found:
+		return "", nil
+	case slices.Contains([]string{"expenses", "income", "assets", "liabilities", "equity"}, prefix):
+		return category, nil
+	}
+	return "", fmt.Errorf("mapped category %q has unknown account type %q; use assets:, liabilities:, income:, expenses: or equity:", category, prefix)
 }

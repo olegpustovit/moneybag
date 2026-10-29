@@ -59,6 +59,8 @@ type Income struct {
 	Start     string  `json:"start,omitempty" bson:"start,omitempty"`
 	End       string  `json:"end,omitempty" bson:"end,omitempty"`
 	GrowthPct float64 `json:"growth_pct,omitempty" bson:"growth_pct,omitempty"`
+	// Reimbursement streams repay spend already paid from Kyiv cash, so they net against Kyiv instead of adding wealth.
+	Reimbursement bool `json:"reimbursement,omitempty" bson:"reimbursement,omitempty"`
 }
 type State struct {
 	Assumptions []tables.Row `json:"assumptions"`
@@ -342,15 +344,18 @@ func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, s
 	}
 	for m := 0; m <= horizon; m++ {
 		if m > 0 {
-			monthIncome := income
+			monthIncome, monthReimb := income, reimb
 			if len(streams) > 0 && !incomeOverride {
-				monthIncome = 0
+				monthIncome, monthReimb = 0, 0
 				d := start.AddDate(0, m, 0).Format("2006-01-02")
 				for _, v := range streams {
 					if v.Start != "" && d < v.Start || v.End != "" && d > v.End {
 						continue
 					}
 					n := v.Amount
+					if o, ok := a[v.ID]; ok { // a scenario override named after the stream wins, even when zero
+						n = o
+					}
 					switch v.Frequency {
 					case "biweekly":
 						n *= 26.0 / 12
@@ -360,13 +365,18 @@ func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, s
 					if v.Currency == "EUR" {
 						n *= a["eurusd"]
 					}
-					monthIncome += n * math.Pow(1+v.GrowthPct/100, float64(m-1)/12)
+					n *= math.Pow(1+v.GrowthPct/100, float64(m-1)/12)
+					if v.Reimbursement {
+						monthReimb += n
+					} else {
+						monthIncome += n
+					}
 				}
 			}
-			wise += monthIncome + reimb - spend
-			fromKyiv := math.Min(reimb, kyiv)
+			wise += monthIncome + monthReimb - spend
+			fromKyiv := math.Min(monthReimb, kyiv)
 			kyiv -= fromKyiv
-			wise -= reimb - fromKyiv
+			wise -= monthReimb - fromKyiv
 			drain := math.Min(extra, kyiv)
 			kyiv -= drain
 			wise += drain

@@ -125,3 +125,21 @@ func TestNiceStep(t *testing.T) {
 		}
 	}
 }
+
+type countingReader struct{ calls int }
+
+func (r *countingReader) Rows(context.Context, principal.Principal, string) ([]map[string]any, error) {
+	r.calls++
+	return []map[string]any{{"amount": float64(1)}}, nil
+}
+func TestSourceReadOncePerExecutionAndRowsNotShared(t *testing.T) {
+	expr, _ := expressions.New()
+	reader := &countingReader{}
+	engine := Engine{Expr: expr, Reader: reader}
+	data := map[string]Query{"a": {From: "journal", Derive: map[string]string{"amount": "row.amount + 1.0"}}, "b": {From: "journal"}}
+	spec := Spec{Data: data, Computed: map[string]string{"b": "data.b[0].amount", "a": "data.a[0].amount"}, Pages: []Page{{ID: "main"}}}
+	out, e := engine.Execute(context.Background(), principal.Principal{}, spec)
+	if e != nil || !out.Validation.OK || reader.calls != 1 {
+		t.Fatal(out.Validation, e, reader.calls)
+	}
+}

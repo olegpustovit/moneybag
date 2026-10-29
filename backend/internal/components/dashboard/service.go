@@ -355,11 +355,14 @@ func (s *Service) Patch(ctx context.Context, p principal.Principal, id string, o
 		if e != nil {
 			return fmt.Errorf("patch does not apply")
 		}
+		// Decode into a fresh Spec: decoding into the old one merges maps, so removed queries would survive.
+		var patched Spec
 		decoder := json.NewDecoder(strings.NewReader(string(next)))
 		decoder.DisallowUnknownFields()
-		if e = decoder.Decode(spec); e != nil {
+		if e = decoder.Decode(&patched); e != nil {
 			return fmt.Errorf("invalid spec: %w", e)
 		}
+		*spec = patched
 		return nil
 	})
 }
@@ -412,7 +415,11 @@ func (s *Service) Publish(ctx context.Context, p principal.Principal, id string,
 		}
 		out = PublishResult{PublishedVersion: version, Gate: rendered.Validation, URL: "/dashboards/" + id}
 		if !rendered.Validation.OK {
-			return fmt.Errorf("publish gate failed; correct validation errors and retry")
+			reasons := []string{}
+			for _, i := range rendered.Validation.Errors {
+				reasons = append(reasons, i.Path+": "+i.Msg)
+			}
+			return fmt.Errorf("publish gate failed: %s", strings.Join(reasons, "; "))
 		}
 		_, e = s.audit.Write(tx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, note, h, out, func(tx context.Context) error {
 			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note}
