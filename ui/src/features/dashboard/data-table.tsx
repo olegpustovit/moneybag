@@ -39,7 +39,7 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
  function tableKey(event:KeyboardEvent<HTMLTableElement>) {
   if(event.key==='/' && !event.ctrlKey && !event.metaKey && !event.altKey && !(event.target instanceof HTMLInputElement)) {event.preventDefault();filterRef.current?.focus();return}
   if(!(event.target instanceof HTMLTableCellElement))return
-  if(event.key==='Enter') {const action=event.target.querySelector<HTMLElement>('a[href],button:not([disabled])');if(action){event.preventDefault();action.click()}return}
+  if(event.key==='Enter') {const links=event.target.parentElement?.querySelectorAll<HTMLAnchorElement>('a[href]');const action=event.target.querySelector<HTMLElement>('a[href],button:not([disabled])') ?? (links?.length===1 ? links[0] : undefined);if(action){event.preventDefault();action.click()}return}
   const moves:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}
   const move=moves[event.key];if(!move)return
   event.preventDefault();const source=event.target,row=Number(source.parentElement?.dataset.row)+move[0],col=source.cellIndex+move[1]
