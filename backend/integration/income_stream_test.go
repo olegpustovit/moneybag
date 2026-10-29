@@ -58,12 +58,12 @@ func TestIncomeReconcileStreamsJournalAndPreservesLimit(t *testing.T) {
 	if _, err = db.Collection("journal").InsertMany(ctx, extra); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Collection("entry_tags").InsertOne(ctx, bson.M{"_id": p.UserID + ":extra-0496", "user_id": p.UserID, "entry_id": "extra-0496", "tags": []string{"synthetic"}}); err != nil {
+	if _, err = db.Collection("entry_tags").InsertMany(ctx, []any{bson.M{"_id": p.UserID + ":extra-0496", "user_id": p.UserID, "entry_id": "extra-0496", "tags": []string{"synthetic"}}, bson.M{"_id": p.UserID + ":entry-00001", "user_id": p.UserID, "entry_id": "entry-00001", "tags": []string{"synthetic"}}}); err != nil {
 		t.Fatal(err)
 	}
 	reads.Store(0)
 	out, err := service.IncomeReconcile(ctx, p, model.ReconcileInput{StreamID: "tagged", From: "2026-01-01", To: "2026-01-31"})
-	if err != nil || len(out) != 1 || out[0].Actual != 2 || len(out[0].EntryIDs) != 2 || out[0].EntryIDs[0] != "extra-0496" || out[0].EntryIDs[1] != "entry-00000" {
+	if err != nil || len(out) != 1 || out[0].Actual != 3 || len(out[0].EntryIDs) != 3 || out[0].EntryIDs[0] != "extra-0496" || out[0].EntryIDs[1] != "entry-00001" || out[0].EntryIDs[2] != "entry-00000" {
 		t.Fatalf("income result: %+v, %v", out, err)
 	}
 	if n := reads.Load(); n > 8 {
