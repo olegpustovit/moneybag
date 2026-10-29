@@ -207,11 +207,43 @@ func (e *Engine) Eval(ctx context.Context, src string, vars map[string]any) (Res
 }
 
 func EvalProgram(ctx context.Context, src string, p cel.Program, vars map[string]any) (Result, error) {
-	markVolatile(ctx, src)
 	env := map[string]any{"row": map[string]any{}, "data": map[string]any{}, "params": map[string]any{}, "computed": map[string]any{}, "rates": map[string]any{}}
 	for k, v := range vars {
 		env[k] = v
 	}
+	return evalProgram(ctx, src, p, env)
+}
+
+type rowActivation struct {
+	vars map[string]any
+	row  map[string]any
+}
+
+var emptyBindings = map[string]any{}
+
+func (a rowActivation) ResolveName(name string) (any, bool) {
+	if name == "row" && a.row != nil {
+		return a.row, true
+	}
+	if v, ok := a.vars[name]; ok {
+		return v, true
+	}
+	switch name {
+	case "row", "data", "params", "computed", "rates":
+		return emptyBindings, true
+	default:
+		return nil, false
+	}
+}
+func (rowActivation) Parent() cel.Activation { return nil }
+
+// EvalProgramRow evaluates dashboard variables without copying their shared maps.
+func EvalProgramRow(ctx context.Context, src string, p cel.Program, vars, row map[string]any) (Result, error) {
+	return evalProgram(ctx, src, p, rowActivation{vars: vars, row: row})
+}
+
+func evalProgram(ctx context.Context, src string, p cel.Program, env any) (Result, error) {
+	markVolatile(ctx, src)
 	out, details, err := p.ContextEval(ctx, env)
 	if err != nil {
 		return Result{}, err

@@ -52,13 +52,6 @@ func (x *execution) eval(expr string, row map[string]any) (any, error) {
 	if x.count > 5000000 {
 		return nil, fmt.Errorf("page evaluation exceeds 5000000 calls")
 	}
-	vars := map[string]any{}
-	for k, v := range x.vars {
-		vars[k] = v
-	}
-	if row != nil {
-		vars["row"] = row
-	}
 	if x.programs == nil {
 		x.programs = map[string]cel.Program{}
 	}
@@ -71,7 +64,7 @@ func (x *execution) eval(expr string, row map[string]any) (any, error) {
 		}
 		x.programs[expr] = program
 	}
-	r, e := expressions.EvalProgram(x.ctx, expr, program, vars)
+	r, e := expressions.EvalProgramRow(x.ctx, expr, program, x.vars, row)
 	x.cost += r.Cost
 	if x.cost > 100000000 {
 		return nil, fmt.Errorf("page evaluation exceeds 100 million operations")

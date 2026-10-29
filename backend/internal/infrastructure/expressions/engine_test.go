@@ -2,6 +2,8 @@ package expressions
 
 import (
 	"context"
+	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -86,5 +88,47 @@ func TestPreparedEvaluationMatchesEvaluation(t *testing.T) {
 		if got != want || (gotErr == nil) != (wantErr == nil) || Volatile(first) != Volatile(second) {
 			t.Fatalf("%s: got %+v, %v; want %+v, %v", expr, got, gotErr, want, wantErr)
 		}
+	}
+}
+
+func TestRowActivationMatchesCopiedBindings(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	vars := map[string]any{"params": map[string]any{"n": 3.0}, "data": map[string]any{"items": []any{1.0, 2.0}}, "row": map[string]any{"amount": 99.0}}
+	row := map[string]any{"amount": 2.0}
+	for _, tc := range []struct {
+		expr string
+		row  map[string]any
+	}{
+		{`row.amount + params.n`, row}, {`row.amount`, nil}, {`size(data.items)`, row}, {`size(computed) + size(rates)`, row}, {`row.missing`, row}, {`now() > timestamp('2020-01-01T00:00:00Z')`, row},
+	} {
+		program, err := e.Compile(tc.expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		copied := maps.Clone(vars)
+		if tc.row != nil {
+			copied["row"] = tc.row
+		}
+		before, after := WithVolatility(context.Background()), WithVolatility(context.Background())
+		want, wantErr := EvalProgram(before, tc.expr, program, copied)
+		got, gotErr := EvalProgramRow(after, tc.expr, program, vars, tc.row)
+		if !reflect.DeepEqual(want, got) || (wantErr == nil) != (gotErr == nil) || wantErr != nil && gotErr != nil && wantErr.Error() != gotErr.Error() || Volatile(before) != Volatile(after) {
+			t.Fatalf("%s: got %+v %v, want %+v %v", tc.expr, got, gotErr, want, wantErr)
+		}
+	}
+	program, err := e.Compile(`size(row) + size(data) + size(params) + size(computed) + size(rates)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, wantErr := EvalProgram(context.Background(), "defaults", program, nil)
+	got, gotErr := EvalProgramRow(context.Background(), "defaults", program, nil, nil)
+	if !reflect.DeepEqual(want, got) || wantErr != nil || gotErr != nil {
+		t.Fatalf("default bindings: got %+v %v, want %+v %v", got, gotErr, want, wantErr)
+	}
+	if vars["row"].(map[string]any)["amount"] != 99.0 {
+		t.Fatal("row bindings were mutated")
 	}
 }
