@@ -1818,10 +1818,18 @@ export interface DuplicatesFindOutput {
 export interface EntriesListInput {
   account?: string;
   cursor?: number;
+  /**
+   * date returned with next_cursor when sorting by date
+   */
+  cursor_date?: string;
   effective?: boolean;
   from?: string;
   kind?: string;
   limit?: number;
+  /**
+   * date or -date; omitted sorts by descending sequence
+   */
+  sort?: string;
   status?: string;
   tag?: string;
   text?: string;
@@ -1876,6 +1884,7 @@ export interface EntriesListOutput {
         [k: string]: unknown;
       }[];
   next_cursor?: number;
+  next_cursor_date?: string;
   [k: string]: unknown;
 }
 export interface EntryGetInput {

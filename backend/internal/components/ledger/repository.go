@@ -96,8 +96,15 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	if len(dates) > 0 {
 		f["date"] = dates
 	}
-	if in.Cursor > 0 {
+	if in.Cursor > 0 && in.Sort == "" {
 		f["seq"] = bson.M{"$lt": in.Cursor}
+	}
+	if in.Cursor > 0 && in.Sort != "" {
+		op := "$gt"
+		if in.Sort == "-date" {
+			op = "$lt"
+		}
+		f["$or"] = bson.A{bson.M{"date": bson.M{op: in.CursorDate}}, bson.M{"date": in.CursorDate, "seq": bson.M{op: in.Cursor}}}
 	}
 	for k, v := range map[string]string{"postings.account": in.Account, "kind": in.Kind, "status": in.Status} {
 		if v != "" {
@@ -126,7 +133,15 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 		limit = 100
 	}
 	overlay := bson.A{bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}}, bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"}}
-	page := bson.A{bson.M{"$sort": bson.D{{Key: "seq", Value: -1}}}, bson.M{"$limit": int64(limit + 1)}}
+	sort := bson.D{{Key: "seq", Value: -1}}
+	if in.Sort != "" {
+		direction := 1
+		if in.Sort == "-date" {
+			direction = -1
+		}
+		sort = bson.D{{Key: "date", Value: direction}, {Key: "seq", Value: direction}}
+	}
+	page := bson.A{bson.M{"$sort": sort}, bson.M{"$limit": int64(limit + 1)}}
 	pipeline := bson.A{bson.M{"$match": f}}
 	if in.Tag != "" {
 		// The tag filter needs the overlay first; otherwise page first so only one page is joined.
@@ -144,6 +159,9 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	if len(out.Items) > limit {
 		out.Items = out.Items[:limit]
 		out.NextCursor = out.Items[limit-1].Seq
+		if in.Sort != "" {
+			out.NextCursorDate = out.Items[limit-1].Date
+		}
 	}
 	return out, e
 }
@@ -307,7 +325,7 @@ func (r *MongoRepository) Init(ctx context.Context, p principal.Principal) error
 	}
 	for name, models := range map[string][]mongo.IndexModel{
 		"accounts":           {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"journal":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "postings.account", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "tags", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "kind", Value: 1}, {Key: "status", Value: 1}}}},
+		"journal":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "seq", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "postings.account", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "tags", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "kind", Value: 1}, {Key: "status", Value: 1}}}},
 		"entry_tags":         {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "entry_id", Value: 1}}, Options: options.Index().SetUnique(true)}},
 		"rows":               {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "table_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
 		"tables":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},

@@ -192,7 +192,13 @@ func (s *Service) Entries(ctx context.Context, p principal.Principal, in Entries
 	if in.Limit < 0 || in.Limit > 500 || len(in.Text) > 200 {
 		return EntriesPage{}, fmt.Errorf("limit at most 500 and text at most 200 characters")
 	}
-	for _, d := range []string{in.From, in.To} {
+	if in.Sort != "" && in.Sort != "date" && in.Sort != "-date" {
+		return EntriesPage{}, fmt.Errorf("sort must be date or -date")
+	}
+	if (in.Sort != "" && ((in.Cursor > 0) != (in.CursorDate != ""))) || (in.Sort == "" && in.CursorDate != "") || in.Cursor < 0 {
+		return EntriesPage{}, fmt.Errorf("date sort cursor needs both cursor and cursor_date")
+	}
+	for _, d := range []string{in.From, in.To, in.CursorDate} {
 		if d != "" {
 			if _, e := time.Parse("2006-01-02", d); e != nil {
 				return EntriesPage{}, fmt.Errorf("dates must be YYYY-MM-DD")

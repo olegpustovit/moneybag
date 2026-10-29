@@ -13,10 +13,10 @@ import { tool, type Session } from '../lib/api'
 import type { EntriesListInput } from '../lib/tools'
 
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined)
-const searchSchema = z.object({ text:z.string().max(200).optional().catch(undefined), account:z.string().optional().catch(undefined), tag:z.string().optional().catch(undefined), from:date, to:date, status:z.enum(['draft','posted']).optional().catch(undefined), effective:z.boolean().optional().catch(undefined), entry:z.string().optional().catch(undefined), new:z.boolean().optional().catch(undefined) })
+const searchSchema = z.object({ text:z.string().max(200).optional().catch(undefined), account:z.string().optional().catch(undefined), tag:z.string().optional().catch(undefined), from:date, to:date, status:z.enum(['draft','posted']).optional().catch(undefined), effective:z.boolean().optional().catch(undefined), sort:z.enum(['date','-date']).optional().catch(undefined), entry:z.string().optional().catch(undefined), new:z.boolean().optional().catch(undefined) })
 export const Route = createFileRoute('/_app/journal')({
   validateSearch: searchSchema,
-  loaderDeps: ({ search }) => ({ text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective }),
+  loaderDeps: ({ search }) => ({ text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:search.sort }),
   loader: async ({ context, deps }) => { await Promise.all([context.queryClient.infiniteQuery({ ...journalQuery(context.session, deps), staleTime:'static' }), context.queryClient.query({ ...accountsQuery(context.session), staleTime:'static' })]) },
   pendingComponent: () => <section aria-busy="true"><h1>Journal</h1><p>Loading entries…</p></section>,
   errorComponent: JournalError,
@@ -27,11 +27,10 @@ function Journal() {
   const { session } = Route.useRouteContext()
   const search = Route.useSearch()
   const navigate = Route.useNavigate()
-  const filters: EntriesListInput = { text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective }
+  const filters: EntriesListInput = { text:search.text, account:search.account, tag:search.tag, from:search.from, to:search.to, status:search.status, effective:search.effective, sort:search.sort }
   const entries = useInfiniteQuery(journalQuery(session, filters))
   const { data: accounts } = useSuspenseQuery(accountsQuery(session))
   const names = new Map(accounts.map((account) => [account.id, account.name]))
-  // shortcut: entries remain in sequence order until the API supports stable sorted cursors.
   const rows = entries.data?.pages.flatMap((page) => page.items ?? []) ?? []
   const scrollRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({ count:rows.length, getScrollElement:() => scrollRef.current, estimateSize:() => 32, overscan:12 })
@@ -39,7 +38,7 @@ function Journal() {
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const data = new FormData(event.currentTarget)
     const value = (key:string) => String(data.get(key) || '') || undefined
-    void navigate({ search: { text:value('text'), account:value('account'), tag:value('tag'), from:value('from'), to:value('to'), status: data.get('status') === 'draft' ? 'draft' : data.get('status') === 'posted' ? 'posted' : undefined, effective:data.has('effective') || undefined, entry:undefined } })
+    void navigate({ search: { text:value('text'), account:value('account'), tag:value('tag'), from:value('from'), to:value('to'), status: data.get('status') === 'draft' ? 'draft' : data.get('status') === 'posted' ? 'posted' : undefined, effective:data.has('effective') || undefined, sort:search.sort, entry:undefined } })
     scrollRef.current?.scrollTo(0,0)
   }
   return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / JOURNAL</p><h1>Journal</h1><p className="description">Entries and their postings.</p></div><Button onClick={() => void navigate({search:(old) => ({...old,new:true,entry:undefined})})}>New entry</Button></header>
@@ -47,7 +46,7 @@ function Journal() {
       <label>Search<Input name="text" type="search" defaultValue={search.text} maxLength={200}/></label><label>Account<Input name="account" list="journal-accounts" defaultValue={search.account}/><datalist id="journal-accounts">{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</datalist></label><label>Tag<Input name="tag" defaultValue={search.tag}/></label><label>From<Input name="from" type="date" defaultValue={search.from}/></label><label>To<Input name="to" type="date" defaultValue={search.to}/></label><label>Status<select name="status" defaultValue={search.status ?? ''}><option value="">All</option><option value="draft">Draft</option><option value="posted">Posted</option></select></label><label className="journal-check"><input name="effective" type="checkbox" defaultChecked={search.effective}/> Effective only</label><Button type="submit" variant="outline" size="sm">Apply filters</Button>
     </form>
     {entries.isPending ? <p aria-busy="true">Loading entries…</p> : entries.isError && rows.length === 0 ? <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.refetch()}>Retry</Button></div> : rows.length === 0 ? <p className="settings-empty">No entries match these filters.</p> : <div ref={scrollRef} className="journal-scroll" role="region" aria-label="Journal entries" tabIndex={0} onScroll={() => { const element=scrollRef.current; if (element && element.scrollHeight-element.scrollTop-element.clientHeight < 320 && entries.hasNextPage && !entries.isFetching) void entries.fetchNextPage() }}>
-      <table className="journal-table"><thead><tr><th>Date</th><th>Payee</th><th>Accounts</th><th className="numeric">Posting amount</th><th>Status</th><th>Tags</th></tr></thead><tbody>
+      <table className="journal-table"><thead><tr><th aria-sort={search.sort === 'date' ? 'ascending' : search.sort === '-date' ? 'descending' : 'none'}><button type="button" onClick={() => {scrollRef.current?.scrollTo(0,0);void navigate({search:(old) => ({...old,sort:old.sort==='date' ? '-date' : 'date'})})}}>Date{search.sort === 'date' ? ' ↑' : search.sort === '-date' ? ' ↓' : ''}</button></th><th>Payee</th><th>Accounts</th><th className="numeric">Posting amount</th><th>Status</th><th>Tags</th></tr></thead><tbody>
         {virtual.length > 0 && virtual[0].start > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:virtual[0].start,padding:0,border:0}}/></tr>}
         {/* shortcut: amounts use one posting until main-commodity selection is defined. */}
         {virtual.map((item) => { const entry=rows[item.index]; const amount=(entry.postings?.find((posting) => search.account && posting.account === search.account) ?? entry.postings?.[0])?.amount; return <tr key={entry.id} onClick={() => void navigate({ search:(old) => ({...old,entry:entry.id}) })}><td><button className="journal-entry-link" onClick={(event) => { event.stopPropagation(); void navigate({ search:(old) => ({...old,entry:entry.id}) }) }}>{entry.date}</button></td><td>{entry.payee || '—'}</td><td>{(entry.postings ?? []).map((posting) => names.get(posting.account) || posting.account).join(', ')}</td><td className="numeric">{amount ? `${amount.v.replace(/^-/, '−')} ${amount.c}` : '—'}</td><td>{entry.status}</td><td>{entry.tags?.join(', ') || '—'}</td></tr> })}

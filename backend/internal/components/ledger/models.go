@@ -174,13 +174,16 @@ type EntriesInput struct {
 	Text    string `json:"text,omitempty"`
 	Status  string `json:"status,omitempty"`
 	// Effective hides reversed originals and their reversals, leaving the latest replacement of each chain.
-	Effective bool  `json:"effective,omitempty"`
-	Cursor    int64 `json:"cursor,omitempty"`
-	Limit     int   `json:"limit,omitempty"`
+	Effective  bool   `json:"effective,omitempty"`
+	Cursor     int64  `json:"cursor,omitempty"`
+	CursorDate string `json:"cursor_date,omitempty" jsonschema:"date returned with next_cursor when sorting by date"`
+	Sort       string `json:"sort,omitempty" jsonschema:"date or -date; omitted sorts by descending sequence"`
+	Limit      int    `json:"limit,omitempty"`
 }
 type EntriesPage struct {
-	Items      []Entry `json:"items"`
-	NextCursor int64   `json:"next_cursor,omitempty"`
+	Items          []Entry `json:"items"`
+	NextCursor     int64   `json:"next_cursor,omitempty"`
+	NextCursorDate string  `json:"next_cursor_date,omitempty"`
 }
 type AccountsInput struct {
 	Type          string `json:"type,omitempty"`
