@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
@@ -53,6 +54,11 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices}
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
+	engine := &dashboard.Engine{Expr: expr, Reader: sources}
+	// The initialized model has zero spending, so every scenario's runway is null.
+	if r, e := engine.Evaluate(ctx, pa, "data.sc.map(s, s.runway == null)", map[string]dashboard.Query{"sc": {From: "scenarios"}}, nil); e != nil || fmt.Sprint(r.Value) != "[true]" {
+		t.Fatal("scenario source with null runway", r.Value, e)
+	}
 	columns := []tables.Column{{ID: "qty", Type: "number"}, {ID: "price", Type: "number"}, {ID: "total", Type: "formula", Formula: "row.qty * row.price"}}
 	for _, p := range []principal.Principal{pa, pb} {
 		if _, e = tab.CreateNamed(ctx, p, "margin", tables.CreateInput{Name: "Margin", Columns: columns}); e != nil {

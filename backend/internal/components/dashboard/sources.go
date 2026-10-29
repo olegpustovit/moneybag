@@ -162,7 +162,12 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 			return nil, e
 		}
 		for _, proj := range projections {
-			out = append(out, map[string]any{"id": proj.Scenario, "name": proj.Name, "spendUsd": proj.SpendUSD, "endNetUsd": proj.EndNetUSD, "runway": proj.Runway})
+			// A nil runway (no spending) must reach CEL as null; a typed nil pointer cannot be converted.
+			var runway any
+			if proj.Runway != nil {
+				runway = *proj.Runway
+			}
+			out = append(out, map[string]any{"id": proj.Scenario, "name": proj.Name, "spendUsd": proj.SpendUSD, "endNetUsd": proj.EndNetUSD, "runway": runway})
 		}
 	default:
 		return nil, fmt.Errorf("unknown source %q; use journal, accounts, budget_lines, months, range, scenarios, scenario:<id> or table:<id>", source)
