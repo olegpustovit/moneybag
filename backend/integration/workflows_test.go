@@ -9,6 +9,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
+	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -378,7 +379,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || len(state) == 0 || state[0].LastOK != "2026-10-31" {
 		t.Fatal("resolved assertion was stale", state, e)
 	}
-	testMCPWorkflows(t, ctx, pa, pb, mcpserver.Services{History: hist, Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Classify: classes, Imports: imp, Reconcile: rec, Sharing: shares, Logger: slog.Default()}, db)
+	testMCPWorkflows(t, ctx, pa, pb, mcpserver.Services{History: hist, Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Classify: classes, Imports: imp, Reconcile: rec, Sharing: shares, Logger: slog.Default(), Consistency: &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}}, db)
 	draftEntry, e := book.Post(ctx, pa, ledger.EntryInput{Date: "2026-10-28", Payee: "Draft commit test", Postings: []ledger.Posting{{Account: "assets:bank", Amount: ledger.Amount{Value: ledger.MustDecimal("-1"), Commodity: "EUR"}}, {Account: "expenses:food", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}})
 	if e != nil {
 		t.Fatal(e)
