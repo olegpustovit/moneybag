@@ -1,0 +1,20 @@
+import { useState } from 'react'
+import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { Button } from '../components/ui/button'
+import { ownedQuery, receivedQuery } from '../features/sharing/queries'
+import { tool, type Session } from '../lib/api'
+import type { DashboardSharesListOutput } from '../lib/tools'
+
+type Share=NonNullable<DashboardSharesListOutput['items']>[number]
+export const Route=createFileRoute('/_app/shared/')({loader:async ({context}) => {await Promise.all([context.queryClient.query({...receivedQuery(context.session),staleTime:'static'}),context.queryClient.query({...ownedQuery(context.session),staleTime:'static'})])},pendingComponent:() => <section aria-busy="true"><h1>Shared dashboards</h1><p>Loading shares…</p></section>,errorComponent:SharedError,component:Shared})
+function SharedError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load shared dashboards</h1><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
+function status(share:Share) {return share.revoked_at ? 'Revoked' : share.expires_at && Date.parse(share.expires_at)<=Date.now() ? 'Expired' : 'Active'}
+function Shared() {
+ const {session}=Route.useRouteContext(),{data:received}=useSuspenseQuery(receivedQuery(session)),{data:owned}=useSuspenseQuery(ownedQuery(session))
+ return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SHARED</p><h1>Shared dashboards</h1><p className="description">Dashboards shared with you and access you have granted.</p></div></header><section className="import-panel"><h2>Shared with you</h2>{!received.items?.length ? <p>No dashboards have been shared with you.</p> : <div className="table-scroll" role="region" aria-label="Received shares" tabIndex={0}><table><thead><tr><th>Dashboard</th><th>Owner</th><th>Access</th><th>Expires</th><th>Status</th></tr></thead><tbody>{received.items.map((share) => <tr key={share.id}><td>{status(share)==='Active' ? <a href={`/shared/${encodeURIComponent(share.id)}`}>{share.dashboard_id}</a> : share.dashboard_id}</td><td>{share.owner_user}</td><td>{share.role} · {share.mode}</td><td>{share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}</td><td>{status(share)}</td></tr>)}</tbody></table></div>}</section><section className="import-panel"><h2>Shared by you</h2>{!owned.items?.length ? <p>You have not shared any dashboards.</p> : <div className="table-scroll" role="region" aria-label="Granted shares" tabIndex={0}><table><thead><tr><th>Dashboard</th><th>Recipient</th><th>Access</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{owned.items.map((share) => <OwnedShare key={share.id} share={share} session={session}/>)}</tbody></table></div>}</section></>
+}
+function OwnedShare({share,session}:{share:Share;session:Session}) {
+ const [confirm,setConfirm]=useState(false),client=useQueryClient(),revoke=useMutation({mutationFn:() => tool(session,'dashboard_unshare',{share_id:share.id}),onSettled:async () => {await client.invalidateQueries({queryKey:['shares-owned',session.user.id]})}})
+ return <tr><td>{share.dashboard_id}</td><td>{share.grantee_user}</td><td>{share.role} · {share.mode}</td><td>{share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}</td><td>{status(share)}</td><td>{status(share)==='Active' && (confirm ? <div><p>Revoke access?</p><Button size="xs" variant="destructive" disabled={revoke.isPending} onClick={() => revoke.mutate()}>Confirm revoke<span className="sr-only"> {share.dashboard_id} {share.grantee_user}</span></Button> <Button size="xs" variant="outline" onClick={() => setConfirm(false)}>Cancel</Button></div> : <Button size="xs" variant="outline" onClick={() => setConfirm(true)}>Revoke<span className="sr-only"> {share.dashboard_id} {share.grantee_user}</span></Button>)}{revoke.error && <p role="alert">{revoke.error.message}</p>}</td></tr>
+}

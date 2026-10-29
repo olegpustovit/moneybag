@@ -1,13 +1,11 @@
-import { Suspense, lazy } from 'react'
 import { keepPreviousData, useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { componentValue } from '../features/dashboard/values'
-import type { ComponentValue } from '../features/dashboard/values'
+import { Component } from '../features/dashboard/component'
 import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
 
-const DashboardChart = lazy(() => import('../features/dashboard/chart'))
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined)
 const searchSchema = z.object({ version: z.enum(['draft','published']).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, month: z.string().regex(/^\d{4}-\d{2}$/).optional().catch(undefined) })
 export const Route = createFileRoute('/_app/dashboards/$id')({
@@ -60,13 +58,4 @@ function Dashboard() {
       return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${placement.span}` }}><h2>{parsed.data.title || component.title || component.id}</h2><Component value={parsed.data} /></section>
     }))}</div>}
   </>
-}
-function Component({ value }: { value: ComponentValue }) {
-  switch (value.type) {
-    case 'kpi': return <div className="kpi"><div className={`kpi-value ${value.tone}`}>{value.text}</div>{value.sub && <p>{value.sub}</p>}</div>
-    case 'text': return <div className="note" dangerouslySetInnerHTML={{ __html: value.html }} />
-    case 'table': case 'scenario_compare': return value.rows.length === 0 ? <p className="muted">No matching rows.</p> : <div className="table-scroll" tabIndex={0} role="region" aria-label={`${value.title || 'Dashboard'} table`}><table><thead><tr>{value.columns.map((column) => <th key={column.key} className={column.align === 'right' ? 'numeric' : ''}>{column.label}</th>)}</tr></thead><tbody>{value.rows.map((row, index) => <tr key={index}>{value.columns.map((column) => <td key={column.key} className={`${column.align === 'right' ? 'numeric ' : ''}${row[column.key]?.tone || ''}`}>{row[column.key]?.t ?? '—'}</td>)}</tr>)}</tbody></table></div>
-    case 'budget': return <div className="budget-bars">{value.rows.map((row, index) => { const max = Math.max(1, row.actual, row.limit); return <div className="budget-row" key={index}><span>{row.label}</span><span className="budget-track"><i className={row.status} style={{ width: `${row.actual / max * 100}%` }}/><b style={{ left: `${row.limit / max * 100}%` }}/></span><span className="numeric">{row.actual_text} / {row.limit_text}</span></div> })}</div>
-    case 'chart': return <Suspense fallback={<div className="dashboard-pending" aria-busy="true">Loading chart…</div>}><DashboardChart value={value} /></Suspense>
-  }
 }

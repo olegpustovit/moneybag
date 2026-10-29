@@ -129,6 +129,7 @@ type Validation struct {
 	Cost     uint64  `json:"cost"`
 }
 type Rendered struct {
+	Pages      []Page         `json:"pages,omitempty" bson:"pages,omitempty"`
 	HTMLURL    string         `json:"html_url,omitempty"`
 	PNGURL     string         `json:"png_url,omitempty"`
 	HTML       string         `json:"html"`

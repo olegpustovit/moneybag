@@ -287,3 +287,14 @@ th { color:var(--text2); font-weight:600; }
 .activity-undo label { font-size:.8rem; }
 .activity-undo p { font-size:.8rem; color:var(--muted-foreground); }
 @media (max-width:600px) { .activity-filters { flex-direction:column; align-items:stretch; } }
+
+/* Older shared snapshots retain their frozen server-rendered markup. */
+.shared-legacy .dash { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1rem; }
+.shared-legacy .cmp { min-width: 0; border: 1px solid var(--border); padding: 1rem; }
+.shared-legacy .ct { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: .75rem; }
+.shared-legacy .tbl { overflow-x: auto; }
+.shared-legacy .bbar { display: grid; grid-template-columns: minmax(5rem, 1fr) 2fr minmax(5rem, 1fr); gap: .5rem; }
+.shared-legacy .tr { position: relative; background: var(--muted); }
+.shared-legacy .tr i, .shared-legacy .tr b { position: absolute; top: 0; bottom: 0; background: currentColor; }
+.shared-legacy .tr b { width: 2px; }
+@media (max-width: 860px) { .shared-legacy .cmp { grid-column: span 12 !important; } }

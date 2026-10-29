@@ -204,6 +204,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session", h.apiSession)
 	mux.HandleFunc("GET /api/imports", h.apiImports)
 	mux.HandleFunc("GET /api/settings", h.apiSettings)
+	mux.HandleFunc("GET /api/shared/{id}", h.apiShared)
 	mux.HandleFunc("GET /api/consistency", h.consistency)
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 		mux.HandleFunc(method+" /api/", func(w http.ResponseWriter, _ *http.Request) {

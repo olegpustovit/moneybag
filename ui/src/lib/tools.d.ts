@@ -1254,6 +1254,25 @@ export interface DashboardPreviewOutput {
   };
   html: string;
   html_url?: string;
+  pages?:
+    | null
+    | {
+        id: string;
+        layout:
+          | null
+          | {
+              cols:
+                | null
+                | {
+                    component: string;
+                    span: number;
+                    [k: string]: unknown;
+                  }[];
+              [k: string]: unknown;
+            }[];
+        title: string;
+        [k: string]: unknown;
+      }[];
   png_url?: string;
   validation: {
     cost: number;

@@ -590,17 +590,19 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	used := map[string]bool{}
 	pageIDs := map[string]bool{}
 	for pi, pg := range spec.Pages {
+		pg.Title = ""
 		if pg.ID == "" || pageIDs[pg.ID] {
 			issue(fmt.Sprintf("/pages/%d/id", pi), fmt.Errorf("unique page id required"))
 		}
 		pageIDs[pg.ID] = true
 		output.WriteString(`<section class="dashboard-page">`)
 		if len(spec.Pages) > 1 {
-			title, err := x.template("title", pg.Title)
+			title, err := x.template("title", spec.Pages[pi].Title)
 			if err != nil {
 				issue(fmt.Sprintf("/pages/%d/title", pi), err)
 			}
 			output.WriteString(`<h2>` + escape(title) + `</h2>`)
+			pg.Title = title
 		}
 		output.WriteString(`<div class="dash">`)
 		for ri, r := range pg.Layout {
@@ -629,6 +631,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			}
 		}
 		output.WriteString(`</div></section>`)
+		result.Pages = append(result.Pages, pg)
 	}
 	for id := range components {
 		if !used[id] {

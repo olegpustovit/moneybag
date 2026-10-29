@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
@@ -61,6 +62,82 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			}
 		}
 		return res.StatusCode, body, res.Header
+	}
+
+	{
+		token, err := services.Identity.Invite(ctx, p, "shared-spa@example.test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		viewer, err := services.Identity.Register(ctx, token, "Shared viewer", "synthetic-test-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		viewerRaw, _, err := services.Identity.StartSession(ctx, viewer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = services.Dashboard.Create(ctx, p, dashboard.CreateInput{ID: "spa-shared", Title: "Shared"}); err != nil {
+			t.Fatal(err)
+		}
+		spec := dashboard.Spec{ID: "spa-shared", Title: "Shared", Data: map[string]dashboard.Query{}, Pages: []dashboard.Page{{ID: "main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 12, Component: "visible"}}}}}}, Components: []dashboard.Component{{ID: "visible", Type: "kpi", Value: "42", Format: "usd0"}, {ID: "hidden", Type: "text", MD: "hidden-secret"}}}
+		ops, _ := json.Marshal([]map[string]any{{"op": "replace", "path": "", "value": spec}})
+		draft, err := services.Dashboard.Patch(ctx, p, "spa-shared", ops)
+		if err != nil || !draft.Validation.OK {
+			t.Fatal(draft, err)
+		}
+		if _, err = services.Dashboard.Publish(ctx, p, "spa-shared", draft.DraftVersion, "Synthetic"); err != nil {
+			t.Fatal(err)
+		}
+		grant, err := services.Sharing.Share(ctx, p, sharing.ShareInput{DashboardID: "spa-shared", Grantee: viewer.ID, Role: "viewer"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := "/api/shared/" + grant.ShareID
+		if status, _, _ := request("GET", path, nil, false, false, true); status != 401 {
+			t.Fatal("anonymous share", status)
+		}
+		if status, _, _ := request("GET", path, nil, true, false, true); status != 404 {
+			t.Fatal("owner received viewer grant", status)
+		}
+		fetchShared := func() (int, map[string]any) {
+			req, err := http.NewRequestWithContext(ctx, "GET", endpoint+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.AddCookie(&http.Cookie{Name: "moneybag_session", Value: viewerRaw})
+			res, err := client.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer res.Body.Close()
+			var body map[string]any
+			if err = json.NewDecoder(res.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if res.Header.Get("Cache-Control") != "no-store" {
+				t.Fatal("shared response cached")
+			}
+			return res.StatusCode, body
+		}
+		status, body := fetchShared()
+		if status != 200 {
+			t.Fatal("viewer share", status, body)
+		}
+		rawBody, _ := json.Marshal(body)
+		if strings.Contains(string(rawBody), "hidden-secret") || strings.Contains(string(rawBody), "computed") {
+			t.Fatal("unplaced data exposed", string(rawBody))
+		}
+		values := body["values"].(map[string]any)
+		if len(values) != 1 || values["visible"].(map[string]any)["value"] != nil || len(body["pages"].([]any)) != 1 {
+			t.Fatal("snapshot projection", body)
+		}
+		if err = services.Sharing.Unshare(ctx, p, grant.ShareID); err != nil {
+			t.Fatal(err)
+		}
+		if status, _ = fetchShared(); status != 404 {
+			t.Fatal("revoked share", status)
+		}
 	}
 	for _, path := range []string{"/api/session", "/api/imports", "/api/settings", "/api/expr/catalog"} {
 		status, _, headers := request("GET", path, nil, false, false, true)

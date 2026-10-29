@@ -84,3 +84,16 @@ func TestAggregates(t *testing.T) {
 		t.Error("one point has no slope")
 	}
 }
+
+func TestRenderedPagesResolveOnlyVisibleTitles(t *testing.T) {
+	spec := Spec{Computed: map[string]string{"n": "42"}, Pages: []Page{{ID: "a", Title: "Page {{ computed.n }}"}, {ID: "b", Title: "Other"}}}
+	out := run(t, spec)
+	if !out.Validation.OK || len(out.Pages) != 2 || out.Pages[0].Title != "Page 42" {
+		t.Fatal(out.Validation, out.Pages)
+	}
+	spec.Pages = spec.Pages[:1]
+	out = run(t, spec)
+	if !out.Validation.OK || out.Pages[0].Title != "" {
+		t.Fatal(out.Validation, out.Pages)
+	}
+}

@@ -22,6 +22,8 @@ import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$i
 import { Route as AppDatabasesIdRouteImport } from './routes/_app.databases.$id'
 import { Route as AppImportsIndexRouteImport } from './routes/_app.imports.index'
 import { Route as AppImportsBatchRouteImport } from './routes/_app.imports.$batch'
+import { Route as AppSharedIndexRouteImport } from './routes/_app.shared.index'
+import { Route as AppSharedIdRouteImport } from './routes/_app.shared.$id'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -87,6 +89,16 @@ const AppImportsBatchRoute = AppImportsBatchRouteImport.update({
   path: '/imports/$batch',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSharedIndexRoute = AppSharedIndexRouteImport.update({
+  id: '/shared/',
+  path: '/shared/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSharedIdRoute = AppSharedIdRouteImport.update({
+  id: '/shared/$id',
+  path: '/shared/$id',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -100,7 +112,9 @@ export interface FileRoutesByFullPath {
   '/dashboards/$id': typeof AppDashboardsIdRoute
   '/databases/$id': typeof AppDatabasesIdRoute
   '/imports/$batch': typeof AppImportsBatchRoute
+  '/shared/$id': typeof AppSharedIdRoute
   '/imports/': typeof AppImportsIndexRoute
+  '/shared/': typeof AppSharedIndexRoute
 }
 export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
@@ -114,7 +128,9 @@ export interface FileRoutesByTo {
   '/dashboards/$id': typeof AppDashboardsIdRoute
   '/databases/$id': typeof AppDatabasesIdRoute
   '/imports/$batch': typeof AppImportsBatchRoute
+  '/shared/$id': typeof AppSharedIdRoute
   '/imports': typeof AppImportsIndexRoute
+  '/shared': typeof AppSharedIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -130,7 +146,9 @@ export interface FileRoutesById {
   '/_app/dashboards/$id': typeof AppDashboardsIdRoute
   '/_app/databases/$id': typeof AppDatabasesIdRoute
   '/_app/imports/$batch': typeof AppImportsBatchRoute
+  '/_app/shared/$id': typeof AppSharedIdRoute
   '/_app/imports/': typeof AppImportsIndexRoute
+  '/_app/shared/': typeof AppSharedIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -146,7 +164,9 @@ export interface FileRouteTypes {
     | '/dashboards/$id'
     | '/databases/$id'
     | '/imports/$batch'
+    | '/shared/$id'
     | '/imports/'
+    | '/shared/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/accounts'
@@ -160,7 +180,9 @@ export interface FileRouteTypes {
     | '/dashboards/$id'
     | '/databases/$id'
     | '/imports/$batch'
+    | '/shared/$id'
     | '/imports'
+    | '/shared'
   id:
     | '__root__'
     | '/_app'
@@ -175,7 +197,9 @@ export interface FileRouteTypes {
     | '/_app/dashboards/$id'
     | '/_app/databases/$id'
     | '/_app/imports/$batch'
+    | '/_app/shared/$id'
     | '/_app/imports/'
+    | '/_app/shared/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -275,6 +299,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppImportsBatchRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/shared/': {
+      id: '/_app/shared/'
+      path: '/shared'
+      fullPath: '/shared/'
+      preLoaderRoute: typeof AppSharedIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/shared/$id': {
+      id: '/_app/shared/$id'
+      path: '/shared/$id'
+      fullPath: '/shared/$id'
+      preLoaderRoute: typeof AppSharedIdRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -290,7 +328,9 @@ interface AppRouteChildren {
   AppDashboardsIdRoute: typeof AppDashboardsIdRoute
   AppDatabasesIdRoute: typeof AppDatabasesIdRoute
   AppImportsBatchRoute: typeof AppImportsBatchRoute
+  AppSharedIdRoute: typeof AppSharedIdRoute
   AppImportsIndexRoute: typeof AppImportsIndexRoute
+  AppSharedIndexRoute: typeof AppSharedIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -305,7 +345,9 @@ const AppRouteChildren: AppRouteChildren = {
   AppDashboardsIdRoute: AppDashboardsIdRoute,
   AppDatabasesIdRoute: AppDatabasesIdRoute,
   AppImportsBatchRoute: AppImportsBatchRoute,
+  AppSharedIdRoute: AppSharedIdRoute,
   AppImportsIndexRoute: AppImportsIndexRoute,
+  AppSharedIndexRoute: AppSharedIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
