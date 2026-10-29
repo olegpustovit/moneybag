@@ -250,6 +250,24 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		}
 		return published.Warnings
 	}
+
+	createShared("edit-cas", "42", map[string]dashboard.Query{})
+	current, e := dash.Get(ctx, pa, "edit-cas", "")
+	if e != nil {
+		t.Fatal(e)
+	}
+	patch, _ := json.Marshal([]map[string]any{{"op": "test", "path": "/version", "value": current.Spec.Version}, {"op": "replace", "path": "/title", "value": "Updated"}})
+	first, e := dash.Patch(ctx, pa, "edit-cas", patch)
+	if e != nil || !first.Validation.OK {
+		t.Fatal("atomic draft save", first, e)
+	}
+	if _, e = dash.Patch(ctx, pa, "edit-cas", patch); e == nil {
+		t.Fatal("stale draft accepted")
+	}
+	draftAfter, e := dash.Get(ctx, pa, "edit-cas", "draft")
+	if e != nil || draftAfter.Version != first.DraftVersion || draftAfter.Spec.Title != "Updated" {
+		t.Fatal("stale write changed draft", draftAfter, e)
+	}
 	createShared("fixed", "42", map[string]dashboard.Query{})
 	if w := createShared("orphan", "42", map[string]dashboard.Query{"unused": {From: "journal"}}); len(w) == 0 || !strings.Contains(strings.Join(w, ";"), "data.unused is never referenced") {
 		t.Fatal("publish warning for orphan query", w)

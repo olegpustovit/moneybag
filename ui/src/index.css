@@ -298,3 +298,13 @@ th { color:var(--text2); font-weight:600; }
 .shared-legacy .tr i, .shared-legacy .tr b { position: absolute; top: 0; bottom: 0; background: currentColor; }
 .shared-legacy .tr b { width: 2px; }
 @media (max-width: 860px) { .shared-legacy .cmp { grid-column: span 12 !important; } }
+.dashboard-action-dialog, .dashboard-editor-dialog { max-height: calc(100dvh - 2rem); overflow-y: auto; }
+.dashboard-editor-dialog { width: min(42rem, calc(100vw - 2rem)); max-width: none; }
+.dashboard-action-form, .dashboard-editor { display: flex; flex-direction: column; gap: .75rem; }
+.dashboard-action-form label, .dashboard-editor label { display: flex; flex-direction: column; gap: .25rem; }
+.dashboard-action-form select, .dashboard-editor select, .dashboard-editor textarea { border: 1px solid var(--border); background: var(--background); border-radius: .375rem; padding: .5rem; }
+.dashboard-editor textarea { width: 100%; resize: vertical; }
+.dashboard-editor .dashboard-json { min-height: 24rem; font-family: var(--font-mono); font-size: .8rem; }
+.dashboard-editor-tabs { display: flex; gap: .5rem; }
+.dashboard-editor-tabs button { padding: .4rem .6rem; border-bottom: 2px solid transparent; }
+.dashboard-editor-tabs button[aria-pressed="true"] { border-color: currentColor; }
