@@ -91,6 +91,16 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 			f[k] = v
 		}
 	}
+	if in.Effective {
+		reversed := []string{}
+		if e := db.Collection("journal").Distinct(ctx, "links.id", bson.M{"user_id": p.UserID, "kind": "reversal"}).Decode(&reversed); e != nil {
+			return EntriesPage{}, e
+		}
+		f["_id"] = bson.M{"$nin": reversed}
+		if in.Kind == "" {
+			f["kind"] = bson.M{"$ne": "reversal"}
+		}
+	}
 	if in.Text != "" {
 		f["payee"] = bson.M{"$regex": regexp.QuoteMeta(in.Text), "$options": "i"}
 	}

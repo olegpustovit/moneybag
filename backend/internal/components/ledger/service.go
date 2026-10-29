@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -19,9 +20,11 @@ import (
 type Service struct {
 	repo  *MongoRepository
 	audit *audit.Service
+	// Expr evaluates tags_set where expressions; nil disables them.
+	Expr *expressions.Engine
 }
 
-func NewService(r *MongoRepository, a *audit.Service) *Service { return &Service{r, a} }
+func NewService(r *MongoRepository, a *audit.Service) *Service { return &Service{repo: r, audit: a} }
 
 var accountID = regexp.MustCompile(`^(assets|liabilities|income|expenses|equity):[a-z0-9_:-]{1,150}$`)
 var commodityID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,19}$`)
@@ -32,6 +35,9 @@ func (s *Service) CreateAccount(ctx context.Context, p principal.Principal, a Ac
 	}
 	if !accountID.MatchString(a.ID) || strings.TrimSpace(a.Name) == "" || len(a.Name) > 200 || len(a.Commodities) == 0 || len(a.Commodities) > 20 || a.ClosedAt != nil {
 		return AccountResult{}, fmt.Errorf("valid id, name, type and 1..20 commodities required")
+	}
+	if e := validateClassGroups(a.Class, a.Groups); e != nil {
+		return AccountResult{}, e
 	}
 	types := map[string]string{"assets": "asset", "liabilities": "liability", "income": "income", "expenses": "expense", "equity": "equity"}
 	if types[strings.Split(a.ID, ":")[0]] != a.Type {
@@ -87,12 +93,16 @@ func (s *Service) EnsureAccount(ctx context.Context, p principal.Principal, a Ac
 }
 
 type AccountUpdate struct {
-	ID          string    `json:"id"`
-	Name        *string   `json:"name,omitempty"`
-	Pot         *string   `json:"pot,omitempty"`
-	Location    *string   `json:"location,omitempty"`
-	Close       *bool     `json:"close,omitempty"`
-	Commodities *[]string `json:"commodities,omitempty"`
+	ID       string  `json:"id"`
+	Name     *string `json:"name,omitempty"`
+	Pot      *string `json:"pot,omitempty"`
+	Location *string `json:"location,omitempty"`
+	Close    *bool   `json:"close,omitempty"`
+	// Class is one of bank, cash, metal_holding, receivable, liability, equity, income, expense; empty clears it.
+	Class *string `json:"class,omitempty"`
+	// Groups replaces all groups (dimension to value, e.g. type, category, source); an empty map clears them.
+	Groups      *map[string]string `json:"groups,omitempty"`
+	Commodities *[]string          `json:"commodities,omitempty"`
 }
 
 func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in AccountUpdate) (AccountResult, error) {
@@ -132,6 +142,15 @@ func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in A
 	if in.Location != nil {
 		a.Location = *in.Location
 	}
+	if in.Class != nil {
+		a.Class = *in.Class
+	}
+	if in.Groups != nil {
+		a.Groups = *in.Groups
+	}
+	if e := validateClassGroups(a.Class, a.Groups); e != nil {
+		return AccountResult{}, e
+	}
 	if in.Close != nil {
 		if *in.Close {
 			now := time.Now().UTC()
@@ -142,7 +161,7 @@ func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in A
 	}
 	db, _ := s.repo.db(p)
 	id, e := s.audit.Write(ctx, p, "account_update", audit.Target{Collection: "accounts", ID: a.ID}, "", old, a, func(tx context.Context) error {
-		result, err := db.Collection("accounts").ReplaceOne(tx, old, a)
+		result, err := db.Collection("accounts").ReplaceOne(tx, bson.M{"_id": old.Key}, a)
 		if err == nil && result.MatchedCount != 1 {
 			return principal.ErrConflict
 		}

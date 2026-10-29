@@ -27,7 +27,7 @@ func registerWorkflows(r registration, s Services) {
 		}{v.Items}, e
 	})
 	add(r, "reclassify", "classify", "ledger:write", "Use this when moving spend to another expense category. Appends balanced reclassification entries with the original date and a reason; defaults to draft. Original entries remain unchanged.", false, false, s.Classify.Reclassify)
-	add(r, "tags_set", "classify", "ledger:write", "Use this when adding or removing tags on 1..100 entries. A separate metadata overlay preserves the immutable original journal document.", false, false, s.Ledger.SetTags)
+	add(r, "tags_set", "classify", "ledger:write", "Use this when adding or removing tags (namespaced like trip:x is fine) on 1..100 entry_ids, or on up to 10000 entries selected by where (CEL over the entry row); dry_run with where returns the match count only. A separate metadata overlay preserves the immutable original journal document.", false, false, s.Ledger.SetTags)
 	add(r, "rules_list", "classify", "ledger:read", "Use this when inspecting auto-classification rules in priority order. The first enabled matching rule wins.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (struct {
 		Items []classify.Rule `json:"items"`
 	}, error) {

@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
+	"slices"
 	"strings"
 	"time"
 )
@@ -23,14 +24,22 @@ type Line struct {
 	Name     string         `json:"name" bson:"name"`
 	Limit    ledger.Decimal `json:"limit" bson:"limit"`
 	Accounts []string       `json:"accounts" bson:"accounts"`
-	Order    int            `json:"order" bson:"order"`
+	// GroupRef maps every expense account whose groups[dimension] equals value, resolved on read.
+	GroupRef *GroupRef `json:"group_ref,omitempty" bson:"group_ref,omitempty"`
+	Order    int       `json:"order" bson:"order"`
+}
+type GroupRef struct {
+	Dimension string `json:"dimension" bson:"dimension"`
+	Value     string `json:"value" bson:"value"`
 }
 type SetInput struct {
 	ID       string          `json:"id"`
 	Limit    *ledger.Decimal `json:"limit,omitempty"`
 	Name     *string         `json:"name,omitempty"`
 	Accounts *[]string       `json:"accounts,omitempty"`
-	Order    *int            `json:"order,omitempty"`
+	// GroupRef replaces the literal accounts list by an account group; an empty dimension clears it.
+	GroupRef *GroupRef `json:"group_ref,omitempty"`
+	Order    *int      `json:"order,omitempty"`
 }
 type SetResult struct {
 	Line    Line   `json:"line"`
@@ -46,9 +55,21 @@ type StatusLine struct {
 	Accounts []string `json:"accounts"`
 }
 type Status struct {
-	Month string       `json:"month"`
-	Lines []StatusLine `json:"lines"`
-	Total StatusLine   `json:"total"`
+	Month  string       `json:"month"`
+	Window Window       `json:"window"`
+	Lines  []StatusLine `json:"lines"`
+	Total  StatusLine   `json:"total"`
+	// Unmapped lists open expense accounts that no budget line covers.
+	Unmapped []string `json:"unmapped"`
+}
+
+// Window selects the months averaged by budget_get. Zero Months means 6; without IncludeCurrent the window ends before the selected month.
+type Window struct {
+	Months         int    `json:"months,omitempty"`
+	IncludeCurrent bool   `json:"include_current,omitempty"`
+	From           string `json:"from,omitempty"`
+	To             string `json:"to,omitempty"`
+	Label          string `json:"label,omitempty"`
 }
 type Month struct {
 	Month  string             `json:"month"`
@@ -79,6 +100,27 @@ func (s *Service) Lines(ctx context.Context, p principal.Principal) ([]Line, err
 	e = cur.All(ctx, &out)
 	if len(out) > 500 {
 		return nil, fmt.Errorf("too many budget lines")
+	}
+	for i, l := range out {
+		if l.GroupRef == nil || e != nil {
+			continue
+		}
+		var found []struct {
+			ID string `bson:"id"`
+		}
+		c, err := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}, "groups." + l.GroupRef.Dimension: l.GroupRef.Value}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+		if err == nil {
+			err = c.All(ctx, &found)
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[i].Accounts = slices.Clone(l.Accounts)
+		for _, a := range found {
+			if !slices.Contains(out[i].Accounts, a.ID) {
+				out[i].Accounts = append(out[i].Accounts, a.ID)
+			}
+		}
 	}
 	return out, e
 }
@@ -116,6 +158,14 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 			return SetResult{}, fmt.Errorf("at most 100 accounts")
 		}
 		line.Accounts = *in.Accounts
+	}
+	if in.GroupRef != nil {
+		line.GroupRef = in.GroupRef
+		if in.GroupRef.Dimension == "" {
+			line.GroupRef = nil
+		} else if !ledger.ValidateGroupKey(in.GroupRef.Dimension) || strings.TrimSpace(in.GroupRef.Value) == "" {
+			return SetResult{}, fmt.Errorf("group_ref needs a valid dimension and a value")
+		}
 	}
 	if in.Order != nil {
 		line.Order = *in.Order
@@ -234,6 +284,15 @@ func (s *Service) Months(ctx context.Context, p principal.Principal, from, to st
 	return out, nil
 }
 func (s *Service) Get(ctx context.Context, p principal.Principal, month string) (Status, error) {
+	return s.GetWindow(ctx, p, month, Window{})
+}
+func (s *Service) GetWindow(ctx context.Context, p principal.Principal, month string, w Window) (Status, error) {
+	if w.Months == 0 {
+		w.Months = 6
+	}
+	if w.Months < 1 || w.Months > 36 {
+		return Status{}, fmt.Errorf("window months must be 1..36")
+	}
 	if month == "" {
 		month = time.Now().Format("2006-01")
 	}
@@ -245,11 +304,25 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, month string) 
 	if e != nil {
 		return Status{}, e
 	}
-	months, e := s.Months(ctx, p, date.AddDate(0, -6, 0).Format("2006-01-02"), date.AddDate(0, 1, -1).Format("2006-01-02"))
+	first := date.AddDate(0, -w.Months, 0)
+	if w.IncludeCurrent {
+		first = first.AddDate(0, 1, 0)
+	}
+	last := date.AddDate(0, 1, -1)
+	if !w.IncludeCurrent {
+		last = date.AddDate(0, 0, -1)
+	}
+	w.From, w.To = first.Format("2006-01-02"), last.Format("2006-01-02")
+	w.Label = first.Format("Jan") + "–" + last.Format("Jan")
+	if w.Months == 1 {
+		w.Label = first.Format("Jan")
+	}
+	// Fetch through the selected month so its actual is available even when the window excludes it.
+	months, e := s.Months(ctx, p, w.From, date.AddDate(0, 1, -1).Format("2006-01-02"))
 	if e != nil {
 		return Status{}, e
 	}
-	out := Status{Month: month, Lines: []StatusLine{}, Total: StatusLine{ID: "total", Name: "Total", Status: "within"}}
+	out := Status{Month: month, Window: w, Unmapped: []string{}, Lines: []StatusLine{}, Total: StatusLine{ID: "total", Name: "Total", Status: "within"}}
 	for _, m := range months {
 		if m.ByLine["unmapped"] != 0 {
 			lines = append(lines, Line{ID: "unmapped", Name: "Unmapped expenses", Limit: ledger.MustDecimal("0"), Accounts: []string{}})
@@ -262,13 +335,14 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, month string) 
 		for _, m := range months {
 			if m.Month == month {
 				r.Actual = m.ByLine[l.ID]
-			} else {
+			}
+			if m.Month >= w.From[:7] && m.Month <= w.To[:7] {
 				v := new(big.Rat)
 				v.SetFloat64(m.ByLine[l.ID])
 				avg.Add(avg, v)
 			}
 		}
-		r.Avg6, _ = avg.Quo(avg, big.NewRat(6, 1)).Float64()
+		r.Avg6, _ = avg.Quo(avg, big.NewRat(int64(w.Months), 1)).Float64()
 		if r.Actual > r.Limit {
 			r.Status = "over"
 		}
@@ -276,6 +350,27 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, month string) 
 		out.Total.Limit += r.Limit
 		out.Total.Actual += r.Actual
 		out.Total.Avg6 += r.Avg6
+	}
+	mapped := map[string]bool{}
+	for _, l := range lines {
+		for _, a := range l.Accounts {
+			mapped[a] = true
+		}
+	}
+	cur, e := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+	if e != nil {
+		return Status{}, e
+	}
+	var expenses []struct {
+		ID string `bson:"id"`
+	}
+	if e = cur.All(ctx, &expenses); e != nil {
+		return Status{}, e
+	}
+	for _, a := range expenses {
+		if !mapped[a.ID] {
+			out.Unmapped = append(out.Unmapped, a.ID)
+		}
 	}
 	if out.Total.Actual > out.Total.Limit {
 		out.Total.Status = "over"

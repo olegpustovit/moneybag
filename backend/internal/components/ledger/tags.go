@@ -2,6 +2,7 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -12,11 +13,15 @@ import (
 )
 
 type TagInput struct {
-	EntryIDs []string `json:"entry_ids"`
-	Add      []string `json:"add,omitempty"`
-	Remove   []string `json:"remove,omitempty"`
+	EntryIDs []string `json:"entry_ids,omitempty"`
+	// Where is a CEL expression over the entry row (as entries_list returns it) selecting up to 10000 posted entries; use instead of entry_ids.
+	Where  string   `json:"where,omitempty"`
+	DryRun bool     `json:"dry_run,omitempty"`
+	Add    []string `json:"add,omitempty"`
+	Remove []string `json:"remove,omitempty"`
 }
 type TagResult struct {
+	Matched int    `json:"matched"`
 	Updated int    `json:"updated"`
 	EventID string `json:"event_id"`
 }
@@ -25,15 +30,30 @@ func (s *Service) SetTags(ctx context.Context, p principal.Principal, in TagInpu
 	if e := p.Require("ledger:write"); e != nil {
 		return TagResult{}, e
 	}
-	if len(in.EntryIDs) < 1 || len(in.EntryIDs) > 100 || len(in.Add)+len(in.Remove) > 100 {
-		return TagResult{}, fmt.Errorf("1..100 entries and at most 100 tag changes required")
+	if in.Where != "" {
+		if len(in.EntryIDs) > 0 {
+			return TagResult{}, fmt.Errorf("use entry_ids or where, not both")
+		}
+		ids, e := s.matchIDs(ctx, p, in.Where)
+		if e != nil {
+			return TagResult{}, e
+		}
+		if in.DryRun {
+			return TagResult{Matched: len(ids)}, nil
+		}
+		in.EntryIDs = ids
+	} else if len(in.EntryIDs) < 1 || len(in.EntryIDs) > 100 {
+		return TagResult{}, fmt.Errorf("1..100 entries required, or a where expression")
+	}
+	if len(in.Add)+len(in.Remove) > 100 || in.DryRun && in.Where == "" {
+		return TagResult{}, fmt.Errorf("at most 100 tag changes; dry_run needs where")
 	}
 	for _, tag := range append(slices.Clone(in.Add), in.Remove...) {
 		if strings.TrimSpace(tag) == "" || len(tag) > 100 {
 			return TagResult{}, fmt.Errorf("tags must be 1..100 characters")
 		}
 	}
-	result := TagResult{}
+	result := TagResult{Matched: len(in.EntryIDs)}
 	db, _ := s.repo.db(p)
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
 		for _, id := range in.EntryIDs {
@@ -71,4 +91,47 @@ func (s *Service) SetTags(ctx context.Context, p principal.Principal, in TagInpu
 		return nil
 	})
 	return result, e
+}
+
+// matchIDs returns the ids of posted entries for which where is true; at most 10000.
+func (s *Service) matchIDs(ctx context.Context, p principal.Principal, where string) ([]string, error) {
+	if s.Expr == nil {
+		return nil, fmt.Errorf("where expressions are unavailable")
+	}
+	ids := []string{}
+	in := EntriesInput{Status: "posted", Limit: 500}
+	for {
+		page, e := s.repo.Entries(ctx, p, in)
+		if e != nil {
+			return nil, e
+		}
+		for _, entry := range page.Items {
+			b, e := json.Marshal(entry)
+			if e != nil {
+				return nil, e
+			}
+			var row map[string]any
+			if e = json.Unmarshal(b, &row); e != nil {
+				return nil, e
+			}
+			r, e := s.Expr.Eval(ctx, where, map[string]any{"row": row})
+			if e != nil {
+				return nil, fmt.Errorf("where: %w", e)
+			}
+			ok, isBool := r.Value.(bool)
+			if !isBool {
+				return nil, fmt.Errorf("where must evaluate to a boolean")
+			}
+			if ok {
+				if len(ids) == 10000 {
+					return nil, fmt.Errorf("where matches more than 10000 entries")
+				}
+				ids = append(ids, entry.ID)
+			}
+		}
+		if page.NextCursor == 0 {
+			return ids, nil
+		}
+		in.Cursor = page.NextCursor
+	}
 }
