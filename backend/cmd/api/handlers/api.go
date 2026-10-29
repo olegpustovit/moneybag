@@ -4,7 +4,29 @@ import (
 	"net/http"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
+
+func (h *Handler) apiDashboardValidate(w http.ResponseWriter, r *http.Request) {
+	p, _ := principal.From(r.Context())
+	if _, err := h.services.Dashboard.Get(r.Context(), p, r.PathValue("id"), "draft"); err != nil {
+		respond(w, http.StatusNotFound, map[string]string{"error": "dashboard unavailable"})
+		return
+	}
+	var in struct {
+		Spec dashboard.Spec `json:"spec"`
+	}
+	if err := decode(r, &in); err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid dashboard specification: " + err.Error()})
+		return
+	}
+	result, err := h.services.Dashboard.ValidateSpec(r.Context(), p, in.Spec)
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	respond(w, http.StatusOK, result)
+}
 
 func (h *Handler) apiExpressionCatalog(w http.ResponseWriter, r *http.Request) {
 	p, _, err := h.session(r)

@@ -200,6 +200,7 @@ func (h *Handler) Handler() http.Handler {
 	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	mux.Handle("POST /api/mcp", h.browser(browserTransport))
 	mux.Handle("POST /api/expr/check", h.browser(http.HandlerFunc(h.apiExpressionCheck)))
+	mux.Handle("POST /api/dashboards/{id}/validate", h.browser(http.HandlerFunc(h.apiDashboardValidate)))
 	mux.HandleFunc("GET /api/expr/catalog", h.apiExpressionCatalog)
 	mux.HandleFunc("GET /api/session", h.apiSession)
 	mux.HandleFunc("GET /api/imports", h.apiImports)
@@ -210,6 +211,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.Handle("POST /api/shared/{id}/patch", h.browser(http.HandlerFunc(h.apiSharedPatch)))
 	mux.Handle("POST /api/shared/{id}/publish", h.browser(http.HandlerFunc(h.apiSharedPublish)))
 	mux.Handle("POST /api/shared/{id}/evaluate", h.browser(http.HandlerFunc(h.apiSharedEvaluate)))
+	mux.Handle("POST /api/shared/{id}/validate", h.browser(http.HandlerFunc(h.apiSharedValidate)))
 	mux.HandleFunc("GET /api/consistency", h.consistency)
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 		mux.HandleFunc(method+" /api/", func(w http.ResponseWriter, _ *http.Request) {

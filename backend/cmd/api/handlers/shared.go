@@ -276,6 +276,29 @@ func (h *Handler) apiSharedEvaluate(w http.ResponseWriter, r *http.Request) {
 	respond(w, http.StatusOK, result)
 }
 
+func (h *Handler) apiSharedValidate(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Spec dashboard.Spec `json:"spec"`
+	}
+	if err := decode(r, &in); err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid dashboard specification: " + err.Error()})
+		return
+	}
+	result, err := access.Dashboard.ValidateSpec(r.Context(), access.Principal, in.Spec)
+	if !h.recheckSharedEditor(w, r, access) {
+		return
+	}
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	respond(w, http.StatusOK, result)
+}
+
 func (h *Handler) apiSharedCatalog(w http.ResponseWriter, r *http.Request) {
 	access, ok := h.sharedEditor(w, r)
 	if !ok {

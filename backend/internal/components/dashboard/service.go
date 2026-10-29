@@ -83,6 +83,14 @@ func (s *Service) Evaluate(ctx context.Context, p principal.Principal, expr stri
 	return s.engine.Evaluate(ctx, p, expr, data, params)
 }
 
+func (s *Service) ValidateSpec(ctx context.Context, p principal.Principal, spec Spec) (Validation, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return Validation{}, err
+	}
+	result, err := s.engine.Execute(ctx, p, spec)
+	return result.Validation, err
+}
+
 func (s *Service) Get(ctx context.Context, p principal.Principal, id, ref string) (GetResult, error) {
 	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
 		return s.get(ctx, p, id, ref)

@@ -178,6 +178,9 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		if code, _ := editorRequest("POST", "/evaluate", map[string]any{"expr": "1", "data": map[string]any{}, "params": map[string]any{}}, true); code != 404 {
 			t.Fatal("viewer evaluate", code)
 		}
+		if code, _ := editorRequest("POST", "/validate", map[string]any{"spec": spec}, true); code != 404 {
+			t.Fatal("viewer validate", code)
+		}
 		for _, name := range []string{"shared-allowed", "shared-blocked"} {
 			if _, err = services.Tables.CreateNamed(ctx, p, name, tables.CreateInput{Name: name, Columns: []tables.Column{{ID: "amount", Type: "number"}}}); err != nil {
 				t.Fatal(err)
@@ -223,6 +226,24 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		}
 		if code, _ = evaluate("table:shared-blocked"); code != 400 {
 			t.Fatal("restricted source", code)
+		}
+		candidate := editDraft["spec"].(map[string]any)
+		candidate["data"] = map[string]any{"rows": map[string]any{"from": "table:shared-allowed"}}
+		candidate["components"] = []any{map[string]any{"id": "visible", "type": "kpi", "value": "1 / (2 - size(data.rows))"}}
+		code, validation := editorRequest("POST", "/validate", map[string]any{"spec": candidate}, true)
+		if code != 200 || validation["ok"] != true {
+			t.Fatal("validate unsaved spec", code, validation)
+		}
+		candidate["data"] = map[string]any{"rows": map[string]any{"from": "table:shared-blocked"}}
+		code, validation = editorRequest("POST", "/validate", map[string]any{"spec": candidate}, true)
+		if code != 200 || validation["ok"] != false {
+			t.Fatal("validate restricted source", code, validation)
+		}
+		if code, _ = editorRequest("POST", "/validate", map[string]any{"spec": candidate}, false); code != 403 {
+			t.Fatal("validate missing csrf", code)
+		}
+		if current, err := services.Dashboard.Get(ctx, p, "spa-shared", "draft"); err != nil || current.Version != int(editDraft["version"].(float64)) {
+			t.Fatal("validation changed draft", current, err)
 		}
 		version := editDraft["version"].(float64)
 		patch := map[string]any{"ops": []any{map[string]any{"op": "test", "path": "/version", "value": version}, map[string]any{"op": "replace", "path": "/title", "value": "Editor changed"}}}
