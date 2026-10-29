@@ -299,7 +299,11 @@ func (s *Service) Months(ctx context.Context, p principal.Principal, from, to st
 	if len(rows) > 5000 {
 		return nil, fmt.Errorf("monthly query exceeds 5000 rows")
 	}
-	months := map[string]*Month{}
+	type monthTotals struct {
+		lines map[string]*big.Rat
+		total *big.Rat
+	}
+	months := map[string]*monthTotals{}
 	for _, r := range rows {
 		month := r.ID.Date[:7]
 		amount := r.Amount
@@ -323,15 +327,19 @@ func (s *Service) Months(ctx context.Context, p principal.Principal, from, to st
 		}
 		m := months[month]
 		if m == nil {
-			m = &Month{Month: month, ByLine: map[string]float64{}}
+			m = &monthTotals{lines: map[string]*big.Rat{}, total: new(big.Rat)}
 			months[month] = m
 		}
 		line := mapping[r.ID.Account]
 		if line == "" {
 			line = "unmapped"
 		}
-		m.ByLine[line] += amount.Float()
-		m.Total += amount.Float()
+		if m.lines[line] == nil {
+			m.lines[line] = new(big.Rat)
+		}
+		value := amount.Rat()
+		m.lines[line].Add(m.lines[line], value)
+		m.total.Add(m.total, value)
 	}
 	start, e := time.Parse("2006-01-02", from)
 	if e != nil {
@@ -345,7 +353,12 @@ func (s *Service) Months(ctx context.Context, p principal.Principal, from, to st
 	for d := start; !d.After(end); d = d.AddDate(0, 1, 0) {
 		key := d.Format("2006-01")
 		if m := months[key]; m != nil {
-			out = append(out, *m)
+			result := Month{Month: key, ByLine: make(map[string]float64, len(m.lines))}
+			for line, amount := range m.lines {
+				result.ByLine[line], _ = amount.Float64()
+			}
+			result.Total, _ = m.total.Float64()
+			out = append(out, result)
 		} else {
 			out = append(out, Month{Month: key, ByLine: map[string]float64{}})
 		}
