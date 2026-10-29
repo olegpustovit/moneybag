@@ -74,6 +74,9 @@ func run() error {
 	}
 	a := audit.NewService(audit.NewMongoRepository(db))
 	bookRepo := ledger.NewMongoRepository(db)
+	if e = ids.EachUser(ctx, func(p principal.Principal) error { return bookRepo.Init(ctx, p) }); e != nil {
+		return fmt.Errorf("initialize ledger indexes: %w", e)
+	}
 	book := ledger.NewService(bookRepo, a)
 	expr, e := expressions.New()
 	if e != nil {
