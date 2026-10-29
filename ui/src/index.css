@@ -361,3 +361,9 @@ th { color:var(--text2); font-weight:600; }
 .data-table-filter input { min-width:0; padding:3px 6px; border:1px solid var(--bd); border-radius:3px; background:var(--paper); color:var(--text); }
 .shared-data-table td:focus-visible { outline:2px solid var(--focus); outline-offset:-2px; }
 .shared-data-table tfoot td { border-top:1px solid var(--bd); border-bottom:0; font-variant-numeric:tabular-nums; }
+.chart-direct-label { font-size:11px; pointer-events:none; }
+
+.budget-track::before { content:""; position:absolute; inset:-8px 0; }
+.budget-track:focus-visible { outline:2px solid var(--focus); outline-offset:3px; }
+
+.dashboard-chart .recharts-label { pointer-events:none; }
