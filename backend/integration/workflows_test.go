@@ -380,6 +380,51 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if _, e = shares.View(ctx, pb, live.ShareID); !errors.Is(e, principal.ErrNotFound) {
 		t.Fatal("revoked grant still works", e)
 	}
+	if _, e = tab.CreateNamed(ctx, pa, "shared-partial", tables.CreateInput{Name: "Partial", Columns: []tables.Column{{ID: "amount", Type: "number"}}}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = tab.Update(ctx, pa, tables.UpdateInput{DB: "shared-partial", Updates: []tables.CellUpdate{{RowID: "one", Column: "amount", Value: 1.0}, {RowID: "two", Column: "amount", Value: 2.0}}}); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = dash.Create(ctx, pa, dashboard.CreateInput{ID: "partial-share", Title: "Partial"}); e != nil {
+		t.Fatal(e)
+	}
+	partialSpec := dashboard.Spec{ID: "partial-share", Title: "Partial", Params: map[string]any{"secret": "owner-secret"}, Data: map[string]dashboard.Query{"items": {From: "table:shared-partial"}}, Pages: []dashboard.Page{{ID: "main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 6, Component: "count"}, {Span: 6, Component: "first"}}}}}}, Components: []dashboard.Component{{ID: "count", Type: "kpi", Value: "size(data.items)"}, {ID: "first", Title: "{{params.secret}}", Type: "kpi", Value: "data.items[0].amount"}}}
+	partialOps, _ := json.Marshal([]map[string]any{{"op": "replace", "path": "", "value": partialSpec}})
+	partialDraft, e := dash.Patch(ctx, pa, "partial-share", partialOps)
+	if e != nil || !partialDraft.Validation.OK {
+		t.Fatal("partial draft", partialDraft, e)
+	}
+	if _, e = dash.Publish(ctx, pa, "partial-share", partialDraft.DraftVersion, ""); e != nil {
+		t.Fatal(e)
+	}
+	partialGrant, e := shares.Share(ctx, pa, sharing.ShareInput{DashboardID: "partial-share", Grantee: pb.UserID, Role: "viewer", Mode: "live", Sources: []string{"table:shared-partial"}, RowFilter: "row.amount >= 2.0"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = tab.Update(ctx, pa, tables.UpdateInput{DB: "shared-partial", Updates: []tables.CellUpdate{{RowID: "two", Column: "amount", Value: 1.0}}}); e != nil {
+		t.Fatal(e)
+	}
+	partial, e := shares.View(ctx, pb, partialGrant.ShareID)
+	if e != nil || partial.Snapshot.Rendered.Validation.OK || partial.Snapshot.Rendered.Values["count"].(map[string]any)["text"] != "0" || partial.Snapshot.Rendered.Values["first"] != nil {
+		t.Fatal("partial filtered share", partial, e)
+	}
+	encoded, _ := json.Marshal(partial.Snapshot.Rendered.Validation)
+	if strings.Contains(string(encoded), "data.items") || strings.Contains(string(encoded), "amount") || !strings.Contains(string(encoded), "could not be displayed") || (strings.Contains(partial.Snapshot.Rendered.HTML, "data.items") || strings.Contains(partial.Snapshot.Rendered.HTML, "owner-secret")) {
+		t.Fatal("shared error leaked details", string(encoded), partial.Snapshot.Rendered.HTML)
+	}
+	if e = tab.Archive(ctx, pa, "shared-partial", true, "test"); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = shares.View(ctx, pb, partialGrant.ShareID); e == nil {
+		t.Fatal("global source error exposed partial share")
+	}
+	if e = shares.Unshare(ctx, pa, partialGrant.ShareID); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = shares.View(ctx, pb, partialGrant.ShareID); !errors.Is(e, principal.ErrNotFound) {
+		t.Fatal("revoked partial share", e)
+	}
 	hist := &history.Service{Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Reconcile: rec}
 	testViewsTablesUnpublish(t, ctx, pa, pb, dash, tab, hist, sources, expr)
 	createShared("undo-publish", "1", map[string]dashboard.Query{})

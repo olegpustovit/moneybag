@@ -638,7 +638,12 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 					continue
 				}
 				used[c.ID] = true
-				fragment := componentHTML(c, col.Span, html[c.ID])
+				body, ok := html[c.ID]
+				if !ok {
+					c.Title = "Component unavailable"
+					body = "<p>This component could not be displayed.</p>"
+				}
+				fragment := componentHTML(c, col.Span, body)
 				if output.Len()+len(fragment) > 2*1024*1024 {
 					issue("/pages", fmt.Errorf("rendered dashboard exceeds 2 MiB"))
 					result.HTML = ""

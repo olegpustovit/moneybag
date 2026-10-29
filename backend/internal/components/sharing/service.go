@@ -347,7 +347,17 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 			return SharedView{}, e
 		}
 		if !rendered.Validation.OK {
-			return SharedView{}, fmt.Errorf("shared dashboard failed validation")
+			if len(rendered.Pages) == 0 || len(rendered.Validation.Errors) == 0 {
+				return SharedView{}, fmt.Errorf("shared dashboard failed validation")
+			}
+			for i, issue := range rendered.Validation.Errors {
+				if issue.ComponentID == "" {
+					return SharedView{}, fmt.Errorf("shared dashboard failed validation")
+				}
+				rendered.Validation.Errors[i] = dashboard.Issue{ComponentID: issue.ComponentID, Msg: "This component could not be displayed."}
+			}
+			rendered.Validation.Warnings = nil
+			rendered.Computed = nil
 		}
 		snap = Snapshot{GrantHash: PermissionHash(g), ID: g.ID, OwnerUser: g.OwnerUser, DashboardID: g.DashboardID, Version: v.Version, Title: v.Spec.Title, Rendered: rendered, At: time.Now().UTC()}
 	}

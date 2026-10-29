@@ -122,6 +122,15 @@ func sharedOutput(view sharing.SharedView) (map[string]any, error) {
 		visible[id] = result
 	}
 	out["values"] = visible
+	issues := map[string]string{}
+	for _, issue := range rendered.Validation.Errors {
+		if allowed[issue.ComponentID] {
+			issues[issue.ComponentID] = "This component could not be displayed."
+		}
+	}
+	if len(issues) > 0 {
+		out["issues"] = issues
+	}
 	return out, nil
 }
 func fields(source map[string]any, keys ...string) map[string]any {
