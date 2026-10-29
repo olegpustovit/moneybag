@@ -482,6 +482,10 @@ type EvalError struct {
 	Err               error
 }
 
+func componentPath(id string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(id, "~", "~0"), "/", "~1")
+}
+
 func (e *EvalError) Error() string { return e.Err.Error() }
 func (e *EvalError) Unwrap() error { return e.Err }
 
@@ -509,6 +513,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 		if rest, ok := strings.CutPrefix(path, "/components/"); ok {
 			var field string
 			i.ComponentID, field, _ = strings.Cut(rest, "/")
+			i.ComponentID = strings.ReplaceAll(strings.ReplaceAll(i.ComponentID, "~1", "/"), "~0", "~")
 			if i.Field == "" {
 				i.Field = field
 			}
@@ -527,25 +532,37 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 		return result, fmt.Errorf("dashboard needs 1..20 pages, at most 100 components, 50 queries and 100 computed expressions")
 	}
 	count := 0
+	globalCompileError := false
 	walkExpressions(spec, func(path, expr string) {
 		count++
 		if _, err := e.Expr.Compile(expr); err != nil {
-			issue(path, err)
+			issue(path, &EvalError{Expr: expr, Err: err})
+			if !strings.HasPrefix(path, "/components/") {
+				globalCompileError = true
+			}
 		}
 	})
 	if count > 200 {
 		issue("/", fmt.Errorf("dashboard exceeds 200 expressions"))
+		globalCompileError = true
 	}
-	if !result.Validation.OK {
+	if globalCompileError {
 		return result, nil
 	}
 	x := &execution{ctx: ctx, engine: e, p: p, vars: map[string]any{"data": map[string]any{}, "params": spec.Params, "computed": map[string]any{}, "rates": map[string]any{}}}
 	if spec.Params == nil {
 		x.vars["params"] = map[string]any{}
 	}
+	compiledIssues := len(result.Validation.Errors)
 	x.load(spec.Data, spec.Computed, issue)
-	if !result.Validation.OK {
+	if len(result.Validation.Errors) > compiledIssues {
 		return result, nil
+	}
+	invalidComponents := map[string]bool{}
+	for _, problem := range result.Validation.Errors {
+		if problem.ComponentID != "" {
+			invalidComponents[problem.ComponentID] = true
+		}
 	}
 	components := map[string]Component{}
 	html := map[string]string{}
@@ -555,12 +572,15 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			issue(fmt.Sprintf("/components/%d/id", i), fmt.Errorf("id required"))
 			continue
 		}
-		path := "/components/" + c.ID
+		path := "/components/" + componentPath(c.ID)
 		if _, ok := components[c.ID]; ok {
 			issue(path+"/id", fmt.Errorf("duplicate component id"))
 			continue
 		}
 		components[c.ID] = c
+		if invalidComponents[c.ID] {
+			continue
+		}
 		c, err := x.resolveText(c)
 		if err != nil {
 			issue(path, err)
@@ -635,7 +655,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	}
 	for id := range components {
 		if !used[id] {
-			result.Validation.Warnings = append(result.Validation.Warnings, Issue{Path: "/components/" + id, Msg: "component " + id + " is not placed", ComponentID: id})
+			result.Validation.Warnings = append(result.Validation.Warnings, Issue{Path: "/components/" + componentPath(id), Msg: "component " + id + " is not placed", ComponentID: id})
 		}
 	}
 	result.Validation.Cost = x.cost
@@ -678,7 +698,7 @@ func walkExpressions(s Spec, fn func(string, string)) {
 		}
 	}
 	for i, c := range s.Components {
-		base := "/components/" + c.ID
+		base := "/components/" + componentPath(c.ID)
 		if c.ID == "" {
 			base = fmt.Sprintf("/components/%d", i)
 		}

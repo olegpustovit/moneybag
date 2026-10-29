@@ -46,6 +46,39 @@ func TestServerRenderAndValidation(t *testing.T) {
 		t.Fatal("missing layout component passed", out, e)
 	}
 }
+
+func TestComponentErrorsKeepHealthyComponents(t *testing.T) {
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := Engine{Expr: expr, Reader: fixtureReader{}}
+	spec := Spec{Data: map[string]Query{}, Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{6, "good"}, {6, "broken"}}}}}}, Components: []Component{{ID: "good", Type: "kpi", Value: "42"}, {ID: "broken", Type: "kpi", Value: "unknown_function(1)"}}}
+	result, err := engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || result.Validation.OK || result.Values["good"] == nil || result.Values["broken"] != nil || len(result.Pages) != 1 {
+		t.Fatal(result, err)
+	}
+	if len(result.Validation.Errors) != 1 || result.Validation.Errors[0].ComponentID != "broken" || result.Validation.Errors[0].Expr != "unknown_function(1)" {
+		t.Fatal(result.Validation.Errors)
+	}
+	spec.Components[1].ID = "broken/~one"
+	spec.Pages[0].Layout[0].Cols[1].Component = "broken/~one"
+	result, err = engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || result.Values["good"] == nil || len(result.Validation.Errors) != 1 || result.Validation.Errors[0].ComponentID != "broken/~one" || result.Validation.Errors[0].Path != "/components/broken~1~0one/value" {
+		t.Fatal("escaped component ID", result, err)
+	}
+	spec.Pages[0].Layout[0].Cols[1].Component = "broken"
+	spec.Components[1] = Component{ID: "broken", Type: "table", Rows: "missing", Columns: []Column{{Label: "Value", Value: "row.value"}}}
+	result, err = engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || result.Validation.OK || result.Values["good"] == nil || len(result.Validation.Errors) != 1 || result.Validation.Errors[0].ComponentID != "broken" || result.Validation.Errors[0].Hint == "" {
+		t.Fatal(result, err)
+	}
+	spec.Data = map[string]Query{"bad": {From: "journal", Where: "unknown_function(1)"}}
+	result, err = engine.Execute(context.Background(), principal.Principal{}, spec)
+	if err != nil || result.Validation.OK || len(result.Values) != 0 {
+		t.Fatal("global query error must not return misleading values", result, err)
+	}
+}
 func TestAllChartMarksAndTextEscape(t *testing.T) {
 	expr, _ := expressions.New()
 	engine := Engine{Expr: expr, Reader: fixtureReader{}}

@@ -340,3 +340,5 @@ th { color:var(--text2); font-weight:600; }
 .range-dialog .rdp-root { --rdp-accent-color:var(--foreground); --rdp-accent-background-color:var(--muted); --rdp-day-width:min(44px, calc((100vw - 5rem)/7)); --rdp-day_button-width:var(--rdp-day-width); --rdp-day_button-border-radius:0; --rdp-range_start-color:var(--background); --rdp-range_end-color:var(--background); margin:1rem 0; }
 .range-dialog .rdp-months { flex-wrap:wrap; }
 .range-dialog .rdp-month_grid th, .range-dialog .rdp-month_grid td { padding:0; border:0; }
+.component-issues { color:var(--neg); overflow-wrap:anywhere; }
+.component-issues pre { white-space:pre-wrap; overflow-wrap:anywhere; font-family:var(--font-mono); }
