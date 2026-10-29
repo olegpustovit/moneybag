@@ -229,10 +229,8 @@ th { color:var(--text2); font-weight:600; }
 .upload-drop { border:1px dashed var(--border); padding:1rem; }
 .upload-drop label { font-weight:600; margin-bottom:.5rem; }
 .import-mapping { display:grid; grid-template-columns:repeat(auto-fit,minmax(10rem,1fr)); gap:.75rem; }
-.import-panel .table-scroll, .import-table { position:relative; }
+.import-panel .table-scroll { position:relative; }
 .import-counts { display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0; font-size:.85rem; }
-.import-table table { min-width:800px; }
-.import-table td { vertical-align:top; }
 .import-row-form { min-width:14rem; max-width:24rem; }
 .import-row-form .import-skip { flex-direction:row; align-items:center; }
 .import-commit { position:sticky; bottom:0; z-index:2; display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:1rem; margin-top:1rem; background:var(--background); border:1px solid var(--border); }

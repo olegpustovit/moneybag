@@ -9,7 +9,7 @@ const features=tableFeatures({rowSortingFeature,sortedRowModel:createSortedRowMo
 function preferences(key:string):{visibility:ColumnVisibilityState;sizing:ColumnSizingState} {
  try {const data=JSON.parse(localStorage.getItem(key) || '{}');return {visibility:data.visibility && typeof data.visibility==='object' ? data.visibility : {},sizing:data.sizing && typeof data.sizing==='object' ? data.sizing : {}}} catch {return {visibility:{},sizing:{}}}
 }
-export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, renderCell, sorters, requiredColumns, unsortable, onFilterChange }: { value:Value; storageKey:string; sort?:string; onSortChange?:(sort:string|undefined)=>void; regionLabel?:string; renderCell?:(row:Value['rows'][number],column:string)=>ReactNode; sorters?:Record<string,(a:Value['rows'][number],b:Value['rows'][number])=>number>; requiredColumns?:string[]; unsortable?:string[]; onFilterChange?:()=>void }) {
+export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, renderCell, sorters, requiredColumns, unsortable, onFilterChange, initialSizing }: { value:Value; storageKey:string; sort?:string; onSortChange?:(sort:string|undefined)=>void; regionLabel?:string; renderCell?:(row:Value['rows'][number],column:string)=>ReactNode; sorters?:Record<string,(a:Value['rows'][number],b:Value['rows'][number])=>number>; requiredColumns?:string[]; unsortable?:string[]; onFilterChange?:()=>void; initialSizing?:ColumnSizingState }) {
  const key=`moneybag:table:${storageKey}`
  const [initial]=useState(() => preferences(key))
  const [localSorting,setLocalSorting]=useState<SortingState>([])
@@ -19,7 +19,7 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
  const sorting=onSortChange ? (sort?.split(',').flatMap(item => {const desc=item.startsWith('-'),id=desc ? item.slice(1) : item;return value.columns.some(column => column.key===id) && !unsortable?.includes(id) ? [{id,desc}] : []}) ?? []) : localSorting
  const setSorting=(updater:SortingState | ((old:SortingState)=>SortingState)) => {const next=typeof updater==='function' ? updater(sorting) : updater;if(onSortChange)onSortChange(next.map(item => `${item.desc ? '-' : ''}${item.id}`).join(',') || undefined);else setLocalSorting(next);scroll.current?.scrollTo(0,0)}
  const [visibility,setVisibility]=useState<ColumnVisibilityState>(() => ({...initial.visibility,...Object.fromEntries([value.columns[0]?.key,...(requiredColumns ?? [])].filter(Boolean).map(id => [id,true]))}))
- const [sizing,setSizing]=useState<ColumnSizingState>(initial.sizing)
+ const [sizing,setSizing]=useState<ColumnSizingState>(() => ({...initialSizing,...initial.sizing}))
  const scroll=useRef<HTMLDivElement>(null)
  useEffect(() => {try {localStorage.setItem(key,JSON.stringify({visibility,sizing}))} catch { /* Storage can be unavailable. */ }},[key,visibility,sizing])
  const columns=useMemo<Array<ColumnDef<typeof features,Value['rows'][number]>>>(() => value.columns.map((column,index) => ({
