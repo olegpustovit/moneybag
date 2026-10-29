@@ -223,3 +223,24 @@ th { color:var(--text2); font-weight:600; }
 .formula-display { display:flex; align-items:end; gap:.75rem; max-width:40rem; margin-top:1rem; }
 .formula-display label { flex:1; font-size:.8rem; }
 @media (max-width:600px) { .grid-filter { flex-direction:column; align-items:stretch; } }
+.import-panel, .import-balance { border:1px solid var(--border); padding:1.25rem; margin-bottom:1.5rem; }
+.import-panel h2, .import-balance h2 { font-weight:600; }
+.import-panel p, .import-balance p { color:var(--muted-foreground); margin:.5rem 0; }
+.import-upload, .import-undo, .import-row-form { display:flex; flex-direction:column; gap:.75rem; }
+.import-upload { max-width:40rem; margin-top:1rem; }
+.import-upload label, .import-undo label, .import-row-form label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }
+.import-upload select { border:1px solid var(--border); background:var(--background); min-height:2rem; padding:0 .5rem; }
+.upload-drop { border:1px dashed var(--border); padding:1rem; }
+.upload-drop label { font-weight:600; margin-bottom:.5rem; }
+.import-mapping { display:grid; grid-template-columns:repeat(auto-fit,minmax(10rem,1fr)); gap:.75rem; }
+.import-panel .table-scroll, .import-table { position:relative; }
+.import-counts { display:flex; flex-wrap:wrap; gap:1rem; margin:1rem 0; font-size:.85rem; }
+.import-table table { min-width:800px; }
+.import-table td { vertical-align:top; }
+.import-row-form { min-width:14rem; max-width:24rem; }
+.import-row-form .import-skip { flex-direction:row; align-items:center; }
+.import-commit { position:sticky; bottom:0; z-index:2; display:flex; justify-content:space-between; align-items:center; gap:1rem; padding:1rem; margin-top:1rem; background:var(--background); border:1px solid var(--border); }
+.import-commit label { display:block; margin-top:.5rem; font-size:.85rem; }
+.import-undo { max-width:30rem; }
+@media (max-width:600px) { .import-commit { flex-direction:column; align-items:stretch; } }
+.import-row-fields { display:flex; flex-direction:column; gap:.75rem; border:0; padding:0; margin:0; }

@@ -17,6 +17,8 @@ import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
 import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
 import { Route as AppDatabasesIdRouteImport } from './routes/_app.databases.$id'
+import { Route as AppImportsIndexRouteImport } from './routes/_app.imports.index'
+import { Route as AppImportsBatchRouteImport } from './routes/_app.imports.$batch'
 
 const AppRoute = AppRouteImport.update({
   id: '/_app',
@@ -57,6 +59,16 @@ const AppDatabasesIdRoute = AppDatabasesIdRouteImport.update({
   path: '/databases/$id',
   getParentRoute: () => AppRoute,
 } as any)
+const AppImportsIndexRoute = AppImportsIndexRouteImport.update({
+  id: '/imports/',
+  path: '/imports/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppImportsBatchRoute = AppImportsBatchRouteImport.update({
+  id: '/imports/$batch',
+  path: '/imports/$batch',
+  getParentRoute: () => AppRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
@@ -66,6 +78,8 @@ export interface FileRoutesByFullPath {
   '/settings': typeof AppSettingsRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
   '/databases/$id': typeof AppDatabasesIdRoute
+  '/imports/$batch': typeof AppImportsBatchRoute
+  '/imports/': typeof AppImportsIndexRoute
 }
 export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
@@ -75,6 +89,8 @@ export interface FileRoutesByTo {
   '/': typeof AppIndexRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
   '/databases/$id': typeof AppDatabasesIdRoute
+  '/imports/$batch': typeof AppImportsBatchRoute
+  '/imports': typeof AppImportsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -86,6 +102,8 @@ export interface FileRoutesById {
   '/_app/': typeof AppIndexRoute
   '/_app/dashboards/$id': typeof AppDashboardsIdRoute
   '/_app/databases/$id': typeof AppDatabasesIdRoute
+  '/_app/imports/$batch': typeof AppImportsBatchRoute
+  '/_app/imports/': typeof AppImportsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -97,6 +115,8 @@ export interface FileRouteTypes {
     | '/settings'
     | '/dashboards/$id'
     | '/databases/$id'
+    | '/imports/$batch'
+    | '/imports/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/accounts'
@@ -106,6 +126,8 @@ export interface FileRouteTypes {
     | '/'
     | '/dashboards/$id'
     | '/databases/$id'
+    | '/imports/$batch'
+    | '/imports'
   id:
     | '__root__'
     | '/_app'
@@ -116,6 +138,8 @@ export interface FileRouteTypes {
     | '/_app/'
     | '/_app/dashboards/$id'
     | '/_app/databases/$id'
+    | '/_app/imports/$batch'
+    | '/_app/imports/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -180,6 +204,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDatabasesIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/imports/': {
+      id: '/_app/imports/'
+      path: '/imports'
+      fullPath: '/imports/'
+      preLoaderRoute: typeof AppImportsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/imports/$batch': {
+      id: '/_app/imports/$batch'
+      path: '/imports/$batch'
+      fullPath: '/imports/$batch'
+      preLoaderRoute: typeof AppImportsBatchRouteImport
+      parentRoute: typeof AppRoute
+    }
   }
 }
 
@@ -191,6 +229,8 @@ interface AppRouteChildren {
   AppIndexRoute: typeof AppIndexRoute
   AppDashboardsIdRoute: typeof AppDashboardsIdRoute
   AppDatabasesIdRoute: typeof AppDatabasesIdRoute
+  AppImportsBatchRoute: typeof AppImportsBatchRoute
+  AppImportsIndexRoute: typeof AppImportsIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
@@ -201,6 +241,8 @@ const AppRouteChildren: AppRouteChildren = {
   AppIndexRoute: AppIndexRoute,
   AppDashboardsIdRoute: AppDashboardsIdRoute,
   AppDatabasesIdRoute: AppDatabasesIdRoute,
+  AppImportsBatchRoute: AppImportsBatchRoute,
+  AppImportsIndexRoute: AppImportsIndexRoute,
 }
 
 const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
