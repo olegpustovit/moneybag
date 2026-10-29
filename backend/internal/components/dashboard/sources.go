@@ -300,15 +300,19 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 	case source == "balance_history":
 		// Month-end USD totals for the last 12 months (today for the current month).
 		today := time.Now()
+		dates := make([]string, 0, 12)
 		for i := 11; i >= 0; i-- {
 			end := time.Date(today.Year(), today.Month()-time.Month(i)+1, 0, 0, 0, 0, 0, time.UTC)
 			if i == 0 {
 				end = today
 			}
-			res, e := s.Ledger.Balances(ctx, p, ledger.BalancesInput{At: end.Format("2006-01-02"), GroupBy: "type", ValueIn: "USD"}, s.Valuer)
-			if e != nil {
-				return nil, e
-			}
+			dates = append(dates, end.Format("2006-01-02"))
+		}
+		history, e := s.Ledger.BalanceSeries(ctx, p, dates, s.Valuer)
+		if e != nil {
+			return nil, e
+		}
+		for i, res := range history {
 			assets, liabilities := 0.0, 0.0
 			for _, r := range res.Rows {
 				if r.Value == nil {
@@ -321,8 +325,9 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 					liabilities = r.Value.Value.Float()
 				}
 			}
-			out = append(out, map[string]any{"month": end.Format("2006-01"), "date": end.Format("2006-01-02"), "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
+			out = append(out, map[string]any{"month": dates[i][:7], "date": dates[i], "assets": assets, "liabilities": liabilities, "net": assets + liabilities})
 		}
+
 	case strings.HasPrefix(source, "forecast_series:"):
 		id := strings.TrimPrefix(source, "forecast_series:")
 		state, e := s.Model.Get(ctx, p)

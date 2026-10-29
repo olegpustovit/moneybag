@@ -31,6 +31,14 @@ type BalancesResult struct {
 	Lots []Lot        `json:"lots,omitempty"`
 }
 
+type rawBalance struct {
+	ID struct {
+		Account   string `bson:"account"`
+		Commodity string `bson:"commodity"`
+	} `bson:"_id"`
+	Amount Decimal `bson:"amount"`
+}
+
 func (s *Service) Balances(ctx context.Context, p principal.Principal, in BalancesInput, valuer Valuer) (BalancesResult, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return BalancesResult{}, e
@@ -68,27 +76,27 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 		return BalancesResult{}, e
 	}
 	defer cur.Close(ctx)
-	var raw []struct {
-		ID struct {
-			Account   string `bson:"account"`
-			Commodity string `bson:"commodity"`
-		} `bson:"_id"`
-		Amount Decimal `bson:"amount"`
-	}
+	var raw []rawBalance
 	if e = cur.All(ctx, &raw); e != nil {
 		return BalancesResult{}, e
 	}
 	if len(raw) > 5000 {
 		return BalancesResult{}, fmt.Errorf("balance result exceeds 5000 rows")
 	}
-	groups := map[string]map[string]*big.Rat{}
+	accounts, e := s.balanceAccounts(ctx, p, in.GroupBy)
+	if e != nil {
+		return BalancesResult{}, e
+	}
+	return s.balanceResult(ctx, p, in, valuer, raw, accounts)
+}
+
+func (s *Service) balanceAccounts(ctx context.Context, p principal.Principal, groupBy string) (map[string]Account, error) {
 	accounts := map[string]Account{}
-	if in.GroupBy == "pot" || in.GroupBy == "type" {
-		// One paged read instead of a query per balance row.
+	if groupBy == "pot" || groupBy == "type" {
 		for cursor := ""; ; {
-			page, e := s.repo.Accounts(ctx, p, AccountsInput{IncludeClosed: true, Limit: 500, Cursor: cursor})
-			if e != nil {
-				return BalancesResult{}, e
+			page, err := s.repo.Accounts(ctx, p, AccountsInput{IncludeClosed: true, Limit: 500, Cursor: cursor})
+			if err != nil {
+				return nil, err
 			}
 			for _, a := range page.Items {
 				accounts[a.ID] = a
@@ -98,6 +106,10 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 			}
 		}
 	}
+	return accounts, nil
+}
+func (s *Service) balanceResult(ctx context.Context, p principal.Principal, in BalancesInput, valuer Valuer, raw []rawBalance, accounts map[string]Account) (BalancesResult, error) {
+	groups := map[string]map[string]*big.Rat{}
 	for _, r := range raw {
 		key := r.ID.Account
 		switch in.GroupBy {
@@ -168,10 +180,11 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 		out.Rows = append(out.Rows, row)
 	}
 	if in.IncludeLots {
-		out.Lots, e = s.lots(ctx, p, in, valuer)
-		if e != nil {
-			return BalancesResult{}, e
+		lots, err := s.lots(ctx, p, in, valuer)
+		if err != nil {
+			return BalancesResult{}, err
 		}
+		out.Lots = lots
 	}
 	return out, nil
 }

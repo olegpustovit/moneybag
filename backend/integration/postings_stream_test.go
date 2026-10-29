@@ -2,7 +2,9 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/url"
 	"os"
 	"strings"
@@ -125,5 +127,61 @@ func BenchmarkPostingsSource(b *testing.B) {
 		if err != nil || len(rows) != 19999 {
 			b.Fatalf("postings: %d rows, %v", len(rows), err)
 		}
+	}
+}
+
+type historyValuer struct{}
+
+func (historyValuer) Convert(_ context.Context, _ principal.Principal, a ledger.Amount, target, at string) (ledger.Amount, error) {
+	factor := big.NewRat(1, 1)
+	if a.Commodity == "EUR" {
+		factor = big.NewRat(5, 4)
+		if at >= "2026-02-01" {
+			factor = big.NewRat(3, 2)
+		}
+	}
+	value, err := ledger.DecimalFromRat(new(big.Rat).Mul(a.Value.Rat(), factor))
+	return ledger.Amount{Value: value, Commodity: target}, err
+}
+func TestBalanceSeriesMatchesIndividualDates(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
+	parsed, _ := url.Parse(uri)
+	client, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
+	if _, err = db.Collection("accounts").InsertOne(ctx, ledger.Account{Key: p.UserID + ":liabilities:test", UserID: p.UserID, ID: "liabilities:test", Type: "liability", Name: "Loan", Commodities: []string{"USD"}}); err != nil {
+		t.Fatal(err)
+	}
+	docs := []any{ledger.Entry{UserID: p.UserID, ID: "later", Seq: 20010, Date: "2026-02-15", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("0.123456"), Commodity: "EUR"}}, {Account: "liabilities:test", Amount: ledger.Amount{Value: ledger.MustDecimal("-42.75"), Commodity: "USD"}}}}, ledger.Entry{UserID: p.UserID, ID: "future", Seq: 20011, Date: "2027-01-01", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("100"), Commodity: "EUR"}}}}, ledger.Entry{UserID: p.UserID, ID: "draft", Seq: 20012, Date: "2026-01-01", Status: "draft", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("500"), Commodity: "EUR"}}}}}
+	if _, err = db.Collection("journal").InsertMany(ctx, docs); err != nil {
+		t.Fatal(err)
+	}
+	dates := []string{"2025-12-31", "2026-01-01", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30", "2026-10-31", "2026-12-31"}
+	want := make([]ledger.BalancesResult, len(dates))
+	for i, date := range dates {
+		want[i], err = sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: date, GroupBy: "type", ValueIn: "USD"}, historyValuer{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	reads.Store(0)
+	got, err := sources.Ledger.BalanceSeries(ctx, p, dates, historyValuer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
+	if string(gotJSON) != string(wantJSON) {
+		t.Fatalf("series %s != individual balances %s", gotJSON, wantJSON)
+	}
+	if n := reads.Load(); n > 3 {
+		t.Fatalf("series required %d reads", n)
+	}
+	if _, err = sources.Ledger.BalanceSeries(ctx, p, []string{"2026-01-01", "2025-12-31"}, historyValuer{}); err == nil {
+		t.Fatal("unsorted dates accepted")
 	}
 }
