@@ -518,39 +518,47 @@ func dupDetail(d []Duplicate) any {
 }
 
 type receivableRow struct {
-	Account string `json:"account"`
-	Balance string `json:"balance"`
-	Since   string `json:"oldest_unsettled,omitempty"`
-	AgeDays int    `json:"age_days,omitempty"`
+	Account   string `json:"account"`
+	Commodity string `json:"commodity"`
+	Balance   string `json:"balance"`
+	Since     string `json:"oldest_unsettled,omitempty"`
+	AgeDays   int    `json:"age_days,omitempty"`
 }
 
 func receivables(entries []ledger.Entry, accts []ledger.Account) []receivableRow {
-	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Date < entries[j].Date })
+	sort.SliceStable(entries, func(i, j int) bool {
+		if entries[i].Date == entries[j].Date {
+			return entries[i].Seq < entries[j].Seq
+		}
+		return entries[i].Date < entries[j].Date
+	})
 	out := []receivableRow{}
 	for _, a := range accts {
 		if !receivable(a.ID) {
 			continue
 		}
-		bal, since := new(big.Rat), ""
-		for _, en := range entries {
-			for _, po := range en.Postings {
-				if po.Account != a.ID {
-					continue
-				}
-				if bal.Sign() == 0 {
-					since = en.Date
-				}
-				bal.Add(bal, po.Amount.Value.Rat())
-				if bal.Sign() == 0 {
-					since = ""
+		for _, commodity := range a.Commodities {
+			bal, since := new(big.Rat), ""
+			for _, en := range entries {
+				for _, po := range en.Postings {
+					if po.Account != a.ID || po.Amount.Commodity != commodity {
+						continue
+					}
+					if bal.Sign() == 0 {
+						since = en.Date
+					}
+					bal.Add(bal, po.Amount.Value.Rat())
+					if bal.Sign() == 0 {
+						since = ""
+					}
 				}
 			}
+			r := receivableRow{Account: a.ID, Commodity: commodity, Balance: bal.FloatString(2), Since: since}
+			if t, e := time.Parse("2006-01-02", since); e == nil {
+				r.AgeDays = int(time.Since(t).Hours() / 24)
+			}
+			out = append(out, r)
 		}
-		r := receivableRow{Account: a.ID, Balance: bal.FloatString(2), Since: since}
-		if t, e := time.Parse("2006-01-02", since); e == nil {
-			r.AgeDays = int(time.Since(t).Hours() / 24)
-		}
-		out = append(out, r)
 	}
 	return out
 }
