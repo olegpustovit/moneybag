@@ -212,6 +212,7 @@ th { color:var(--text2); font-weight:600; }
 .account-form { display:flex; flex-direction:column; gap:.75rem; }
 .account-form .account-close { flex-direction:row; align-items:center; }
 .account-groups .table-scroll { position:relative; }
+.budget-loading-controls > div { display:grid; gap:4px; width:9rem; font-size:.8rem; }.budget-loading-controls .skeleton-bar { height:32px; }.budget-loading-summary > div { width:8rem; }.budget-loading-summary .skeleton-bar { height:24px; }.budget-loading-bars { display:grid; gap:20px; margin:20px 0; }.budget-loading-bars .skeleton-bar { height:12px; }.budget-loading-table table { min-width:720px; table-layout:fixed; }
 .budget-controls, .month-step { display:flex; flex-wrap:wrap; gap:.75rem; align-items:end; }
 .budget-controls { margin-bottom:1.5rem; }
 .budget-controls label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }

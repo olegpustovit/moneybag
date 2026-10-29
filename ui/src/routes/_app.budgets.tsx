@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { DataTable } from '../features/dashboard/data-table'
 import { compareDecimals } from '../features/dashboard/decimal-sort'
@@ -16,8 +17,12 @@ import type { BudgetGetOutput, BudgetSetLineInput } from '../lib/tools'
 type Line = NonNullable<BudgetGetOutput['lines']>[number]
 const schema=z.object({month:z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional().catch(undefined),window:z.enum(['3','6','12']).optional().catch(undefined),current:z.boolean().optional().catch(undefined),sort:tableSort})
 const budgetQuery=(session:Session,month:string|undefined,window:string|undefined,current:boolean|undefined) => queryOptions({queryKey:['budget',session.user.id,month,window,current],queryFn:() => tool(session,'budget_get',{month,window:{months:Number(window ?? '6'),include_current:current ?? false}})})
-export const Route=createFileRoute('/_app/budgets')({validateSearch:schema,loaderDeps:({search}) => ({month:search.month,window:search.window,current:search.current}),loader:({context,deps}) => context.queryClient.query({...budgetQuery(context.session,deps.month,deps.window,deps.current),staleTime:'static'}),pendingComponent:() => <section aria-busy="true"><h1>Budgets</h1><p>Loading budget…</p></section>,errorComponent:BudgetError,component:Budgets})
-function BudgetError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load budgets</h1><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
+export const Route=createFileRoute('/_app/budgets')({validateSearch:schema,loaderDeps:({search}) => ({month:search.month,window:search.window,current:search.current}),loader:({context,deps}) => context.queryClient.query({...budgetQuery(context.session,deps.month,deps.window,deps.current),staleTime:'static'}),pendingMs:150,pendingMinMs:300,pendingComponent:BudgetPending,errorComponent:BudgetError,component:Budgets})
+function BudgetPending() {
+ const columns=['Name','Limit EUR','Actual','Average','Status','Explicit accounts']
+ return <section role="status" aria-busy="true"><span className="sr-only">Loading budgets…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / BUDGETS</p><h1>Budgets</h1><p className="description">Monthly spending against your limits.</p></div><Skeleton className="skeleton-bar journal-loading-action"/></header><div aria-hidden="true"><div className="budget-controls budget-loading-controls">{['Month','Average window'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}</div><section className="budget-summary budget-loading-summary">{['Spent','Budget','Average'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}</section><section className="budget-panel"><h2>Spending by line</h2><div className="budget-loading-bars">{Array.from({length:4},(_,index) => <Skeleton key={index} className="skeleton-bar"/>)}</div></section><section className="budget-panel"><h2>Budget lines</h2><div className="skeleton-table budget-loading-table"><table><thead><tr>{columns.map(label => <th key={label}>{label}</th>)}</tr></thead><tbody>{Array.from({length:8},(_,row) => <tr key={row}>{columns.map((label,index) => <td key={label}><Skeleton className={`skeleton-bar ${index>=1 && index<=3 ? 'numeric' : ''}`}/></td>)}</tr>)}</tbody></table></div></section></div></section>
+}
+function BudgetError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error" role="alert"><h1>Could not load budgets</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
 const euro=new Intl.NumberFormat('en-IE',{style:'currency',currency:'EUR'})
 function stepMonth(month:string,amount:number) {const [year,part]=month.split('-').map(Number); const date=new Date(Date.UTC(year,part-1+amount,1));return `${date.getUTCFullYear()}-${String(date.getUTCMonth()+1).padStart(2,'0')}`}
 function Budgets() {
