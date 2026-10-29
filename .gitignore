@@ -10,3 +10,6 @@ test-results/
 *.archive*
 *.key
 core
+ui/dist/
+backend/cmd/api/handlers/dist/*
+!backend/cmd/api/handlers/dist/.keep

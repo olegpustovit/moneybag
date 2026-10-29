@@ -2,6 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${MONEYBAG_DEPLOY_HOST:=oracle-vm}"
+make build
 release="$(git rev-parse --short=12 HEAD)-$(date -u +%Y%m%d%H%M%S)"
 target=/home/snowbear/ci/moneybag
 (cd backend && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w -X main.version=$release" -o bin/moneybag ./cmd/api)

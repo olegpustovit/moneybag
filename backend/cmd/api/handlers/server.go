@@ -45,8 +45,8 @@ func parseTemplates() (*template.Template, error) {
 }
 
 type Config struct {
-	PublicURL, SetupToken, Version string
-	Toolsets                       map[string]bool
+	PublicURL, SetupToken, Version, UI string
+	Toolsets                           map[string]bool
 }
 type Handler struct {
 	authLimit      authLimiter
@@ -120,7 +120,7 @@ func (h *Handler) security(w http.ResponseWriter) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
 }
 func (h *Handler) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -135,6 +135,9 @@ func (h *Handler) Handler() http.Handler {
 		respond(w, 200, map[string]string{"status": "ok", "version": h.cfg.Version})
 	})
 	mux.HandleFunc("GET /assets/{file}", func(w http.ResponseWriter, r *http.Request) {
+		if h.cfg.UI == "spa" && serveUIAsset(w, r) {
+			return
+		}
 		requested := r.PathValue("file")
 		name := ""
 		immutable := false
@@ -202,7 +205,19 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /api/imports", h.apiImports)
 	mux.HandleFunc("GET /api/settings", h.apiSettings)
 	mux.HandleFunc("GET /api/consistency", h.consistency)
-	mux.HandleFunc("GET /", h.page)
+	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+		mux.HandleFunc(method+" /api/", func(w http.ResponseWriter, _ *http.Request) {
+			respond(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+		})
+	}
+	for _, prefix := range []string{"GET /mcp", "GET /mcp/", "GET /oauth/", "GET /previews/"} {
+		mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
+	}
+	if h.cfg.UI == "spa" {
+		mux.HandleFunc("GET /", serveUI)
+	} else {
+		mux.HandleFunc("GET /", h.page)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.security(w)
 		w.Header().Set("Cache-Control", "no-store")

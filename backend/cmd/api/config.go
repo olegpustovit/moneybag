@@ -10,9 +10,9 @@ import (
 )
 
 type config struct {
-	Listen, PublicURL, MongoURI, MongoDB, SetupToken, LogFormat, Chromium string
-	Toolsets                                                              map[string]bool
-	SecretKey                                                             []byte
+	Listen, PublicURL, MongoURI, MongoDB, SetupToken, LogFormat, Chromium, UI string
+	Toolsets                                                                  map[string]bool
+	SecretKey                                                                 []byte
 }
 
 func env(key, def string) string {
@@ -35,7 +35,10 @@ func loadConfig() (config, error) {
 		}
 		return def
 	}
-	c := config{Listen: env("LISTEN", "127.0.0.1:6459"), PublicURL: strings.TrimRight(env("PUBLIC_URL", "https://moneybag.microapps.space"), "/"), MongoURI: env("MONGO_URI", "mongodb://127.0.0.1:27017/moneybag"), MongoDB: env("MONGO_DB", "moneybag"), SetupToken: env("SETUP_TOKEN", ""), LogFormat: env("LOG_FORMAT", "text"), Chromium: env("CHROMIUM_BIN", "")}
+	c := config{Listen: env("LISTEN", "127.0.0.1:6459"), PublicURL: strings.TrimRight(env("PUBLIC_URL", "https://moneybag.microapps.space"), "/"), MongoURI: env("MONGO_URI", "mongodb://127.0.0.1:27017/moneybag"), MongoDB: env("MONGO_DB", "moneybag"), SetupToken: env("SETUP_TOKEN", ""), LogFormat: env("LOG_FORMAT", "text"), Chromium: env("CHROMIUM_BIN", ""), UI: env("UI", "legacy")}
+	if c.UI != "legacy" && c.UI != "spa" {
+		return c, fmt.Errorf("MONEYBAG_UI must be legacy or spa")
+	}
 	if _, _, e := net.SplitHostPort(c.Listen); e != nil {
 		return c, fmt.Errorf("MONEYBAG_LISTEN must be host:port")
 	}

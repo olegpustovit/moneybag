@@ -48,6 +48,11 @@ func run() error {
 	if e != nil {
 		return e
 	}
+	if cfg.UI == "spa" {
+		if e := handlers.ValidateSPA(); e != nil {
+			return e
+		}
+	}
 	var handler slog.Handler = slog.NewTextHandler(os.Stdout, nil)
 	if cfg.LogFormat == "json" {
 		handler = slog.NewJSONHandler(os.Stdout, nil)
@@ -134,7 +139,7 @@ func run() error {
 	defer stopPrewarm()
 	stopJobs := startJobs(ctx, services, log)
 	defer stopJobs()
-	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
+	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets, UI: cfg.UI}, services, auth, bookRepo, client)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
 	compress, e := handlers.Compression()
 	if e != nil {
