@@ -120,7 +120,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	first.Values["value"].(map[string]any)["value"] = float64(999)
 	first.Values["table"].(map[string]any)["rows"].([]map[string]any)[0]["c0"].(map[string]any)["v"] = float64(999)
 	reads.Store(0)
-	second, err := service.Preview(ctx, p, "sample", "published", nil)
+	second, err := service.Preview(ctx, p, "sample", "published", map[string]any{})
 	if err != nil || second.Values["value"].(map[string]any)["value"] != float64(1) || second.Values["table"].(map[string]any)["rows"].([]map[string]any)[0]["c0"].(map[string]any)["v"] != float64(1) || reader.calls.Load() != 1 || reads.Load() > 1 {
 		t.Fatalf("warm preview: %v, %v, builds=%d reads=%d", second.Values, err, reader.calls.Load(), reads.Load())
 	}
@@ -136,6 +136,10 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	fresh, err := service.Preview(ctx, p, "sample", "published", nil)
 	if err != nil || fresh.Values["value"].(map[string]any)["value"] != float64(3) || reader.calls.Load() != 2 {
 		t.Fatalf("post-write preview: %v, %v, builds=%d", fresh.Values, err, reader.calls.Load())
+	}
+	_, err = service.Preview(ctx, p, "sample", "published", map[string]any{"from": "2026-01-01"})
+	if err != nil || reader.calls.Load() != 3 {
+		t.Fatalf("parameter override must use a separate snapshot: %v, builds=%d", err, reader.calls.Load())
 	}
 	bookRepo := ledger.NewMongoRepository(db)
 	if err := bookRepo.Init(ctx, p); err != nil {

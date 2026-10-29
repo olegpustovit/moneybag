@@ -438,6 +438,9 @@ func (s *Service) Preview(ctx context.Context, p principal.Principal, id, versio
 		return Rendered{}, err
 	}
 	ctx = expressions.WithVolatility(reqcache.With(ctx))
+	if len(params) == 0 {
+		params = nil
+	}
 	key := struct {
 		Version string
 		Params  map[string]any
