@@ -251,7 +251,7 @@ func evalProgram(ctx context.Context, src string, p cel.Program, env any) (Resul
 	if types.IsError(out) || types.IsUnknown(out) {
 		return Result{}, fmt.Errorf("expression failed")
 	}
-	native, err := out.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+	native, err := nativeValue(out)
 	if err != nil {
 		return Result{}, fmt.Errorf("convert CEL result: %w", err)
 	}
@@ -259,5 +259,34 @@ func evalProgram(ctx context.Context, src string, p cel.Program, env any) (Resul
 	if details != nil && details.ActualCost() != nil {
 		cost = *details.ActualCost()
 	}
-	return Result{native.(*structpb.Value).AsInterface(), out.Type().TypeName(), cost}, nil
+	return Result{native, out.Type().TypeName(), cost}, nil
+}
+
+func nativeValue(out ref.Val) (any, error) {
+	const safeInteger = 1<<53 - 1
+	switch v := out.(type) {
+	case types.Bool:
+		return bool(v), nil
+	case types.String:
+		return string(v), nil
+	case types.Null:
+		return nil, nil
+	case types.Int:
+		if v >= -safeInteger && v <= safeInteger {
+			return float64(v), nil
+		}
+	case types.Uint:
+		if v <= safeInteger {
+			return float64(v), nil
+		}
+	case types.Double:
+		if !math.IsNaN(float64(v)) && !math.IsInf(float64(v), 0) {
+			return float64(v), nil
+		}
+	}
+	native, err := out.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+	if err != nil {
+		return nil, err
+	}
+	return native.(*structpb.Value).AsInterface(), nil
 }

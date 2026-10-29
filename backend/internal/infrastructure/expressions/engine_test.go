@@ -1,8 +1,12 @@
 package expressions
 
 import (
+	"cel.dev/cel-go/common/types"
+	"cel.dev/cel-go/common/types/ref"
 	"context"
+	"google.golang.org/protobuf/types/known/structpb"
 	"maps"
+	"math"
 	"reflect"
 	"slices"
 	"strings"
@@ -140,5 +144,32 @@ func TestRowActivationMatchesCopiedBindings(t *testing.T) {
 	}
 	if vars["row"].(map[string]any)["amount"] != 99.0 {
 		t.Fatal("row bindings were mutated")
+	}
+}
+
+func TestNativeValueMatchesProtobufConversion(t *testing.T) {
+	values := []ref.Val{
+		types.True, types.False, types.String("hello 世界"), types.NullValue,
+		types.Int(0), types.Int(1<<53 - 1), types.Int(1 << 53), types.Int(-1 << 53), types.Int(math.MaxInt64), types.Int(math.MinInt64),
+		types.Uint(1<<53 - 1), types.Uint(1 << 53), types.Uint(math.MaxUint64),
+		types.Double(0.1), types.Double(math.Copysign(0, -1)), types.Double(math.Inf(1)), types.Double(math.Inf(-1)), types.Double(math.NaN()),
+		types.Bytes([]byte{0, 1, 255}), types.DefaultTypeAdapter.NativeToValue([]any{1.0, "text", nil}), types.DefaultTypeAdapter.NativeToValue(map[string]any{"k": 2.0}),
+	}
+	for _, v := range values {
+		raw, wantErr := v.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+		got, gotErr := nativeValue(v)
+		if (wantErr == nil) != (gotErr == nil) {
+			t.Fatalf("%v: errors %v and %v", v, gotErr, wantErr)
+		}
+		if wantErr != nil {
+			continue
+		}
+		want := raw.(*structpb.Value).AsInterface()
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%v: got %#v (%T), want %#v (%T)", v, got, got, want, want)
+		}
+		if f, ok := want.(float64); ok && f == 0 && math.Signbit(got.(float64)) != math.Signbit(f) {
+			t.Fatalf("%v: lost zero sign", v)
+		}
 	}
 }

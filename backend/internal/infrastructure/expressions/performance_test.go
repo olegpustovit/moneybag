@@ -1,8 +1,11 @@
 package expressions
 
 import (
+	"cel.dev/cel-go/common/types"
 	"context"
+	"google.golang.org/protobuf/types/known/structpb"
 	"maps"
+	"reflect"
 	"testing"
 )
 
@@ -73,6 +76,25 @@ func BenchmarkDashboardRowActivation(b *testing.B) {
 					}
 				}
 			})
+		})
+	}
+}
+
+func BenchmarkNativeScalar(b *testing.B) {
+	value := types.Double(12.345)
+	for _, tc := range []struct {
+		name string
+		fast bool
+	}{{"protobuf", false}, {"direct", true}} {
+		b.Run(tc.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				if tc.fast {
+					_, _ = nativeValue(value)
+				} else {
+					v, _ := value.ConvertToNative(reflect.TypeOf(&structpb.Value{}))
+					_ = v.(*structpb.Value).AsInterface()
+				}
+			}
 		})
 	}
 }
