@@ -4,6 +4,7 @@ import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
 import { AccountLabel } from '../components/account-label'
 import { Amount } from '../components/amount'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
@@ -18,11 +19,18 @@ export const Route = createFileRoute('/_app/accounts')({
   validateSearch:schema,
   loaderDeps:({search}) => ({at:search.at}),
   loader:async ({context,deps}) => {await Promise.all([context.queryClient.query({...accountsQuery(context.session),staleTime:'static'}),context.queryClient.query({...balancesQuery(context.session,deps.at,undefined),staleTime:'static'})])},
-  pendingComponent:() => <section aria-busy="true"><h1>Accounts</h1><p>Loading balances…</p></section>,
+  pendingMs:150,
+  pendingMinMs:300,
+  pendingComponent:AccountsPending,
   errorComponent:AccountError,
   component:Accounts,
 })
-function AccountError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load accounts</h1><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
+function AccountsPending() {
+  const {currency='EUR'}=Route.useSearch()
+  const columns=['Account','Balances',`Value ${currency}`,'Action']
+  return <section role="status" aria-busy="true"><span className="sr-only">Loading accounts…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / ACCOUNTS</p><h1>Accounts</h1><p className="description">Balances from posted journal entries.</p></div><Skeleton className="skeleton-bar journal-loading-action"/></header><div aria-hidden="true"><div className="account-controls account-loading-controls">{['As of','Value in'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}</div><section className="account-net skeleton-kpi"><span>Net worth</span><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/></section><div className="account-loading-groups skeleton-table"><table><thead><tr>{columns.map((label,index) => <th key={label}>{index===3 ? <span className="sr-only">{label}</span> : label}</th>)}</tr></thead><tbody>{Array.from({length:8},(_,row) => <tr key={row}>{columns.map((label,index) => <td key={label}><Skeleton className={`skeleton-bar ${index===2 ? 'numeric' : ''}`}/></td>)}</tr>)}</tbody></table></div></div></section>
+}
+function AccountError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error" role="alert"><h1>Could not load accounts</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
 // Values from balances_get are rounded to cents; BigInt keeps totals exact beyond JavaScript's safe integer range.
 function total(values:(string | undefined)[]): string | undefined {
   let cents=0n

@@ -195,6 +195,7 @@ th { color:var(--text2); font-weight:600; }
 .entry-form label { display:flex; flex-direction:column; gap:.25rem; }
 .entry-form fieldset { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.5rem; border:1px solid var(--border); padding:.75rem; }
 .entry-form .journal-check { flex-direction:row; align-items:center; }
+.account-loading-controls > div { display:grid; gap:4px; width:8rem; font-size:.8rem; }.account-loading-controls .skeleton-bar { height:32px; }.account-net.skeleton-kpi .skeleton-bar:nth-child(2) { width:60%; height:30px; }.account-net.skeleton-kpi .skeleton-bar:nth-child(3) { width:35%; }.account-loading-groups table { table-layout:fixed; }
 .account-controls { display:flex; gap:.75rem; flex-wrap:wrap; align-items:end; margin-bottom:1.5rem; }
 .account-controls label, .account-form label { display:flex; flex-direction:column; gap:.25rem; font-size:.8rem; }
 .account-controls select, .account-form select, .journal-filters select { border:1px solid var(--border); background:var(--background); min-height:2rem; padding:0 .5rem; }
