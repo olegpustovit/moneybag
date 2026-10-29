@@ -1,4 +1,4 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useRef, useState, type FormEvent, type KeyboardEvent } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
@@ -33,8 +33,21 @@ function Journal() {
   const names = new Map(accounts.map((account) => [account.id, account.name]))
   const rows = entries.data?.pages.flatMap((page) => page.items ?? []) ?? []
   const scrollRef = useRef<HTMLDivElement>(null)
+  const searchRef = useRef<HTMLInputElement>(null)
+  const [focus,setFocus]=useState({row:0,col:0})
   const virtualizer = useVirtualizer({ count:rows.length, getScrollElement:() => scrollRef.current, estimateSize:() => 32, overscan:12 })
   const virtual = virtualizer.getVirtualItems()
+  function tableKey(event:KeyboardEvent<HTMLTableElement>) {
+    if(event.key==='/' && !event.ctrlKey && !event.metaKey && !event.altKey) {event.preventDefault();searchRef.current?.focus();return}
+    if(!(event.target instanceof HTMLTableCellElement))return
+    const row=Number(event.target.parentElement?.dataset.row),col=event.target.cellIndex
+    if(event.key==='Enter') {event.preventDefault();const entry=rows[row];if(entry)void navigate({search:(old) => ({...old,entry:entry.id})});return}
+    const move:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}
+    const delta=move[event.key];if(!delta)return
+    event.preventDefault();const nextRow=row+delta[0],nextCol=col+delta[1]
+    const target=event.currentTarget.querySelector<HTMLTableCellElement>(`tbody tr[data-row="${nextRow}"] td:nth-child(${nextCol+1})`)
+    if(target){target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'})}
+  }
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const data = new FormData(event.currentTarget)
     const value = (key:string) => String(data.get(key) || '') || undefined
@@ -43,13 +56,13 @@ function Journal() {
   }
   return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / JOURNAL</p><h1>Journal</h1><p className="description">Entries and their postings.</p></div><Button onClick={() => void navigate({search:(old) => ({...old,new:true,entry:undefined})})}>New entry</Button></header>
     <form className="journal-filters" key={JSON.stringify(filters)} onSubmit={submit}>
-      <label>Search<Input name="text" type="search" defaultValue={search.text} maxLength={200}/></label><label>Account<Input name="account" list="journal-accounts" defaultValue={search.account}/><datalist id="journal-accounts">{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</datalist></label><label>Tag<Input name="tag" defaultValue={search.tag}/></label><label>From<Input name="from" type="date" defaultValue={search.from}/></label><label>To<Input name="to" type="date" defaultValue={search.to}/></label><label>Status<select name="status" defaultValue={search.status ?? ''}><option value="">All</option><option value="draft">Draft</option><option value="posted">Posted</option></select></label><label className="journal-check"><input name="effective" type="checkbox" defaultChecked={search.effective}/> Effective only</label><Button type="submit" variant="outline" size="sm">Apply filters</Button>
+      <label>Search<Input ref={searchRef} name="text" type="search" defaultValue={search.text} maxLength={200}/></label><label>Account<Input name="account" list="journal-accounts" defaultValue={search.account}/><datalist id="journal-accounts">{accounts.map((account) => <option value={account.id} key={account.id}>{account.name}</option>)}</datalist></label><label>Tag<Input name="tag" defaultValue={search.tag}/></label><label>From<Input name="from" type="date" defaultValue={search.from}/></label><label>To<Input name="to" type="date" defaultValue={search.to}/></label><label>Status<select name="status" defaultValue={search.status ?? ''}><option value="">All</option><option value="draft">Draft</option><option value="posted">Posted</option></select></label><label className="journal-check"><input name="effective" type="checkbox" defaultChecked={search.effective}/> Effective only</label><Button type="submit" variant="outline" size="sm">Apply filters</Button>
     </form>
     {entries.isPending ? <p aria-busy="true">Loading entries…</p> : entries.isError && rows.length === 0 ? <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.refetch()}>Retry</Button></div> : rows.length === 0 ? <p className="settings-empty">No entries match these filters.</p> : <div ref={scrollRef} className="journal-scroll" role="region" aria-label="Journal entries" tabIndex={0} onScroll={() => { const element=scrollRef.current; if (element && element.scrollHeight-element.scrollTop-element.clientHeight < 320 && entries.hasNextPage && !entries.isFetching) void entries.fetchNextPage() }}>
-      <table className="journal-table"><thead><tr><th aria-sort={search.sort === 'date' ? 'ascending' : search.sort === '-date' ? 'descending' : 'none'}><button type="button" onClick={() => {scrollRef.current?.scrollTo(0,0);void navigate({search:(old) => ({...old,sort:old.sort==='date' ? '-date' : 'date'})})}}>Date{search.sort === 'date' ? ' ↑' : search.sort === '-date' ? ' ↓' : ''}</button></th><th>Payee</th><th>Accounts</th><th className="numeric">Posting amount</th><th>Status</th><th>Tags</th></tr></thead><tbody>
+      <table className="journal-table" onKeyDown={tableKey}><thead><tr><th aria-sort={search.sort === 'date' ? 'ascending' : search.sort === '-date' ? 'descending' : 'none'}><button type="button" onClick={() => {scrollRef.current?.scrollTo(0,0);void navigate({search:(old) => ({...old,sort:old.sort==='date' ? '-date' : 'date'})})}}>Date{search.sort === 'date' ? ' ↑' : search.sort === '-date' ? ' ↓' : ''}</button></th><th>Payee</th><th>Accounts</th><th className="numeric">Posting amount</th><th>Status</th><th>Tags</th></tr></thead><tbody>
         {virtual.length > 0 && virtual[0].start > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:virtual[0].start,padding:0,border:0}}/></tr>}
         {/* shortcut: amounts use one posting until main-commodity selection is defined. */}
-        {virtual.map((item) => { const entry=rows[item.index]; const amount=(entry.postings?.find((posting) => search.account && posting.account === search.account) ?? entry.postings?.[0])?.amount; return <tr key={entry.id} onClick={() => void navigate({ search:(old) => ({...old,entry:entry.id}) })}><td><button className="journal-entry-link" onClick={(event) => { event.stopPropagation(); void navigate({ search:(old) => ({...old,entry:entry.id}) }) }}>{entry.date}</button></td><td>{entry.payee || '—'}</td><td>{(entry.postings ?? []).map((posting) => names.get(posting.account) || posting.account).join(', ')}</td><td className="numeric">{amount ? `${amount.v.replace(/^-/, '−')} ${amount.c}` : '—'}</td><td>{entry.status}</td><td>{entry.tags?.join(', ') || '—'}</td></tr> })}
+        {virtual.map((item) => { const entry=rows[item.index]; const amount=(entry.postings?.find((posting) => search.account && posting.account === search.account) ?? entry.postings?.[0])?.amount; const cells=[<button className="journal-entry-link" onClick={(event) => { event.stopPropagation(); void navigate({ search:(old) => ({...old,entry:entry.id}) }) }}>{entry.date}</button>,entry.payee || '—',(entry.postings ?? []).map((posting) => names.get(posting.account) || posting.account).join(', '),amount ? `${amount.v.replace(/^-/, '−')} ${amount.c}` : '—',entry.status,entry.tags?.join(', ') || '—'];const activeRow=virtual.some(v => v.index===focus.row) ? focus.row : virtual[0]?.index;return <tr key={entry.id} data-row={item.index} onClick={() => void navigate({ search:(old) => ({...old,entry:entry.id}) })}>{cells.map((cell,col) => <td key={col} className={col===3 ? 'numeric' : undefined} tabIndex={item.index===activeRow && col===focus.col ? 0 : -1} onFocus={(event) => {if(event.target===event.currentTarget)setFocus({row:item.index,col})}}>{cell}</td>)}</tr> })}
         {virtual.length > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:Math.max(0,virtualizer.getTotalSize()-virtual[virtual.length-1].end),padding:0,border:0}}/></tr>}
       </tbody></table>{entries.isFetchingNextPage && <p>Loading more entries…</p>}{entries.isFetchNextPageError && <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.fetchNextPage()}>Retry</Button></div>}{entries.hasNextPage && <Button variant="outline" size="sm" disabled={entries.isFetching} onClick={() => void entries.fetchNextPage()}>Load more</Button>}
     </div>}
