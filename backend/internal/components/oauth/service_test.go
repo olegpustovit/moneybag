@@ -1,8 +1,20 @@
 package oauth
 
 import (
+	"context"
+	"errors"
 	"testing"
+
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
+
+func TestAgentNamesRequiresRead(t *testing.T) {
+	service := &Service{}
+	_, err := service.AgentNames(context.Background(), principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"})
+	if !errors.Is(err, principal.ErrForbidden) {
+		t.Fatalf("missing ledger scope: %v", err)
+	}
+}
 
 func TestRedirectAllowlistAndPKCE(t *testing.T) {
 	for _, s := range []string{"https://chatgpt.com@evil.com/cb", "https://chatgpt.com/cb#fragment", "http://chatgpt.com/cb", "//chatgpt.com/cb", "javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "https:///nohost", "ws://localhost/cb"} {

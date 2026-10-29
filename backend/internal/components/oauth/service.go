@@ -433,6 +433,46 @@ func (s *Service) Grants(ctx context.Context, p principal.Principal) ([]Grant, e
 	e = cur.All(ctx, &out)
 	return out, e
 }
+
+type AgentName struct {
+	ClientID   string `json:"client_id"`
+	ClientName string `json:"client_name"`
+}
+
+// AgentNames includes expired and revoked grants so past audit events remain identifiable.
+func (s *Service) AgentNames(ctx context.Context, p principal.Principal) ([]AgentName, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return nil, err
+	}
+	cur, err := s.repo.db.Collection("oauth_grants").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetProjection(bson.M{"client_id": 1, "client_name": 1, "created_at": 1}))
+	if err != nil {
+		return nil, fmt.Errorf("find activity agents: %w", err)
+	}
+	defer cur.Close(ctx)
+	latest := map[string]Grant{}
+	for cur.Next(ctx) {
+		var grant Grant
+		if err := cur.Decode(&grant); err != nil {
+			return nil, fmt.Errorf("decode activity agent: %w", err)
+		}
+		if grant.ClientID == "" || grant.ClientName == "" {
+			continue
+		}
+		old, found := latest[grant.ClientID]
+		if !found || grant.CreatedAt.After(old.CreatedAt) || grant.CreatedAt.Equal(old.CreatedAt) && grant.ID > old.ID {
+			latest[grant.ClientID] = grant
+		}
+	}
+	if err := cur.Err(); err != nil {
+		return nil, fmt.Errorf("read activity agents: %w", err)
+	}
+	out := make([]AgentName, 0, len(latest))
+	for _, grant := range latest {
+		out = append(out, AgentName{ClientID: grant.ClientID, ClientName: grant.ClientName})
+	}
+	slices.SortFunc(out, func(a, b AgentName) int { return strings.Compare(a.ClientID, b.ClientID) })
+	return out, nil
+}
 func (s *Service) RevokeGrant(ctx context.Context, p principal.Principal, id string) error {
 	r, e := s.repo.db.Collection("oauth_grants").UpdateOne(ctx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"revoked": true}})
 	if e == nil && r.MatchedCount != 1 {

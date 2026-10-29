@@ -107,3 +107,17 @@ func (h *Handler) apiSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	respond(w, http.StatusOK, map[string]any{"feeds": feeds, "agents": agents})
 }
+
+func (h *Handler) apiActivityAgents(w http.ResponseWriter, r *http.Request) {
+	p, _, err := h.session(r)
+	if err != nil {
+		respond(w, http.StatusUnauthorized, map[string]string{"error": "sign in to continue"})
+		return
+	}
+	agents, err := h.oauth.AgentNames(r.Context(), p)
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load activity agents"})
+		return
+	}
+	respond(w, http.StatusOK, map[string]any{"agents": agents})
+}

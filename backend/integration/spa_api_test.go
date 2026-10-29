@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
@@ -17,9 +18,11 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.Principal, services mcpserver.Services) {
+func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.Principal, services mcpserver.Services, db *mongo.Database) {
 	t.Helper()
 	user, err := services.Identity.User(ctx, p.UserID)
 	if err != nil {
@@ -364,7 +367,21 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatal("revoked editor evaluate", code)
 		}
 	}
-	for _, path := range []string{"/api/session", "/api/imports", "/api/settings", "/api/expr/catalog"} {
+	_, err = db.Collection("oauth_grants").InsertMany(ctx, []any{
+		bson.M{"_id": "activity-old", "user_id": p.UserID, "client_id": "activity-client", "client_name": "Old name", "created_at": time.Unix(1, 0), "revoked": true, "expires_at": time.Unix(2, 0)},
+		bson.M{"_id": "activity-new", "user_id": p.UserID, "client_id": "activity-client", "client_name": "Former agent", "created_at": time.Unix(3, 0), "revoked": true, "expires_at": time.Unix(4, 0)},
+		bson.M{"_id": "activity-blank", "user_id": p.UserID, "client_id": "activity-client", "client_name": "", "created_at": time.Unix(5, 0), "revoked": true, "expires_at": time.Unix(6, 0)},
+		bson.M{"_id": "activity-expired", "user_id": p.UserID, "client_id": "expired-client", "client_name": "Expired agent", "created_at": time.Unix(4, 0), "revoked": false, "expires_at": time.Unix(6, 0)},
+		bson.M{"_id": "activity-other", "user_id": "other-user", "client_id": "private-client", "client_name": "Private name", "created_at": time.Unix(7, 0)},
+		bson.M{"_id": "activity-overlap", "user_id": "other-user", "client_id": "activity-client", "client_name": "Other user's name", "created_at": time.Unix(8, 0)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = db.Collection("oauth_grants").DeleteMany(context.Background(), bson.M{"_id": bson.M{"$in": []string{"activity-old", "activity-new", "activity-blank", "activity-expired", "activity-other", "activity-overlap"}}})
+	})
+	for _, path := range []string{"/api/session", "/api/imports", "/api/settings", "/api/activity/agents", "/api/expr/catalog"} {
 		status, _, headers := request("GET", path, nil, false, false, true)
 		if status != 401 || headers.Get("Cache-Control") != "no-store" {
 			t.Fatalf("%s unauthenticated: %d", path, status)
@@ -388,6 +405,28 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			}
 			if _, ok := body["feeds"]; !ok {
 				t.Fatalf("settings: %v", body)
+			}
+			for _, item := range body["agents"].([]any) {
+				if agent := item.(map[string]any); agent["client_id"] == "activity-client" || agent["client_id"] == "expired-client" {
+					t.Fatalf("inactive agent in settings: %v", agent)
+				}
+			}
+		case "/api/activity/agents":
+			found, expired := false, false
+			for _, item := range body["agents"].([]any) {
+				agent := item.(map[string]any)
+				if len(agent) != 2 || agent["client_id"] == "private-client" {
+					t.Fatalf("activity agent leak: %v", agent)
+				}
+				if agent["client_id"] == "activity-client" && agent["client_name"] == "Former agent" {
+					found = true
+				}
+				if agent["client_id"] == "expired-client" && agent["client_name"] == "Expired agent" {
+					expired = true
+				}
+			}
+			if !found || !expired {
+				t.Fatalf("historical agent missing: %v", body)
 			}
 		case "/api/expr/catalog":
 			if len(body["functions"].([]any)) == 0 || len(body["aggregates"].([]any)) == 0 {

@@ -66,7 +66,7 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 		t.Fatal("resource metadata", meta, e)
 	}
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	testSPAAPI(t, ctx, endpoint, p, s)
+	testSPAAPI(t, ctx, endpoint, p, s, db)
 	for path, want := range map[string]int{"oauth-authorization-server": 200, "oauth-authorization-server/mcp": 200, "oauth-protected-resource": 200, "openid-configuration": 404, "unknown/doc": 404} {
 		r, e := noRedirect.Get(endpoint + "/.well-known/" + path)
 		if e != nil {
