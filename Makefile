@@ -7,3 +7,4 @@ backend:
 build: ui
 	cd backend && go build -o bin/moneybag-local ./cmd/api
 check: ui backend
+	cd ui && bun run test

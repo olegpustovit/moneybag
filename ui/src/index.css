@@ -332,3 +332,11 @@ th { color:var(--text2); font-weight:600; }
 .dashboard-editor-sheet .setting-actions { flex-wrap: wrap; }
 .dashboard-editor-sheet .query-map { min-width: 0; }
 @media (max-width: 480px) { .dashboard-editor-sheet .query-create { flex-wrap: wrap; } .dashboard-editor-sheet .query-create label { flex-basis: 40%; } }
+.range-dialog { width:min(46rem, calc(100% - 2rem)); max-width:46rem; max-height:90vh; overflow:auto; }
+.range-presets, .range-inputs { display:flex; flex-wrap:wrap; gap:.5rem; }
+.range-inputs label { display:flex; align-items:center; gap:.5rem; }
+.range-inputs input { border:1px solid var(--bd); background:var(--paper); padding:.35rem; }
+.range-dialog > *, .range-dialog form, .range-dialog .rdp-root, .range-dialog .rdp-months { min-width:0; max-width:100%; }
+.range-dialog .rdp-root { --rdp-accent-color:var(--foreground); --rdp-accent-background-color:var(--muted); --rdp-day-width:min(44px, calc((100vw - 5rem)/7)); --rdp-day_button-width:var(--rdp-day-width); --rdp-day_button-border-radius:0; --rdp-range_start-color:var(--background); --rdp-range_end-color:var(--background); margin:1rem 0; }
+.range-dialog .rdp-months { flex-wrap:wrap; }
+.range-dialog .rdp-month_grid th, .range-dialog .rdp-month_grid td { padding:0; border:0; }

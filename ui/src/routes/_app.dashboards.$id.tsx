@@ -6,12 +6,15 @@ import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
 import { DashboardActions } from '../features/dashboard/actions'
 import { DashboardEditor } from '../features/dashboard/editor'
+import { DateRange } from '../features/dashboard/date-range'
 import { componentValue } from '../features/dashboard/values'
 import { Component } from '../features/dashboard/component'
 import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
 
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined)
-const searchSchema = z.object({ version: z.enum(['draft','published']).optional().catch(undefined), edit: z.union([z.literal('1'),z.literal(1)]).transform(() => '1' as const).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, month: z.string().regex(/^\d{4}-\d{2}$/).optional().catch(undefined) })
+const validDate=(value:string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value
+const date = z.string().refine(value => value==='' || validDate(value)).optional().catch(undefined)
+function readsParam(value:unknown,key:'from'|'to'|'month'):boolean {if(typeof value==='string')return new RegExp(`\\bparams\\s*(?:\\.\\s*${key}\\b|\\[\\s*['"]${key}['"]\\s*\\])`).test(value);if(Array.isArray(value))return value.some(item => readsParam(item,key));if(value && typeof value==='object')return Object.values(value).some(item => readsParam(item,key));return false}
+const searchSchema = z.object({ version: z.enum(['draft','published']).optional().catch(undefined), edit: z.union([z.literal('1'),z.literal(1)]).transform(() => '1' as const).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, all: z.boolean().optional().catch(undefined), month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional().catch(undefined) })
 export const Route = createFileRoute('/_app/dashboards/$id')({
   validateSearch: searchSchema,
   loaderDeps: ({ search }) => ({ version: search.version }),
@@ -41,21 +44,20 @@ function Dashboard() {
   const { version, head } = Route.useLoaderData()
   const { data: dashboard } = useSuspenseQuery(dashboardSpecQuery(session, id, version))
   const params: Record<string, string> = {}
-  for (const key of ['from','to','month'] as const) if (search[key]) params[key] = search[key]
+  for (const key of ['from','to','month'] as const) if (search[key] !== undefined) params[key] = search[key]
+  if(search.all){params.from='';params.to=''}
   const preview = useQuery({ ...dashboardPreviewQuery(session, id, version, params), placeholderData: keepPreviousData })
   const pages = dashboard.spec.pages ?? []
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
   const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
-  const reads = JSON.stringify({data:dashboard.spec.data, computed:dashboard.spec.computed, components:dashboard.spec.components})
-  const range = reads.includes('params.from') || reads.includes('params.to')
-  const month = reads.includes('params.month')
+  const reads={data:dashboard.spec.data,computed:dashboard.spec.computed,components:dashboard.spec.components}
+  const range = readsParam(reads,'from') || readsParam(reads,'to')
+  const month = readsParam(reads,'month')
   return <>
     <header className="page-header"><div><p className="breadcrumb"><a href="/">DASHBOARDS</a> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.author.kind === 'user' ? 'You' : dashboard.author.id}</>}</p></div>
       <div className="dashboard-toolbar">{head && head.published_version > 0 && head.draft_version > 0 && <label>Version <select value={version} onChange={(event) => void navigate({ search: (old) => ({ ...old, version: event.target.value === 'draft' ? 'draft' : 'published' }) })}><option value="published">Published</option><option value="draft">Draft</option></select></label>}<Button size="sm" onClick={() => {setSelected(undefined);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit</Button><DashboardActions session={session} id={id} head={head} onPublished={() => {void navigate({search:(old) => ({...old,version:'published',edit:undefined})});void router.invalidate()}}/></div>
     </header>
-    {(range || month) && <form key={`${search.from}-${search.to}-${search.month}`} className="range-bar" onSubmit={(event) => { event.preventDefault(); const data = new FormData(event.currentTarget); void navigate({ search: (old) => ({ ...old, from: String(data.get('from') || '') || undefined, to: String(data.get('to') || '') || undefined, month: String(data.get('month') || '') || undefined }) }) }}>
-      {range && <><label>From <input name="from" type="date" defaultValue={search.from} /></label><label>To <input name="to" type="date" defaultValue={search.to} /></label></>}{month && <label>Month <input name="month" type="month" defaultValue={search.month} /></label>}<Button type="submit" variant="outline" size="sm">Apply</Button>
-    </form>}
+    {(range || month) && <DateRange range={range} month={month} values={search} defaults={{from:typeof dashboard.spec.params?.from==='string' && validDate(dashboard.spec.params.from) ? dashboard.spec.params.from : undefined,to:typeof dashboard.spec.params?.to==='string' && validDate(dashboard.spec.params.to) ? dashboard.spec.params.to : undefined,month:typeof dashboard.spec.params?.month==='string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dashboard.spec.params.month) ? dashboard.spec.params.month : undefined}} onChange={value => void navigate({search:old => ({...old,from:value.from,to:value.to,month:value.month,all:value.all || undefined})})}/>}
     {pages.length > 1 && <nav className="page-tabs" aria-label="Dashboard pages">{pages.map((item) => <button type="button" key={item.id} className={item.id === page?.id ? 'active' : ''} aria-current={item.id === page?.id ? 'page' : undefined} onClick={() => void navigate({ search: (old) => ({ ...old, page: item.id }) })}>{item.title || item.id}</button>)}</nav>}
     {preview.isFetching && !preview.isPending && <div className="refresh-line" role="status" aria-label="Refreshing dashboard"/>}
     {preview.isPending ? <div className="dashboard-pending" aria-busy="true">Loading dashboard values…</div> : preview.isError ? <div className="dashboard-error" role="alert"><p>Could not load dashboard values.</p><Button onClick={() => void preview.refetch()}>Try again</Button></div> : !preview.data.validation.ok ? <div className="dashboard-error" role="alert"><h2>Dashboard needs attention</h2><ul>{(preview.data.validation.errors ?? []).map((issue, index) => <li key={index}>{issue.msg}</li>)}</ul></div> : <div className="dashboard-grid">{(page?.layout ?? []).flatMap((row, rowIndex) => (row.cols ?? []).map((placement, colIndex) => {

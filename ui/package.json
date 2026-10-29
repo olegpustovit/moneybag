@@ -7,6 +7,7 @@
     "dev": "vite",
     "lint": "oxlint",
     "typecheck": "tsc -b --noEmit",
+    "test": "bun run tests/date-range.test.ts",
     "build": "vite build && tsc -b --noEmit && bun scripts/check-size.ts && bun scripts/precompress.ts",
     "preview": "vite preview",
     "tools": "bash scripts/generate-tools.sh"
@@ -28,6 +29,7 @@
     "geist": "1.8.2",
     "lucide-react": "1.64.0",
     "react": "19.3.1",
+    "react-day-picker": "9.14.0",
     "react-dom": "19.3.1",
     "recharts": "3.10.1",
     "shadcn": "4.23.0",
