@@ -30,6 +30,7 @@ function Journal() {
   const entries = useInfiniteQuery(journalQuery(session, filters))
   const { data: accounts } = useSuspenseQuery(accountsQuery(session))
   const names = new Map(accounts.map((account) => [account.id, account.name]))
+  // shortcut: entries remain in sequence order until the API supports stable sorted cursors.
   const rows = entries.data?.pages.flatMap((page) => page.items ?? []) ?? []
   const scrollRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({ count:rows.length, getScrollElement:() => scrollRef.current, estimateSize:() => 32, overscan:12 })
@@ -47,6 +48,7 @@ function Journal() {
     {entries.isPending ? <p aria-busy="true">Loading entries…</p> : entries.isError && rows.length === 0 ? <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.refetch()}>Retry</Button></div> : rows.length === 0 ? <p className="settings-empty">No entries match these filters.</p> : <div ref={scrollRef} className="journal-scroll" role="region" aria-label="Journal entries" tabIndex={0} onScroll={() => { const element=scrollRef.current; if (element && element.scrollHeight-element.scrollTop-element.clientHeight < 320 && entries.hasNextPage && !entries.isFetching) void entries.fetchNextPage() }}>
       <table className="journal-table"><thead><tr><th>Date</th><th>Payee</th><th>Accounts</th><th className="numeric">Posting amount</th><th>Status</th><th>Tags</th></tr></thead><tbody>
         {virtual.length > 0 && virtual[0].start > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:virtual[0].start,padding:0,border:0}}/></tr>}
+        {/* shortcut: amounts use one posting until main-commodity selection is defined. */}
         {virtual.map((item) => { const entry=rows[item.index]; const amount=(entry.postings?.find((posting) => search.account && posting.account === search.account) ?? entry.postings?.[0])?.amount; return <tr key={entry.id} onClick={() => void navigate({ search:(old) => ({...old,entry:entry.id}) })}><td><button className="journal-entry-link" onClick={(event) => { event.stopPropagation(); void navigate({ search:(old) => ({...old,entry:entry.id}) }) }}>{entry.date}</button></td><td>{entry.payee || '—'}</td><td>{(entry.postings ?? []).map((posting) => names.get(posting.account) || posting.account).join(', ')}</td><td className="numeric">{amount ? `${amount.v.replace(/^-/, '−')} ${amount.c}` : '—'}</td><td>{entry.status}</td><td>{entry.tags?.join(', ') || '—'}</td></tr> })}
         {virtual.length > 0 && <tr aria-hidden="true"><td colSpan={6} style={{height:Math.max(0,virtualizer.getTotalSize()-virtual[virtual.length-1].end),padding:0,border:0}}/></tr>}
       </tbody></table>{entries.isFetchingNextPage && <p>Loading more entries…</p>}{entries.isFetchNextPageError && <div role="alert"><p>{entries.error.message}</p><Button onClick={() => void entries.fetchNextPage()}>Retry</Button></div>}{entries.hasNextPage && <Button variant="outline" size="sm" disabled={entries.isFetching} onClick={() => void entries.fetchNextPage()}>Load more</Button>}
