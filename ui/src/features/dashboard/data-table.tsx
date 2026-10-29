@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type KeyboardEven
 import { columnResizingFeature, columnSizingFeature, columnVisibilityFeature, createSortedRowModel, rowSortingFeature, sortFns, tableFeatures, useTable, type ColumnDef, type ColumnSizingState, type ColumnVisibilityState, type SortingState } from '@tanstack/react-table'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import type { ComponentValue } from './values'
+import { tableTotal } from './table-total'
 
 type Value = Extract<ComponentValue, { type: 'table' | 'scenario_compare' }>
 const features=tableFeatures({rowSortingFeature,sortedRowModel:createSortedRowModel(),sortFns,columnVisibilityFeature,columnSizingFeature,columnResizingFeature})
@@ -27,6 +28,7 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
   cell:({row}) => renderCell ? renderCell(row.original,column.key) : row.original[column.key]?.t ?? '—',
  })),[value.columns,renderCell])
  const filtered=useMemo(() => {const query=filter.trim().toLocaleLowerCase();return query ? value.rows.filter(row => Object.values(row).some(cell => cell.t.toLocaleLowerCase().includes(query))) : value.rows},[value.rows,filter])
+ const totals=useMemo(() => new Map(value.columns.map(column => {const values=filtered.map(row => row[column.key]?.v);return [column.key,{total:tableTotal(values,column.format),numeric:values.some(value => typeof value==='number')}] })),[filtered,value.columns])
  const table=useTable({features,columns,data:filtered,state:{sorting,columnVisibility:visibility,columnSizing:sizing},onSortingChange:setSorting,onColumnVisibilityChange:setVisibility,onColumnSizingChange:setSizing,columnResizeMode:'onEnd'})
  const rows=table.getRowModel().rows
  const virtual=useVirtualizer({count:rows.length,getScrollElement:() => scroll.current,estimateSize:() => 32,overscan:12,enabled:rows.length>200})
@@ -52,6 +54,6 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
    {top>0 && <tr aria-hidden="true"><td colSpan={table.getVisibleLeafColumns().length} style={{height:top,padding:0,border:0}}/></tr>}
    {rendered.map(({row,index}) => <tr key={row.id} data-row={index} style={rows.length>200 ? {height:32} : undefined}>{row.getVisibleCells().map((cell,col) => {const column=value.columns.find(item => item.key===cell.column.id);return <td key={cell.id} tabIndex={index===activeRow && col===Math.min(focus.col,table.getVisibleLeafColumns().length-1) ? 0 : -1} onFocus={event => {if(event.target===event.currentTarget)setFocus({row:index,col})}} title={row.original[cell.column.id]?.t} className={`${column?.align==='right' ? 'numeric ' : ''}${row.original[cell.column.id]?.tone || ''}`}><table.FlexRender cell={cell}/></td>})}</tr>)}
    {bottom>0 && <tr aria-hidden="true"><td colSpan={table.getVisibleLeafColumns().length} style={{height:bottom,padding:0,border:0}}/></tr>}
-  </tbody></table>{rows.length===0 && <p className="muted">No rows match this filter.</p>}</div>
+  </tbody>{rows.length>0 && <tfoot><tr>{table.getVisibleLeafColumns().map((column,index) => {const def=value.columns.find(item => item.key===column.id),result=totals.get(column.id),total=result?.total ?? (result?.numeric ? '—' : undefined);return <td key={column.id} title={result?.numeric && result.total===undefined ? 'Total unavailable for mixed or unsafe numeric values.' : undefined} className={def?.align==='right' ? 'numeric' : ''}>{index===0 && <strong>Total · {filtered.length} {filtered.length===1 ? 'row' : 'rows'}{total!==undefined ? ' · ' : ''}</strong>}{total}</td>})}</tr></tfoot>}</table>{rows.length===0 && <p className="muted">No rows match this filter.</p>}</div>
  </>
 }
