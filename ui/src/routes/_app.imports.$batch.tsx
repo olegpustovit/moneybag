@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useInfiniteQuery, useIsMutating, useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { createFileRoute, useBlocker, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { AccountPicker, type Account } from '../components/account-picker'
@@ -31,6 +31,7 @@ function ImportPreview({id}:{id:string}) {
  const pages=preview.data?.pages ?? [],proposed=pages.flatMap((page) => page.proposed ?? []),duplicates=pages.flatMap((page) => page.duplicates ?? []),balance=pages[0]?.statement_balance
  const [assertBalance,setAssertBalance]=useState(false),[undoOpen,setUndoOpen]=useState(false),[reason,setReason]=useState(''),[dirty,setDirty]=useState<string[]>([])
  const drafts=useRef<Record<string,Draft>>({})
+ useBlocker({shouldBlockFn:({current,next}) => current.pathname!==next.pathname && Object.keys(drafts.current).length>0 && !window.confirm('Discard unsaved import changes?'),enableBeforeUnload:() => Object.keys(drafts.current).length>0})
  const entries=useMemo(() => (preview.data?.pages ?? []).flatMap(page => [...(page.proposed ?? []).map(row => ({row,duplicate:false})),...(page.duplicates ?? []).map(row => ({row,duplicate:true}))]),[preview.data])
  const markDirty=useCallback((rowID:string,draft?:Draft) => {if(draft)drafts.current[rowID]=draft;else delete drafts.current[rowID];setDirty(old => draft ? old.includes(rowID) ? old : [...old,rowID] : old.filter(item => item!==rowID))},[])
  const editing=useIsMutating({mutationKey:['import-edit',session.user.id,id]})

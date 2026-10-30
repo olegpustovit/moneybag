@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { keepPreviousData, useQuery, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { useRef, useState } from 'react'
+import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
+import { createFileRoute, useBlocker, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
@@ -46,12 +46,21 @@ function Dashboard() {
   const router = useRouter()
   const [selected, setSelected] = useState<string>()
   const [dirty, setDirty] = useState(false)
+  const dirtyRef = useRef(false)
+  function markDirty(value:boolean) {dirtyRef.current=value;setDirty(value)}
+  useBlocker({shouldBlockFn:({current,next}) => {
+    if (!dirtyRef.current) return false
+    const leaving=current.pathname!==next.pathname || (next.routeId==='/_app/dashboards/$id' && (next.search.edit!=='1' || next.search.version!==search.version))
+    if (!leaving) return false
+    if (!window.confirm('Discard unsaved dashboard changes?')) return true
+    markDirty(false);return false
+  },enableBeforeUnload:() => dirtyRef.current})
   const { version, head } = Route.useLoaderData()
   const { data: dashboard } = useSuspenseQuery(dashboardSpecQuery(session, id, version))
   const params: Record<string, string> = {}
   for (const key of ['from','to','month'] as const) if (search[key] !== undefined) params[key] = search[key]
   if(search.all){params.from='';params.to=''}
-  const preview = useQuery({ ...dashboardPreviewQuery(session, id, version, params), placeholderData: keepPreviousData })
+  const preview = useQuery({ ...dashboardPreviewQuery(session, id, version, params), placeholderData: (previous, query) => query?.queryKey[0]==='dashboard' && query.queryKey[1]===session.user.id && query.queryKey[2]===id && query.queryKey[3]===version ? previous : undefined })
   const showSkeleton = useLoadingSkeleton(preview.isPending)
   const pages = dashboard.spec.pages ?? []
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
@@ -67,12 +76,12 @@ function Dashboard() {
     {(range || month) && <DateRange range={range} month={month} values={search} defaults={{from:typeof dashboard.spec.params?.from==='string' && validDate(dashboard.spec.params.from) ? dashboard.spec.params.from : undefined,to:typeof dashboard.spec.params?.to==='string' && validDate(dashboard.spec.params.to) ? dashboard.spec.params.to : undefined,month:typeof dashboard.spec.params?.month==='string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dashboard.spec.params.month) ? dashboard.spec.params.month : undefined}} onChange={value => void navigate({search:old => ({...old,from:value.from,to:value.to,month:value.month,all:value.all || undefined})})}/>}
     {pages.length > 1 && <nav className="page-tabs" aria-label="Dashboard pages">{pages.map((item) => <button type="button" key={item.id} className={item.id === page?.id ? 'active' : ''} aria-current={item.id === page?.id ? 'page' : undefined} onClick={() => void navigate({ search: (old) => ({ ...old, page: item.id }) })}>{item.title || item.id}</button>)}</nav>}
     {preview.isFetching && !preview.isPending && <div className="refresh-line" role="status" aria-label="Refreshing dashboard"/>}
-    {preview.isPending || showSkeleton ? <div role="status" aria-busy="true"><span className="sr-only">Loading dashboard values…</span>{showSkeleton && <DashboardSkeleton page={page} components={components}/>}</div> : preview.isError ? <div className="dashboard-error" role="alert"><p>Could not load dashboard values.</p><Button onClick={() => void preview.refetch()}>Try again</Button></div> : <>{!preview.data.validation.ok && <div className="dashboard-error" role="alert"><h2>Dashboard needs attention</h2><ul>{(preview.data.validation.errors ?? []).map((issue,index) => <li key={index}>{issue.msg}</li>)}</ul></div>}<div className="dashboard-grid">{(page?.layout ?? []).flatMap((row, rowIndex) => (row.cols ?? []).map((placement, colIndex) => {
+    {preview.isPending || showSkeleton ? <div role="status" aria-busy="true"><span className="sr-only">Loading dashboard values…</span>{showSkeleton && <DashboardSkeleton page={page} components={components}/>}</div> : preview.isError ? <div className="dashboard-error" role="alert"><p>{preview.error.message}</p><Button onClick={() => void preview.refetch()}>Try again</Button></div> : <>{!preview.data.validation.ok && <div className="dashboard-error" role="alert"><h2>Dashboard needs attention</h2><ul>{(preview.data.validation.errors ?? []).map((issue,index) => <li key={index}>{issue.msg}</li>)}</ul></div>}<div className="dashboard-grid">{(page?.layout ?? []).flatMap((row, rowIndex) => (row.cols ?? []).map((placement, colIndex) => {
       const component = components.get(placement.component)
       const parsed = componentValue.safeParse(preview.data.values[placement.component])
       const issues=(preview.data.validation.errors ?? []).filter(issue => issue.component_id===placement.component)
       return <section className="panel" key={`${rowIndex}-${colIndex}`} style={{ gridColumn: `span ${Math.max(1,Math.min(12,placement.span))}` }}><h2>{parsed.success ? parsed.data.title || component?.title || placement.component : component?.title || placement.component}</h2>{issues.length ? <div className="component-issues" role="alert">{issues.map((issue,index) => <div key={index}><p>{issue.msg}</p>{issue.expr && <pre>{issue.expr}</pre>}{issue.hint && <p>{issue.hint}</p>}</div>)}</div> : parsed.success ? <Component value={parsed.data} drilldown tableId={`dashboard:${id}:${placement.component}`} sort={search.sort_table===placement.component || !search.sort_table && tableCount===1 ? search.sort : undefined} onSortChange={sort => void navigate({search:old => ({...old,sort,sort_table:sort ? placement.component : undefined})})}/> : <p className="muted">This component could not be displayed.</p>}{component && <Button size="xs" variant="ghost" onClick={() => {setSelected(component.id);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit {component.title || component.id}</Button>}</section>
     }))}</div></>}
-    <Sheet open={search.edit==='1'} onOpenChange={(open) => {if(!open && (!dirty || window.confirm('Discard unsaved dashboard changes?'))) {setDirty(false);void navigate({search:(old) => ({...old,edit:undefined})})}}}><SheetContent className="dashboard-editor-sheet"><SheetHeader><SheetTitle>Edit dashboard</SheetTitle><SheetDescription>Save creates a new draft. The published dashboard stays unchanged.</SheetDescription></SheetHeader>{search.edit==='1' && <DashboardEditor key={`${id}-${dashboard.version}-${selected ?? ''}`} session={session} id={id} spec={dashboard.spec} initialComponent={selected} onDirty={setDirty} done={(saved) => {if(!saved && dirty && !window.confirm('Discard unsaved dashboard changes?')) return;setDirty(false);void navigate({search:(old) => ({...old,edit:undefined,version:saved ? 'draft' : old.version})});if(saved) void router.invalidate()}}/>}</SheetContent></Sheet>
+    <Sheet open={search.edit==='1'} onOpenChange={(open) => {if(!open && (!dirty || window.confirm('Discard unsaved dashboard changes?'))) {markDirty(false);void navigate({search:(old) => ({...old,edit:undefined})})}}}><SheetContent className="dashboard-editor-sheet"><SheetHeader><SheetTitle>Edit dashboard</SheetTitle><SheetDescription>Save creates a new draft. The published dashboard stays unchanged.</SheetDescription></SheetHeader>{search.edit==='1' && <DashboardEditor key={`${id}-${dashboard.version}-${selected ?? ''}`} session={session} id={id} spec={dashboard.spec} initialComponent={selected} onDirty={markDirty} done={(saved) => {if(!saved && dirty && !window.confirm('Discard unsaved dashboard changes?')) return;markDirty(false);void navigate({search:(old) => ({...old,edit:undefined,version:saved ? 'draft' : old.version})});if(saved) void router.invalidate()}}/>}</SheetContent></Sheet>
   </>
 }
