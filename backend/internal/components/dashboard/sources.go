@@ -65,11 +65,14 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 		if e != nil {
 			return nil, e
 		}
+		eligible := stable && memoizableChain(v, stack, func(id string) (View, bool) {
+			next, nextEpoch, nextStable, err := s.viewDefinition(ctx, p, id)
+			return next, err == nil && nextStable && nextEpoch == epoch
+		})
 		current, currentStable := s.Snapshots.memoEpoch(p.UserID)
-		if stable && currentStable && current == epoch && memoizableLeaf(v) {
-			rows, err = cachedLeaf(ctx, p, epoch, source, string(params), func() ([]map[string]any, error) { return s.evaluateView(ctx, p, v) })
+		if eligible && currentStable && current == epoch {
+			rows, err = cachedView(ctx, p, epoch, source, string(params), func() ([]map[string]any, error) { return s.evaluateView(ctx, p, v) })
 		} else {
-			// shortcut: nested non-leaf views bypass memoization to avoid cross-root cycles; cache after cycle-aware scheduling exists.
 			rows, err = read()
 		}
 	} else {
@@ -85,16 +88,16 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	return out, nil
 }
 
-type leafResult struct {
+type viewResult struct {
 	rows     []map[string]any
 	volatile bool
 	expires  time.Time
 }
 
-func cachedLeaf(ctx context.Context, p principal.Principal, epoch uint64, source, params string, read func() ([]map[string]any, error)) ([]map[string]any, error) {
-	result, err := reqcache.Do(ctx, fmt.Sprintf("view-leaf|%s|%d|%s|%s", p.UserID, epoch, source, params), func() (leafResult, error) {
+func cachedView(ctx context.Context, p principal.Principal, epoch uint64, source, params string, read func() ([]map[string]any, error)) ([]map[string]any, error) {
+	result, err := reqcache.Do(ctx, fmt.Sprintf("view-chain|%s|%d|%s|%s", p.UserID, epoch, source, params), func() (viewResult, error) {
 		rows, err := read()
-		return leafResult{rows, expressions.Volatile(ctx), expressions.Expiry(ctx)}, err
+		return viewResult{rows, expressions.Volatile(ctx), expressions.Expiry(ctx)}, err
 	})
 	if result.volatile {
 		expressions.MarkVolatile(ctx)

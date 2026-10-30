@@ -150,3 +150,35 @@ func memoizableLeaf(v View) bool {
 	})
 	return !volatile
 }
+
+// Only a statically acyclic chain ending in a safe leaf can share an in-flight result.
+func memoizableChain(v View, stack []string, load func(string) (View, bool)) bool {
+	path := append([]string(nil), stack...)
+	for {
+		if len(path) >= maxViewDepth {
+			return false
+		}
+		for _, id := range path {
+			if id == v.ID {
+				return false
+			}
+		}
+		path = append(path, v.ID)
+		next, nested := strings.CutPrefix(v.Query.From, "view:")
+		if !nested {
+			return memoizableLeaf(v)
+		}
+		volatile := false
+		walkExpressions(Spec{Data: map[string]Query{v.ID: v.Query}}, func(_ string, expr string) {
+			volatile = volatile || expressions.MayUseNow(expr)
+		})
+		if volatile {
+			return false
+		}
+		var ok bool
+		v, ok = load(next)
+		if !ok {
+			return false
+		}
+	}
+}

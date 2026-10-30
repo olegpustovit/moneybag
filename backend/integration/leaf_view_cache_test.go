@@ -62,10 +62,19 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []dashboard.View{{ID: "leaf", Query: dashboard.Query{From: "postings"}}, {ID: "left", Query: dashboard.Query{From: "view:leaf", Derive: map[string]string{"label": "row.payee + '-left'"}}}, {ID: "right", Query: dashboard.Query{From: "view:leaf", Derive: map[string]string{"label": "row.payee + '-right'"}}}, {ID: "cycle-a", Query: dashboard.Query{From: "view:cycle-b"}}, {ID: "cycle-b", Query: dashboard.Query{From: "view:cycle-a"}}} {
+	for _, v := range []dashboard.View{{ID: "leaf", Query: dashboard.Query{From: "postings"}}, {ID: "middle", Query: dashboard.Query{From: "view:leaf"}}, {ID: "left", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-left'"}}}, {ID: "right", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-right'"}}}, {ID: "cycle-a", Query: dashboard.Query{From: "view:cycle-b"}}, {ID: "cycle-b", Query: dashboard.Query{From: "view:cycle-a"}}} {
 		v.UserID = p.UserID
 		v.Key = p.UserID + ":" + v.ID
 		if _, err = db.Collection("views").InsertOne(ctx, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 7; i++ {
+		id, next := fmt.Sprintf("deep-%d", i), fmt.Sprintf("deep-%d", i+1)
+		if i == 6 {
+			next = "middle"
+		}
+		if _, err = db.Collection("views").InsertOne(ctx, dashboard.View{Key: p.UserID + ":" + id, UserID: p.UserID, ID: id, Query: dashboard.Query{From: "view:" + next}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -81,8 +90,8 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	if err != nil || fmt.Sprint(result.Value) != "[Example-left Example-right]" {
 		t.Fatalf("results: %v, %v", result.Value, err)
 	}
-	if got := viewReads.Load(); got != 3 {
-		t.Fatalf("view definitions read %d times, want 3", got)
+	if got := viewReads.Load(); got != 4 {
+		t.Fatalf("view definitions read %d times, want 4", got)
 	}
 	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewMongoRepository(db)))
 	if err != nil {
@@ -93,6 +102,17 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	before, err := engine.Evaluate(request, p, "data.left[0].label", map[string]dashboard.Query{"left": {From: "view:left"}}, nil)
 	if err != nil || before.Value != "Example-left" {
 		t.Fatalf("before edit: %v, %v", before.Value, err)
+	}
+	built := false
+	_, err = reqcache.Do[any](request, "view-chain|"+p.UserID+"|0|view:middle|null", func() (any, error) {
+		built = true
+		return nil, nil
+	})
+	if err != nil || built {
+		t.Fatalf("nested non-leaf was not cached: built=%t, %v", built, err)
+	}
+	if _, err = engine.Evaluate(request, p, "1", map[string]dashboard.Query{"deep": {From: "view:deep-0"}}, nil); err == nil || !strings.Contains(err.Error(), "nest deeper") {
+		t.Fatalf("cached view bypassed nesting limit: %v", err)
 	}
 	cache.Changed(p.UserID, false)
 	_, err = db.Collection("views").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": "leaf"}, bson.M{"$set": bson.M{"query": dashboard.Query{From: "postings", Derive: map[string]string{"payee": "'Changed'"}}}})

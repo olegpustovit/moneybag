@@ -266,22 +266,50 @@ func TestNestedLeafMemoizationAndVolatility(t *testing.T) {
 		expressions.MarkVolatile(first)
 		return []map[string]any{{"n": 1}}, nil
 	}
-	a, err := cachedLeaf(first, p, 0, "view:leaf", "{}", read)
+	a, err := cachedView(first, p, 0, "view:leaf", "{}", read)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := cachedLeaf(second, p, 0, "view:leaf", "{}", read)
+	b, err := cachedView(second, p, 0, "view:leaf", "{}", read)
 	if err != nil || calls.Load() != 1 || len(a) != 1 || len(b) != 1 || !expressions.Volatile(second) || !expressions.Expiry(second).Equal(expires) {
 		t.Fatalf("cache/metadata: calls=%d, expiry=%v, err=%v", calls.Load(), expressions.Expiry(second), err)
 	}
-	_, err = cachedLeaf(second, p, 0, "view:leaf", `{"from":"2025-01-01"}`, read)
+	_, err = cachedView(second, p, 0, "view:leaf", `{"from":"2025-01-01"}`, read)
 	if err != nil || calls.Load() != 2 {
 		t.Fatalf("params isolation: calls=%d, err=%v", calls.Load(), err)
 	}
 	other := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAW")
-	_, err = cachedLeaf(second, other, 0, "view:leaf", "{}", read)
+	_, err = cachedView(second, other, 0, "view:leaf", "{}", read)
 	if err != nil || calls.Load() != 3 {
 		t.Fatalf("owner isolation: calls=%d, err=%v", calls.Load(), err)
+	}
+}
+
+func TestMemoizableViewChains(t *testing.T) {
+	views := map[string]View{
+		"leaf":    {ID: "leaf", Query: Query{From: "postings"}},
+		"middle":  {ID: "middle", Query: Query{From: "view:leaf"}},
+		"now":     {ID: "now", Query: Query{From: "view:leaf", Where: "now() != null"}},
+		"unsafe":  {ID: "unsafe", Query: Query{From: "scenarios"}},
+		"a":       {ID: "a", Query: Query{From: "view:b"}},
+		"b":       {ID: "b", Query: Query{From: "view:a"}},
+		"missing": {ID: "missing", Query: Query{From: "view:missing-child"}},
+	}
+	load := func(id string) (View, bool) { v, ok := views[id]; return v, ok }
+	for _, tc := range []struct {
+		id    string
+		stack []string
+		want  bool
+	}{
+		{"leaf", nil, true}, {"middle", []string{"root"}, true},
+		{"now", nil, false}, {"unsafe", nil, false}, {"a", nil, false},
+		{"missing", nil, false}, {"middle", []string{"leaf"}, false},
+		{"middle", []string{"1", "2", "3", "4", "5", "6", "7"}, false},
+		{"middle", []string{"1", "2", "3", "4", "5", "6"}, true},
+	} {
+		if got := memoizableChain(views[tc.id], tc.stack, load); got != tc.want {
+			t.Fatalf("%s with %v: got %t, want %t", tc.id, tc.stack, got, tc.want)
+		}
 	}
 }
 
@@ -295,7 +323,7 @@ func TestNestedLeafCoalescesConcurrentReads(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, err := cachedLeaf(expressions.WithVolatility(ctx), p, 0, "view:leaf", "{}", func() ([]map[string]any, error) {
+			_, err := cachedView(expressions.WithVolatility(ctx), p, 0, "view:leaf", "{}", func() ([]map[string]any, error) {
 				if calls.Add(1) == 1 {
 					close(started)
 				}
@@ -325,7 +353,7 @@ func TestLeafMemoEpochChangesAcrossWrites(t *testing.T) {
 	if !stable {
 		t.Fatal("unexpected active write")
 	}
-	if _, err := cachedLeaf(ctx, p, epoch, "view:leaf", "{}", read); err != nil {
+	if _, err := cachedView(ctx, p, epoch, "view:leaf", "{}", read); err != nil {
 		t.Fatal(err)
 	}
 	cache.Changed(p.UserID, false)
@@ -337,7 +365,7 @@ func TestLeafMemoEpochChangesAcrossWrites(t *testing.T) {
 	if !stable || next == epoch {
 		t.Fatal("epoch did not advance")
 	}
-	rows, err := cachedLeaf(ctx, p, next, "view:leaf", "{}", read)
+	rows, err := cachedView(ctx, p, next, "view:leaf", "{}", read)
 	if err != nil || calls != 2 || rows[0]["n"] != 2 {
 		t.Fatalf("stale leaf reused: %v, %v, %d", rows, err, calls)
 	}
