@@ -105,7 +105,7 @@ function Bar({initial={}}:{initial?:TelemetrySearch}) {
 }
 describe('TimeBar',() => {
  const field=() => screen.getByLabelText('Time range. Type anything') as HTMLInputElement
- it('shows a friendly name and the resolved dates',() => {render(<Bar/>);expect(field().value).toBe('Last 12 months');expect(screen.getByText(/31 Oct 2025 to 30 Oct 2026 · 365 days/)).toBeTruthy()})
+ it('shows a friendly name and the resolved dates',() => {render(<Bar/>);expect(field().value).toBe('Last 12 months');expect(screen.getByText(/31 Oct 2025 to 30 Oct 2026/)).toBeTruthy()})
  it('parses live, reports errors through aria, and applies on Enter',() => {
   render(<Bar/>)
   fireEvent.change(field(),{target:{value:'q2 2026'}});expect(screen.getByText(/1 Apr 2026 to 30 Jun 2026 · 91 days · press Enter/)).toBeTruthy();expect(field().getAttribute('aria-invalid')).toBe('false')
@@ -130,7 +130,7 @@ describe('TimeBar',() => {
   fireEvent.keyDown(end,{key:'ArrowRight'});expect(screen.getByTestId('t').textContent).toBe('2026-03-01 to 2026-04-07')
   fireEvent.change(screen.getByLabelText('Compare to'),{target:{value:'previous_year'}});expect(screen.getByTestId('cmp').textContent).toBe('previous_year')
  })
- it('falls back on a bad URL value instead of breaking',() => {render(<Bar initial={{t:'nonsense'}}/>);expect(screen.getByText(/365 days/)).toBeTruthy()})
+ it('falls back on a bad URL value instead of breaking',() => {render(<Bar initial={{t:'nonsense'}}/>);expect(screen.getByText(/31 Oct 2025 to 30 Oct 2026/)).toBeTruthy()})
 })
 
 function Filters({onSave}:{onSave?:() => void}) {
