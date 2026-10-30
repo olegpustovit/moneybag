@@ -741,6 +741,7 @@ export interface DashboardAddComponentInput {
       y: string;
     };
     scenarios?: null | string[];
+    sparkline?: string;
     sub?: string;
     title?: string;
     tone?: string;
@@ -895,6 +896,7 @@ export interface DashboardCreateOutput {
             [k: string]: unknown;
           };
           scenarios?: null | string[];
+          sparkline?: string;
           sub?: string;
           title?: string;
           tone?: string;
@@ -1088,6 +1090,7 @@ export interface DashboardGetOutput {
             [k: string]: unknown;
           };
           scenarios?: null | string[];
+          sparkline?: string;
           sub?: string;
           title?: string;
           tone?: string;

@@ -46,6 +46,7 @@ type Component struct {
 	Title     string    `json:"title,omitempty"`
 	Value     string    `json:"value,omitempty"`
 	Delta     string    `json:"delta,omitempty"`
+	Sparkline string    `json:"sparkline,omitempty"`
 	Sub       string    `json:"sub,omitempty"`
 	Tone      string    `json:"tone,omitempty"`
 	Format    string    `json:"format,omitempty"`

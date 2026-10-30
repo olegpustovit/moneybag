@@ -24,7 +24,7 @@ export function dateParams(spec:Spec):{range:boolean;month:boolean} {
  expressions.push(...Object.values(spec.computed ?? {}))
  for(const page of spec.pages ?? [])expressions.push(...holes(page.title))
  for(const component of spec.components ?? []) {
-  expressions.push(component.value ?? '',component.delta ?? '',component.sub ?? '',component.tone ?? '',component.rows ?? '',component.label ?? '',component.actual ?? '',component.limit ?? '',component.metric ?? '',component.rule?.y ?? '',component.rule?.label ?? '',component.encoding?.x.expr ?? '',component.encoding?.y.expr ?? '',component.encoding?.color?.expr ?? '',...holes(component.title),...holes(component.md),...holes(component.sub))
+  expressions.push(component.value ?? '',component.delta ?? '',component.sparkline ?? '',component.sub ?? '',component.tone ?? '',component.rows ?? '',component.label ?? '',component.actual ?? '',component.limit ?? '',component.metric ?? '',component.rule?.y ?? '',component.rule?.label ?? '',component.encoding?.x.expr ?? '',component.encoding?.y.expr ?? '',component.encoding?.color?.expr ?? '',...holes(component.title),...holes(component.md),...holes(component.sub))
   for(const column of component.columns ?? [])expressions.push(column.value,column.tone ?? '',...holes(column.label))
  }
  return {range:expressions.some(expr => reads(expr,'from') || reads(expr,'to')),month:expressions.some(expr => reads(expr,'month'))}

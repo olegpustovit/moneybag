@@ -13,7 +13,7 @@ The screenshot is from the running application. Every amount, account and transa
 - Staged PrivatBank XLSX, Wise CSV, mapped CSV and Plaid JSON imports, with provenance, duplicate detection, resumable commits and undo.
 - Expense rules, tags, balance assertions, reconciliation and monthly budgets.
 - Typed spreadsheet tables, CEL formulas, income streams, scenario overlays and forecasts.
-- Versioned dashboards rendered as HTML/SVG, private HTML/PNG previews, publish validation, rollback and restricted dashboard sharing.
+- Versioned dashboards rendered as HTML/SVG, private HTML/PNG previews, publish validation, rollback and restricted dashboard sharing. KPI components can set `sparkline` to a CEL expression returning up to 600 finite numbers, for example `[1.0, 2.0, 1.5]`.
 - 64 typed MCP tools, eight resource definitions and five prompts. OAuth code + S256 PKCE, rotating refresh tokens and separate full/read-only endpoints.
 
 **One shared `moneybag` database serves all users.** Financial records, queries, indexes and counters are scoped by `user_id`. Production reuses the existing standalone MongoDB on oracle-vm at `127.0.0.1:27017`. The API listens on `127.0.0.1:6459`; Caddy is configured separately.

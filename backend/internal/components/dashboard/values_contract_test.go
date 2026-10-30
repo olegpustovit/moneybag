@@ -12,7 +12,7 @@ import (
 
 func TestTemplateComponentValuesContract(t *testing.T) {
 	components := []Component{
-		{ID: "k", Type: "kpi", Value: "1234.0", Format: "eur0", Tone: "'neg'", Sub: "'sub'", Delta: "-5.0"},
+		{ID: "k", Type: "kpi", Value: "1234.0", Format: "eur0", Tone: "'neg'", Sub: "'sub'", Delta: "-5.0", Sparkline: "[1.0, 3.0, 2.0]"},
 		{ID: "kup", Type: "kpi", Value: "1", Delta: "2"},
 		{ID: "kzero", Type: "kpi", Value: "1", Delta: "0"},
 		{ID: "ktext", Type: "kpi", Value: "1", Delta: "'steady'"},
@@ -39,7 +39,7 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := (&Engine{Expr: expr, Reader: fixtureReader{}}).Execute(context.Background(), principal.Principal{}, Spec{Data: map[string]Query{"items": {From: "journal"}}, Pages: []Page{{ID: "main"}}, Components: components})
+	out, err := (&Engine{Expr: expr, Reader: fixtureReader{}}).Execute(context.Background(), principal.Principal{}, Spec{Data: map[string]Query{"items": {From: "journal"}}, Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{Span: 12, Component: "k"}}}}}}, Components: components})
 	if err != nil || !out.Validation.OK {
 		t.Fatalf("render: %v %+v", err, out.Validation)
 	}
@@ -54,6 +54,9 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 	}
 	if values["k"]["sub"] != "sub · €−5" || values["k"]["sub_text"] != "sub" || values["k"]["delta"].(map[string]any)["direction"] != "down" || values["k"]["type"] != "kpi" || values["k"]["value"] != float64(1234) || values["k"]["text"] != "€1,234" || values["k"]["tone"] != "neg" {
 		t.Fatal(values["k"])
+	}
+	if got := values["k"]["sparkline"].([]any); len(got) != 3 || got[0] != float64(1) || got[2] != float64(2) || !strings.Contains(out.HTML, `aria-label="Trend: €1, €3, €2"`) {
+		t.Fatal("sparkline contract or accessible preview", got)
 	}
 	for id, want := range map[string]string{"kup": "up", "kzero": "unchanged", "ktext": "neutral"} {
 		if got := values[id]["delta"].(map[string]any)["direction"]; got != want {
@@ -77,6 +80,28 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 		chart := values["chart-"+mark]
 		if chart["type"] != "chart" || chart["mark"] != mark || len(chart["points"].([]any)) != 2 || chart["y_format"] != "usd0" || mark != "donut" && chart["rule"].(map[string]any)["y"] != float64(15) {
 			t.Fatal(chart)
+		}
+	}
+}
+
+func TestSparklineValidation(t *testing.T) {
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{Expr: expr, Reader: fixtureReader{}}
+	for _, tc := range []struct {
+		expression string
+		valid      bool
+	}{
+		{"[]", true}, {"[1, 2, 3]", true}, {"[1, 'bad']", false}, {"42", false}, {"[" + strings.Repeat("1,", 600) + "1]", false},
+	} {
+		out, err := engine.Execute(context.Background(), principal.Principal{}, Spec{Pages: []Page{{ID: "main"}}, Components: []Component{{ID: "k", Type: "kpi", Value: "0", Sparkline: tc.expression}}})
+		if err != nil || out.Validation.OK != tc.valid {
+			t.Fatalf("sparkline valid=%t: %v %+v", tc.valid, err, out.Validation)
+		}
+		if !tc.valid && (len(out.Validation.Errors) == 0 || out.Validation.Errors[0].Field != "sparkline") {
+			t.Fatalf("missing sparkline error location: %+v", out.Validation)
 		}
 	}
 }

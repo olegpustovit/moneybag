@@ -220,7 +220,52 @@ func (x *execution) render(c Component) (string, any, error) {
 			sub += " · " + format(d, c.Format)
 		}
 		values["sub"] = sub
-		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div></div>`, values, nil
+		sparkline := ""
+		if c.Sparkline != "" {
+			result, err := x.evalAt("sparkline", c.Sparkline, nil)
+			if err != nil {
+				return "", nil, err
+			}
+			items, ok := result.([]any)
+			if !ok || len(items) > 600 {
+				return "", nil, &EvalError{Field: "sparkline", Expr: c.Sparkline, Err: fmt.Errorf("sparkline must be a list of at most 600 numbers")}
+			}
+			numbers := make([]float64, len(items))
+			labels := make([]string, len(items))
+			for i, item := range items {
+				numbers[i], err = numeric(item)
+				if err != nil {
+					return "", nil, &EvalError{Field: "sparkline", Expr: c.Sparkline, Err: fmt.Errorf("sparkline point %d must be a finite number", i+1)}
+				}
+				labels[i] = format(numbers[i], c.Format)
+			}
+			values["sparkline"] = numbers
+			values["sparkline_text"] = labels
+			if len(numbers) > 0 {
+				var points []string
+				scale := 1.0
+				for _, n := range numbers {
+					scale = math.Max(scale, math.Abs(n))
+				}
+				lo, hi := numbers[0]/scale, numbers[0]/scale
+				for _, n := range numbers {
+					lo, hi = math.Min(lo, n/scale), math.Max(hi, n/scale)
+				}
+				for i, n := range numbers {
+					y := 16.0
+					if hi > lo {
+						y = 30 - 28*(n/scale-lo)/(hi-lo)
+					}
+					points = append(points, fmt.Sprintf("%.2f,%.2f", 2+96*float64(i)/float64(max(1, len(numbers)-1)), y))
+				}
+				mark := `<polyline fill="none" stroke="currentColor" stroke-width="2" points="` + strings.Join(points, " ") + `"/>`
+				if len(numbers) == 1 {
+					mark = `<circle cx="2" cy="16" r="2" fill="currentColor"/>`
+				}
+				sparkline = `<svg width="100" height="32" viewBox="0 0 100 32" role="img" aria-label="` + escape("Trend: "+strings.Join(labels, ", ")) + `">` + mark + `</svg>`
+			}
+		}
+		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div>` + sparkline + `</div>`, values, nil
 	case "text":
 		text, e := x.template("md", c.MD)
 		if e != nil {

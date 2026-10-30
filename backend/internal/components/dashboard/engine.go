@@ -852,7 +852,7 @@ func walkExpressions(s Spec, fn func(string, string)) {
 				emit(fmt.Sprintf("%s/columns/%d/label", base, j), expr)
 			}
 		}
-		for k, v := range map[string]string{"value": c.Value, "delta": c.Delta, "sub": c.Sub, "tone": c.Tone, "label": c.Label, "actual": c.Actual, "limit": c.Limit, "metric": c.Metric} {
+		for k, v := range map[string]string{"value": c.Value, "delta": c.Delta, "sparkline": c.Sparkline, "sub": c.Sub, "tone": c.Tone, "label": c.Label, "actual": c.Actual, "limit": c.Limit, "metric": c.Metric} {
 			emit(base+"/"+k, v)
 		}
 		for j, col := range c.Columns {

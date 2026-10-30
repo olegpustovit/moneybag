@@ -20,3 +20,5 @@ assert.deepEqual(dateParams(spec({},[],{x:'size(params)'})),{range:true,month:tr
 assert.deepEqual(dateParams(spec({},[],{x:`r"params.from" + """params.month"""`})),{range:false,month:false})
 assert.deepEqual(dateParams(spec({},[],{x:`params['other']`})),{range:false,month:false})
 assert.deepEqual(dateParams(spec({},[],{x:`params["\\u0066rom"]`})),{range:true,month:true})
+
+assert.deepEqual(dateParams(spec({},[{id:'x',type:'kpi',value:'1',sparkline:'params.from == "" ? [0] : [1]'}])),{range:true,month:false})
