@@ -132,9 +132,6 @@ type Validation struct {
 }
 type Rendered struct {
 	Pages      []Page         `json:"pages,omitempty" bson:"pages,omitempty"`
-	HTMLURL    string         `json:"html_url,omitempty"`
-	PNGURL     string         `json:"png_url,omitempty"`
-	HTML       string         `json:"html"`
 	Values     map[string]any `json:"values"`
 	Computed   map[string]any `json:"computed,omitempty"`
 	Validation Validation     `json:"validation"`

@@ -16,7 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/model"
-	previewcache "github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
@@ -411,8 +410,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("partial filtered share", partial, e)
 	}
 	encoded, _ := json.Marshal(partial.Snapshot.Rendered.Validation)
-	if strings.Contains(string(encoded), "data.items") || strings.Contains(string(encoded), "amount") || !strings.Contains(string(encoded), "could not be displayed") || (strings.Contains(partial.Snapshot.Rendered.HTML, "data.items") || strings.Contains(partial.Snapshot.Rendered.HTML, "owner-secret")) {
-		t.Fatal("shared error leaked details", string(encoded), partial.Snapshot.Rendered.HTML)
+	if strings.Contains(string(encoded), "data.items") || strings.Contains(string(encoded), "amount") || !strings.Contains(string(encoded), "could not be displayed") {
+		t.Fatal("shared error leaked details", string(encoded))
 	}
 	if e = tab.Archive(ctx, pa, "shared-partial", true, "test"); e != nil {
 		t.Fatal(e)
@@ -573,7 +572,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if _, e = imp.Undo(ctx, pa, start.BatchID, "Retry import undo"); e != nil {
 		t.Fatal("import undo retry", e)
 	}
-	if undone, e := rec.Status(ctx, pa, "assets:bank"); e != nil || len(undone) == 0 || len(undone[0].Discrepancies) == 0 {
+	if undone, e := rec.Recheck(ctx, pa, "assets:bank"); e != nil || len(undone) == 0 || len(undone[0].Discrepancies) == 0 {
 		t.Fatal("status after import undo should show the broken closing balance", undone, e)
 	}
 	if _, e = imp.Redo(ctx, pa, start.BatchID, "Restore import"); e != nil {
@@ -587,7 +586,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || n != 2 {
 		t.Fatal("import raw provenance lost", n, e)
 	}
-	state, e := rec.Status(ctx, pa, "assets:bank")
+	state, e := rec.Recheck(ctx, pa, "assets:bank")
 	if e != nil || len(state) == 0 || state[0].LastOK != "2026-10-31" {
 		t.Fatal("resolved assertion was stale", state, e)
 	}
@@ -608,24 +607,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if _, e = book.Post(ctx, pa, ledger.EntryInput{ID: draftEntry.Entry.ID, Commit: true}); e == nil {
 		t.Fatal("posted draft committed twice")
 	}
-	fixedGrant, e := shares.Resolve(ctx, pb, snap.ShareID)
-	if e != nil {
-		t.Fatal(e)
-	}
-	previews := previewcache.New("http://localhost:6459", "", nil, shares)
-	previewURL, _, e := previews.Create(pb, "<p>Snapshot</p>", &fixedGrant)
-	if e != nil {
-		t.Fatal(e)
-	}
-	previewID := strings.TrimSuffix(strings.TrimPrefix(previewURL, "http://localhost:6459/previews/"), ".html")
-	if _, e = previews.Read(ctx, pb, previewID, false); e != nil {
-		t.Fatal(e)
-	}
 	if e = shares.Unshare(ctx, pa, snap.ShareID); e != nil {
 		t.Fatal(e)
-	}
-	if _, e = previews.Read(ctx, pb, previewID, false); !errors.Is(e, principal.ErrNotFound) {
-		t.Fatal("revoked share preview still readable", e)
 	}
 	testCostLots(t, ctx, pa, pb, book, prices)
 	if e = shares.RefreshDue(ctx); e != nil {

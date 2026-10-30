@@ -1,96 +1,229 @@
+// Package preview renders dashboards through the real SPA in headless Chromium.
 package preview
 
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
-	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/screenshot"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
-type item struct {
-	Owner, HTML, GrantID, GrantHash string
-	Expires                         time.Time
-}
-type Service struct {
-	mu         sync.Mutex
-	items      map[string]item
-	bytes      int
-	url, style string
-	renderer   *screenshot.Renderer
-	sharing    *sharing.Service
+const (
+	tokenTTL      = 60 * time.Second
+	maxTokens     = 16
+	maxReportRows = 500
+	firstHeight   = 1200
+	maxHeight     = 6000
+	DefaultWidth  = 1440
+)
+
+// ErrNoReport means the page loaded or timed out without ever posting its report.
+var ErrNoReport = errors.New("the page never reported within the render budget, so the image would be blank or partial; check that the view endpoint and SPA load")
+
+// Target is the only thing a render token can read.
+type Target struct {
+	Dashboard string
+	Version   string
+	Params    map[string]any
+	Width     int
 }
 
-func New(url, style string, r *screenshot.Renderer, shares *sharing.Service) *Service {
-	return &Service{items: map[string]item{}, url: url, style: style, renderer: r, sharing: shares}
+type Box struct {
+	Component string  `json:"component"`
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	W         float64 `json:"w"`
+	H         float64 `json:"h"`
 }
-func (s *Service) Create(p principal.Principal, body string, grant *sharing.Grant) (string, string, error) {
-	if e := p.Require("ledger:read"); e != nil {
-		return "", "", e
+
+// Checks lists offending component ids; TimeScopeApplies is null when the dashboard has no page clock.
+type Checks struct {
+	Overflow         []string `json:"overflow"`
+	LabelCollisions  []string `json:"label_collisions"`
+	EmptyPanels      []string `json:"empty_panels"`
+	TimeScopeApplies *bool    `json:"time_scope_applies"`
+}
+
+// Report is what the page posts to /api/render/{token}/report.
+type Report struct {
+	Layout   []Box   `json:"layout"`
+	Checks   Checks  `json:"checks"`
+	TimingMS float64 `json:"timing_ms"`
+}
+
+// Failures returns one readable line per failed check; empty means the render gate passes.
+func (r Report) Failures() []string {
+	out := []string{}
+	for _, check := range []struct {
+		name string
+		ids  []string
+	}{{"content overflows", r.Checks.Overflow}, {"labels collide", r.Checks.LabelCollisions}, {"panel is empty", r.Checks.EmptyPanels}} {
+		if len(check.ids) > 0 {
+			out = append(out, check.name+": "+strings.Join(check.ids, ", "))
+		}
 	}
-	html := `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:"><title>Moneybag preview</title><style>` + s.style + `</style></head><body><main class="main">` + body + `</main></body></html>`
-	if len(html) > 2*1024*1024 {
-		return "", "", fmt.Errorf("preview exceeds 2 MiB")
+	if r.Checks.TimeScopeApplies != nil && !*r.Checks.TimeScopeApplies {
+		out = append(out, "the page time range does not apply to its panels")
+	}
+	return out
+}
+
+// Session is a token's binding: one principal, any grant, one dashboard, version and params.
+type Session struct {
+	Principal principal.Principal
+	GrantHash string
+	Target    Target
+	Expires   time.Time
+	report    *Report
+}
+
+// Capture screenshots url; screenshot.Renderer provides it, tests stub it.
+type Capture func(ctx context.Context, url string, width, height int) ([]byte, error)
+
+type Service struct {
+	mu       sync.Mutex
+	sessions map[string]*Session
+	base     string
+	capture  Capture
+}
+
+// New takes the app's own loopback base URL; a nil capture means no renderer is configured.
+func New(base string, capture Capture) *Service {
+	return &Service{sessions: map[string]*Session{}, base: base, capture: capture}
+}
+
+func (s *Service) Available() bool { return s != nil && s.capture != nil }
+
+// Issue creates a 60 second read-only token.
+func (s *Service) Issue(p principal.Principal, grantHash string, t Target) (string, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return "", err
+	}
+	now := time.Now()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for token, session := range s.sessions {
+		if !now.Before(session.Expires) {
+			delete(s.sessions, token)
+		}
+	}
+	if len(s.sessions) >= maxTokens {
+		return "", fmt.Errorf("too many renders in progress; retry in a minute")
+	}
+	token := rand.Text()
+	s.sessions[token] = &Session{Principal: p, GrantHash: grantHash, Target: t, Expires: now.Add(tokenTTL)}
+	return token, nil
+}
+
+// Resolve returns a live token's binding, or not found for an unknown or expired token.
+func (s *Service) Resolve(token string) (Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session := s.sessions[token]
+	if session == nil || !time.Now().Before(session.Expires) {
+		return Session{}, principal.ErrNotFound
+	}
+	return *session, nil
+}
+
+// Report stores the page's latest report; a second pass at the full height replaces the first.
+func (s *Service) Report(token string, report Report) error {
+	if len(report.Layout) > maxReportRows || len(report.Checks.Overflow) > maxReportRows || len(report.Checks.LabelCollisions) > maxReportRows || len(report.Checks.EmptyPanels) > maxReportRows {
+		return fmt.Errorf("report exceeds %d rows", maxReportRows)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now()
-	for id, v := range s.items {
-		if now.After(v.Expires) {
-			delete(s.items, id)
-			s.bytes -= len(v.HTML)
-		}
+	session := s.sessions[token]
+	if session == nil || !time.Now().Before(session.Expires) {
+		return principal.ErrNotFound
 	}
-	if len(s.items) >= 128 || s.bytes+len(html) > 32*1024*1024 {
-		return "", "", fmt.Errorf("preview cache is full; retry in ten minutes")
-	}
-	id := rand.Text()
-	v := item{Owner: p.UserID, HTML: html, Expires: now.Add(10 * time.Minute)}
-	if grant != nil {
-		v.GrantID = grant.ID
-		v.GrantHash = sharing.PermissionHash(*grant)
-	}
-	s.items[id] = v
-	s.bytes += len(html)
-	png := ""
-	if s.renderer != nil && s.renderer.Binary != "" {
-		png = s.url + "/previews/" + id + ".png"
-	}
-	return s.url + "/previews/" + id + ".html", png, nil
+	session.report = &report
+	return nil
 }
-func (s *Service) PNG(ctx context.Context, html string) ([]byte, error) {
-	if s.renderer == nil {
-		return nil, fmt.Errorf("PNG renderer is unavailable")
-	}
-	return s.renderer.PNG(ctx, html)
-}
-func (s *Service) Read(ctx context.Context, p principal.Principal, id string, png bool) ([]byte, error) {
-	if e := p.Require("ledger:read"); e != nil {
-		return nil, e
-	}
+
+func (s *Service) take(token string) (Report, bool) {
 	s.mu.Lock()
-	v, ok := s.items[id]
-	s.mu.Unlock()
-	if !ok || v.Owner != p.UserID || time.Now().After(v.Expires) {
-		return nil, principal.ErrNotFound
+	defer s.mu.Unlock()
+	session := s.sessions[token]
+	if session == nil || session.report == nil {
+		return Report{}, false
 	}
-	if v.GrantID != "" {
-		if s.sharing == nil {
-			return nil, principal.ErrNotFound
+	return *session.report, true
+}
+
+func (s *Service) revoke(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.sessions, token)
+}
+
+// Result is one finished render.
+type Result struct {
+	PNG      []byte
+	Report   Report
+	RenderMS int64
+}
+
+// Render opens the SPA at /render/{token} and fails unless the page reported.
+func (s *Service) Render(ctx context.Context, p principal.Principal, grantHash string, t Target) (Result, error) {
+	if !s.Available() {
+		return Result{}, fmt.Errorf("renderer not configured")
+	}
+	if t.Width == 0 {
+		t.Width = DefaultWidth
+	}
+	started := time.Now()
+	token, err := s.Issue(p, grantHash, t)
+	if err != nil {
+		return Result{}, err
+	}
+	defer s.revoke(token)
+	url := s.base + "/render/" + token
+	png, err := s.capture(ctx, url, t.Width, firstHeight)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return Result{}, err
 		}
-		g, e := s.sharing.Resolve(ctx, p, v.GrantID)
-		if e != nil || sharing.PermissionHash(g) != v.GrantHash {
-			return nil, principal.ErrNotFound
+		return Result{}, fmt.Errorf("%w (%v)", ErrNoReport, err)
+	}
+	report, ok := s.take(token)
+	if !ok {
+		return Result{}, ErrNoReport
+	}
+	if height := report.height(); height > firstHeight {
+		// The first pass measured the page; a second one shows all of it. A failed retake keeps the top of the page.
+		if taller, err := s.capture(ctx, url, t.Width, min(height, maxHeight)); err == nil {
+			png = taller
+			if again, ok := s.take(token); ok {
+				report = again
+			}
 		}
 	}
-	if png {
-		if s.renderer == nil {
-			return nil, fmt.Errorf("PNG renderer unavailable")
-		}
-		return s.renderer.PNG(ctx, v.HTML)
+	return Result{PNG: png, Report: report, RenderMS: time.Since(started).Milliseconds()}, nil
+}
+
+func (r Report) height() int {
+	bottom := 0.0
+	for _, box := range r.Layout {
+		bottom = max(bottom, box.Y+box.H)
 	}
-	return []byte(v.HTML), nil
+	return int(bottom)
+}
+
+// Gate is the publish render gate. Without a renderer it passes, as the contract allows.
+// Call it before entering a workflow: Chromium takes seconds and workflows serialize every writer.
+func (s *Service) Gate(ctx context.Context, p principal.Principal, grantHash string, t Target) ([]string, error) {
+	if !s.Available() {
+		return nil, nil
+	}
+	result, err := s.Render(ctx, p, grantHash, t)
+	if err != nil {
+		return nil, err
+	}
+	return result.Report.Failures(), nil
 }

@@ -63,6 +63,8 @@ type ShareResult struct {
 type SharedView struct {
 	Grant    Grant    `json:"grant"`
 	Snapshot Snapshot `json:"snapshot"`
+	// LegacyHTML is the stored output of a snapshot frozen before page layouts existed.
+	LegacyHTML string `json:"legacy_html,omitempty"`
 }
 type Access struct {
 	Dashboard *dashboard.Service
@@ -262,7 +264,7 @@ func (s *Service) Access(ctx context.Context, p principal.Principal, id string, 
 		}
 	}
 	if !write && g.Role == "viewer" {
-		return Access{}, fmt.Errorf("viewer grants expose rendered output only; open /shared/%s", g.ID)
+		return Access{}, fmt.Errorf("%w: viewer grants expose rendered output only; open /shared/%s", principal.ErrForbidden, g.ID)
 	}
 	return Access{s.scoped(g), ownerPrincipal(g, p.Actor), g.DashboardID, &g}, nil
 }
@@ -296,7 +298,7 @@ func (s *Service) RecordEditorRead(ctx context.Context, p principal.Principal, o
 		}
 		_, err = s.audit.Write(tx, ownerPrincipal(current, p.Actor), "dashboard_shared_read", audit.Target{Collection: "shares", ID: current.ID}, "", nil, struct {
 			Mode string `json:"mode"`
-		}{Mode: "editor"}, func(context.Context) error { return nil })
+		}{Mode: "editor"}, nil)
 		return err
 	})
 }
@@ -322,6 +324,7 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 		return SharedView{}, e
 	}
 	var snap Snapshot
+	legacy := ""
 	if g.Mode == "snapshot" {
 		e = s.repo.db.Collection("dashboard_snapshots").FindOne(ctx, bson.M{"_id": g.ID, "owner_user": g.OwnerUser}).Decode(&snap)
 		if errors.Is(e, mongo.ErrNoDocuments) {
@@ -335,6 +338,17 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 		}
 		for key, value := range snap.Rendered.Values {
 			snap.Rendered.Values[key] = snapshotValue(value)
+		}
+		if len(snap.Rendered.Pages) == 0 {
+			var frozen struct {
+				Rendered struct {
+					HTML string `bson:"html"`
+				} `bson:"rendered"`
+			}
+			if e = s.repo.db.Collection("dashboard_snapshots").FindOne(ctx, bson.M{"_id": g.ID, "owner_user": g.OwnerUser}).Decode(&frozen); e != nil {
+				return SharedView{}, e
+			}
+			legacy = frozen.Rendered.HTML
 		}
 	} else {
 		owner := ownerPrincipal(g, p.Actor)
@@ -371,10 +385,10 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (S
 		}
 		_, err = s.audit.Write(tx, ownerPrincipal(g, p.Actor), "dashboard_shared_read", audit.Target{Collection: "shares", ID: g.ID}, "", nil, struct {
 			Version int `json:"version"`
-		}{snap.Version}, func(context.Context) error { return nil })
+		}{snap.Version}, nil)
 		return err
 	})
-	return SharedView{g, snap}, e
+	return SharedView{g, snap, legacy}, e
 }
 
 func snapshotValue(value any) any {

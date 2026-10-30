@@ -28,6 +28,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/screenshot"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
 	"syscall"
@@ -42,6 +43,15 @@ func main() {
 		slog.Error("Moneybag stopped", "error", err)
 		os.Exit(1)
 	}
+}
+
+// loopbackURL is how Chromium reaches this process directly, skipping the proxy and the public name.
+func loopbackURL(listen string) string {
+	host, port, _ := net.SplitHostPort(listen)
+	if ip := net.ParseIP(host); host == "" || (ip != nil && ip.IsUnspecified()) {
+		host = "127.0.0.1"
+	}
+	return "http://" + net.JoinHostPort(host, port)
 }
 func run() error {
 	cfg, e := loadConfig()
@@ -111,7 +121,11 @@ func run() error {
 	services.Imports = imp
 	services.Reconcile = rec
 	services.Sharing = shares
-	services.Previews = preview.New(cfg.PublicURL, handlers.Stylesheet(), screenshot.New(cfg.Chromium), shares)
+	var capture preview.Capture
+	if cfg.Chromium != "" {
+		capture = screenshot.New(cfg.Chromium).Capture
+	}
+	services.Previews = preview.New(loopbackURL(cfg.Listen), capture)
 	services.History = &history.Service{Reconcile: rec, Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab}
 	if len(os.Args) > 1 && os.Args[1] == "bootstrap" {
 		u, e := ids.Setup(ctx, os.Getenv("MONEYBAG_OWNER_EMAIL"), os.Getenv("MONEYBAG_OWNER_NAME"), os.Getenv("MONEYBAG_OWNER_PASSWORD"))
@@ -137,7 +151,7 @@ func run() error {
 	defer stopPrewarm()
 	stopJobs := startJobs(ctx, services, log)
 	defer stopJobs()
-	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
+	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
 	compress, e := handlers.Compression()
 	if e != nil {

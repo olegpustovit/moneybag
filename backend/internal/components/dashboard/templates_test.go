@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -38,8 +39,8 @@ func TestTemplatedTextRowsExpressionAndHideZero(t *testing.T) {
 		t.Fatalf("component title was not resolved: %#v", out.Values["k"])
 	}
 	for _, want := range []string{"Net €1,234.60", "ratio 26% on 2026-10-29", "Amt $1,235", "$20.00"} {
-		if !strings.Contains(out.HTML, want) {
-			t.Errorf("missing %q in %s", want, out.HTML)
+		if encoded, _ := json.Marshal(out.Values); !strings.Contains(string(encoded), want) {
+			t.Errorf("missing %q in %s", want, encoded)
 		}
 	}
 	if v, _ := out.Values["t"].(map[string]any)["rows"].([]map[string]any); len(v) != 1 {

@@ -50,6 +50,8 @@ type Services struct {
 	Expr        *expressions.Engine
 	Sources     dashboard.Reader
 	Logger      *slog.Logger
+	// DashboardTests is the seam for dashboard_test: dashboard_render includes what it returns.
+	DashboardTests func(ctx context.Context, access sharing.Access, version string) (any, error)
 }
 
 // dashboardWrite keeps grant resolution and the write inside the same serialized workflow.
@@ -97,7 +99,7 @@ type PreviewInput struct {
 	DashboardID string         `json:"dashboard_id"`
 	Version     any            `json:"version,omitempty"`
 	Params      map[string]any `json:"params,omitempty"`
-	ValuesOnly  bool           `json:"values_only,omitempty" jsonschema:"true omits html and preview links and returns only validation, per-component values and computed values"`
+	ValuesOnly  bool           `json:"values_only,omitempty" jsonschema:"deprecated: has no effect, kept so existing calls keep working"`
 }
 
 func versionRef(v any) (string, error) {
@@ -522,7 +524,7 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, err
 	})
-	add(r, "dashboard_render", "dashboard", "ledger:read", "Use this to see a published or draft dashboard as an image of the real page, with its validation. Fix validation errors first; the image appears once the renderer is configured.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (renderOutput, error) {
+	add(r, "dashboard_render", "dashboard", "ledger:read", "Use this to see a published or draft dashboard as an image of the real page in the browser, at width (default 1440) with optional params. Returns the PNG plus layout, checks (overflow, label_collisions, empty_panels, time_scope_applies), lint, tests, timing_ms and validation. Fix validation errors first; the image appears once the renderer is configured. An error means the page failed to load or report, never a blank image.", true, false, func(ctx context.Context, p principal.Principal, in renderInput) (renderOutput, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return renderOutput{}, e
@@ -531,31 +533,46 @@ func New(s Services, opts Options) *mcp.Server {
 		if e != nil {
 			return renderOutput{}, e
 		}
-		rendered, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, nil)
+		if e = in.validate(); e != nil {
+			return renderOutput{}, e
+		}
+		current, e := access.Dashboard.Get(ctx, access.Principal, access.ID, v)
+		if e != nil {
+			return renderOutput{}, e
+		}
+		rendered, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, in.Params)
 		if e == nil && access.Grant != nil {
 			e = s.Sharing.RecordEditorRead(ctx, p, access)
 		}
 		if e != nil {
 			return renderOutput{}, e
 		}
-		out := renderOutput{Validation: rendered.Validation}
+		out := renderOutput{Validation: rendered.Validation, Lint: dashboard.Lint(current.Spec)}
+		if s.DashboardTests != nil {
+			if out.Tests, e = s.DashboardTests(ctx, access, v); e != nil {
+				return renderOutput{}, e
+			}
+		}
 		if !rendered.Validation.OK {
 			out.Message = "fix validation errors before rendering"
 			return out, nil
 		}
-		if s.Previews == nil {
+		if !s.Previews.Available() {
 			out.Message = "image unavailable: renderer not configured"
 			return out, nil
 		}
-		png, e := s.Previews.PNG(ctx, rendered.HTML)
-		if e != nil {
-			out.Message = "image unavailable: " + e.Error()
-			return out, nil
+		hash := ""
+		if access.Grant != nil {
+			hash = sharing.PermissionHash(*access.Grant)
 		}
-		out.PNG = png
+		shot, e := s.Previews.Render(ctx, p, hash, preview.Target{Dashboard: in.ID, Version: v, Params: in.Params, Width: in.Width})
+		if e != nil {
+			return renderOutput{}, fmt.Errorf("dashboard render failed: %w", e)
+		}
+		out.PNG, out.Layout, out.Checks, out.TimingMS, out.RenderMS = shot.PNG, shot.Report.Layout, &shot.Report.Checks, shot.Report.TimingMS, shot.RenderMS
 		return out, nil
 	})
-	add(r, "dashboard_validate", "dashboard", "ledger:read", "Use this before preview or publish. Compiles every CEL expression, evaluates all rows, checks layout references and renders every component within the server budget.", true, false, func(ctx context.Context, p principal.Principal, in DashboardInput) (dashboard.Validation, error) {
+	add(r, "dashboard_validate", "dashboard", "ledger:read", "Use this before preview or publish. Compiles every CEL expression, evaluates all rows, checks layout references and computes every component within the server budget.", true, false, func(ctx context.Context, p principal.Principal, in DashboardInput) (dashboard.Validation, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return dashboard.Validation{}, e
@@ -573,7 +590,7 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return r.Validation, nil
 	})
-	add(r, "dashboard_preview", "dashboard", "ledger:read", "Use this to read back a dashboard as rendered: values (per component id), computed (every computed value) and validation, plus html and preview links unless values_only is true. version is a number, draft or published. Does not publish or execute browser code.", true, false, func(ctx context.Context, p principal.Principal, in PreviewInput) (dashboard.Rendered, error) {
+	add(r, "dashboard_preview", "dashboard", "ledger:read", "Use this to read back a dashboard's numbers: values (per component id), computed (every computed value) and validation. version is a number, draft or published. Does not publish. Use dashboard_render to see the page.", true, false, func(ctx context.Context, p principal.Principal, in PreviewInput) (dashboard.Rendered, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return dashboard.Rendered{}, e
@@ -590,14 +607,7 @@ func New(s Services, opts Options) *mcp.Server {
 			return dashboard.Rendered{}, e
 		}
 		capTableRows(rendered.Values, maxAgentTableRows)
-		if in.ValuesOnly {
-			rendered.HTML = ""
-			return rendered, e
-		}
-		if e == nil && rendered.Validation.OK && s.Previews != nil {
-			rendered.HTMLURL, rendered.PNGURL, e = s.Previews.Create(p, rendered.HTML, access.Grant)
-		}
-		return rendered, e
+		return rendered, nil
 	})
 	add(r, "dashboard_diff", "dashboard", "ledger:read", "Use this when comparing two immutable dashboard versions. from/to are numbers, draft or published.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
@@ -637,7 +647,7 @@ func New(s Services, opts Options) *mcp.Server {
 			Changes []dashboard.Change `json:"changes"`
 		}{v}, nil
 	})
-	add(r, "dashboard_publish", "dashboard", "dash:write", "Use this to publish a draft immediately. No human approval required. Validation and a successful server render gate the publish; failures keep the live head unchanged.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	add(r, "dashboard_publish", "dashboard", "dash:write", "Use this to publish a draft immediately. No human approval required. Validation gates the publish; failures keep the live head unchanged.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
 		Version     int    `json:"version"`
 		Note        string `json:"note,omitempty"`

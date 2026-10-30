@@ -35,7 +35,7 @@ func localNext(raw string) string {
 	return raw
 }
 func (h *Handler) authOrigin(w http.ResponseWriter, r *http.Request) bool {
-	if r.Header.Get("Origin") != h.cfg.PublicURL {
+	if !h.browserOrigin(r.Header.Get("Origin")) {
 		http.Error(w, "origin not allowed", 403)
 		return false
 	}

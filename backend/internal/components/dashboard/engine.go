@@ -700,7 +700,6 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 		}
 	}
 	components := map[string]Component{}
-	html := map[string]string{}
 	valuesBudget := &byteBudget{8 * 1024 * 1024}
 	for i, c := range spec.Components {
 		if c.ID == "" {
@@ -722,16 +721,11 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			continue
 		}
 		components[c.ID] = c
-		body, value, err := x.render(c)
+		value, err := x.render(c)
 		if err != nil {
 			issue(path, err)
 			continue
 		}
-		if len(body) > 2*1024*1024 {
-			issue(path, fmt.Errorf("component exceeds 2 MiB"))
-			continue
-		}
-		html[c.ID] = body
 		if typed, ok := value.(map[string]any); ok {
 			typed["title"] = c.Title
 		}
@@ -741,7 +735,6 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			return result, nil
 		}
 	}
-	var output strings.Builder
 	used := map[string]bool{}
 	pageIDs := map[string]bool{}
 	for pi, pg := range spec.Pages {
@@ -750,16 +743,13 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			issue(fmt.Sprintf("/pages/%d/id", pi), fmt.Errorf("unique page id required"))
 		}
 		pageIDs[pg.ID] = true
-		output.WriteString(`<section class="dashboard-page">`)
 		if len(spec.Pages) > 1 {
 			title, err := x.template("title", spec.Pages[pi].Title)
 			if err != nil {
 				issue(fmt.Sprintf("/pages/%d/title", pi), err)
 			}
-			output.WriteString(`<h2>` + escape(title) + `</h2>`)
 			pg.Title = title
 		}
-		output.WriteString(`<div class="dash">`)
 		for ri, r := range pg.Layout {
 			span := 0
 			for _, col := range r.Cols {
@@ -773,24 +763,11 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 					continue
 				}
 				used[c.ID] = true
-				body, ok := html[c.ID]
-				if !ok {
-					c.Title = "Component unavailable"
-					body = "<p>This component could not be displayed.</p>"
-				}
-				fragment := componentHTML(c, col.Span, body)
-				if output.Len()+len(fragment) > 2*1024*1024 {
-					issue("/pages", fmt.Errorf("rendered dashboard exceeds 2 MiB"))
-					result.HTML = ""
-					return result, nil
-				}
-				output.WriteString(fragment)
 			}
 			if span > 12 {
 				issue(fmt.Sprintf("/pages/%d/layout/%d", pi, ri), fmt.Errorf("row exceeds 12 columns"))
 			}
 		}
-		output.WriteString(`</div></section>`)
 		result.Pages = append(result.Pages, pg)
 	}
 	for id := range components {
@@ -799,7 +776,6 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 		}
 	}
 	result.Validation.Cost = x.cost
-	result.HTML = output.String()
 	result.Computed = x.vars["computed"].(map[string]any)
 	if ctx.Err() != nil {
 		issue("/", fmt.Errorf("dashboard exceeded 10 second evaluation budget"))

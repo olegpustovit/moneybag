@@ -32,8 +32,8 @@ func TestServerRenderAndValidation(t *testing.T) {
 	if e != nil || !out.Validation.OK {
 		t.Fatal(out.Validation, e)
 	}
-	if out.Values["total"].(map[string]any)["value"] != float64(30) || !strings.Contains(out.HTML, "€30") || strings.Contains(out.HTML, "<script>") {
-		t.Fatal("render or escaping failed", out)
+	if total := out.Values["total"].(map[string]any); total["value"] != float64(30) || total["text"] != "€30" {
+		t.Fatal("render failed", out)
 	}
 	spec.Components[0].Value = "missing.reference"
 	out, e = engine.Execute(context.Background(), principal.Principal{}, spec)
@@ -86,10 +86,15 @@ func TestAllChartMarksAndTextEscape(t *testing.T) {
 	for _, mark := range []string{"bar", "line", "area", "stack", "donut"} {
 		spec := Spec{Data: map[string]Query{"rows": {From: "journal"}}, Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{12, "chart"}}}}}}, Components: []Component{{ID: "chart", Type: "chart", Mark: mark, Rows: "rows", Encoding: &Encoding{X: Axis{Field: "name"}, Y: Axis{Field: "amount"}}}}}
 		out, e := engine.Execute(context.Background(), principal.Principal{}, spec)
-		if e != nil || !out.Validation.OK || !strings.Contains(out.HTML, "<svg") || !strings.Contains(out.HTML, "View chart data") || !strings.Contains(out.HTML, `tabindex="0" role="region"`) {
+		if e != nil || !out.Validation.OK || len(out.Values["chart"].(map[string]any)["points"].([]chartPoint)) == 0 {
 			b, _ := json.Marshal(out.Validation)
 			t.Fatalf("%s: %s %v", mark, b, e)
 		}
+	}
+	spec := Spec{Pages: []Page{{ID: "main", Layout: []Row{{Cols: []Placement{{12, "note"}}}}}}, Components: []Component{{ID: "note", Type: "text", MD: "<script>x</script> **bold**"}}}
+	out, e := engine.Execute(context.Background(), principal.Principal{}, spec)
+	if e != nil || out.Values["note"].(map[string]any)["html"] != "&lt;script&gt;x&lt;/script&gt; <strong>bold</strong>" {
+		t.Fatal("text escape", out.Values, e)
 	}
 }
 
@@ -101,9 +106,10 @@ func TestChartDataExposesExactValuesAndReference(t *testing.T) {
 	if err != nil || !result.Validation.OK {
 		t.Fatal(result.Validation, err)
 	}
-	for _, want := range []string{`<th scope="row">A</th>`, `<td class="r">20</td>`, `Reference: Budget`, `25.5`, `&lt;script&gt;bad&lt;/script&gt;`} {
-		if !strings.Contains(result.HTML, want) {
-			t.Fatalf("missing accessible chart data %q", want)
+	encoded, _ := json.Marshal(result.Values)
+	for _, want := range []string{`"series":"A"`, `"y":20`, `"label":"Budget"`, `"y":25.5`} {
+		if !strings.Contains(string(encoded), want) {
+			t.Fatalf("missing chart value %q in %s", want, encoded)
 		}
 	}
 }
@@ -153,16 +159,9 @@ func TestForecastTemplateWithEmptyNewUser(t *testing.T) {
 	}
 	engine := Engine{Expr: expr, Reader: emptyModelReader{}}
 	result, err := engine.Execute(context.Background(), principal.Principal{}, Templates["forecast"])
-	if err != nil || !result.Validation.OK || !strings.Contains(result.HTML, "Set spending assumptions") {
+	encoded, _ := json.Marshal(result.Values)
+	if err != nil || !result.Validation.OK || !strings.Contains(string(encoded), "Set spending assumptions") {
 		t.Fatal(result.Validation, err)
-	}
-}
-
-func TestNiceStep(t *testing.T) {
-	for raw, want := range map[float64]float64{537.5: 1000, 450: 500, 120: 200, 0.3: 0.5, 1: 1, 7: 10} {
-		if got := niceStep(raw); got != want {
-			t.Errorf("niceStep(%v) = %v, want %v", raw, got, want)
-		}
 	}
 }
 

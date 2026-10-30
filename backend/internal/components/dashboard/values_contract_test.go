@@ -55,8 +55,8 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 	if values["k"]["sub"] != "sub · €−5" || values["k"]["sub_text"] != "sub" || values["k"]["delta"].(map[string]any)["direction"] != "down" || values["k"]["type"] != "kpi" || values["k"]["value"] != float64(1234) || values["k"]["text"] != "€1,234" || values["k"]["tone"] != "neg" {
 		t.Fatal(values["k"])
 	}
-	if got := values["k"]["sparkline"].([]any); len(got) != 3 || got[0] != float64(1) || got[2] != float64(2) || !strings.Contains(out.HTML, `aria-label="Trend: €1, €3, €2"`) {
-		t.Fatal("sparkline contract or accessible preview", got)
+	if got := values["k"]["sparkline"].([]any); len(got) != 3 || got[0] != float64(1) || got[2] != float64(2) || !strings.Contains(string(encoded), `"sparkline_text":["€1","€3","€2"]`) {
+		t.Fatal("sparkline contract", got)
 	}
 	for id, want := range map[string]string{"kup": "up", "kzero": "unchanged", "ktext": "neutral"} {
 		if got := values[id]["delta"].(map[string]any)["direction"]; got != want {

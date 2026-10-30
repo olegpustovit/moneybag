@@ -24,6 +24,9 @@ import (
 
 var dashboardID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 
+// ErrNotPublished means the requested reference has no version to show.
+var ErrNotPublished = errors.New("dashboard has no published version")
+
 type MongoRepository struct{ db *mongo.Database }
 type Service struct {
 	repo      *MongoRepository
@@ -140,7 +143,7 @@ func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string
 		}
 	}
 	if n == 0 {
-		return GetResult{}, fmt.Errorf("dashboard has no published version")
+		return GetResult{}, ErrNotPublished
 	}
 	var v Version
 	e = s.repo.db.Collection("dashboard_versions").FindOne(ctx, bson.M{"user_id": p.UserID, "dashboard_id": id, "version": n}).Decode(&v)
@@ -175,7 +178,8 @@ func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string
 				var published struct {
 					Version int `json:"published_version"`
 				}
-				if json.Unmarshal(event.Outcome.After, &published) == nil && published.Version == n && !event.Outcome.At.IsZero() {
+				_, after := event.Result()
+				if json.Unmarshal(after, &published) == nil && published.Version == n && !event.Outcome.At.IsZero() {
 					at := event.Outcome.At
 					result.PublishedAt = &at
 				}
@@ -524,6 +528,22 @@ func (s *Service) Preview(ctx context.Context, p principal.Principal, id, versio
 	if len(params) == 0 {
 		params = nil
 	}
+	value, err := s.rendered(ctx, p, id, version, params)
+	if err != nil {
+		return Rendered{}, err
+	}
+	var result Rendered
+	if err := deepcopy.Copy(&result, value); err != nil {
+		return Rendered{}, fmt.Errorf("copy dashboard snapshot: %w", err)
+	}
+	return result, nil
+}
+
+// rendered returns the shared snapshot, or a new render when there is none; callers must not modify it.
+func (s *Service) rendered(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {
+	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+		return s.preview(ctx, p, id, version, params)
+	}
 	key := struct {
 		Version string
 		Params  map[string]any
@@ -534,11 +554,7 @@ func (s *Service) Preview(ctx context.Context, p principal.Principal, id, versio
 	if err != nil {
 		return Rendered{}, err
 	}
-	var result Rendered
-	if err := deepcopy.Copy(&result, value); err != nil {
-		return Rendered{}, fmt.Errorf("copy dashboard snapshot: %w", err)
-	}
-	return result, nil
+	return value.(Rendered), nil
 }
 
 func (s *Service) preview(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {

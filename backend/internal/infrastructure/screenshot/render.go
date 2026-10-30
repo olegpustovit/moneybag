@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 )
@@ -16,12 +17,12 @@ type Renderer struct {
 }
 
 func New(binary string) *Renderer { return &Renderer{Binary: binary, running: make(chan struct{}, 1)} }
-func (r *Renderer) PNG(ctx context.Context, html string) ([]byte, error) {
+
+// Capture opens url in one headless Chromium at a time. Virtual time fast-forwards page timers but
+// waits for pending fetches, so the SPA can load its data and post its report before the screenshot.
+func (r *Renderer) Capture(ctx context.Context, url string, width, height int) ([]byte, error) {
 	if r.Binary == "" {
 		return nil, fmt.Errorf("PNG renderer is unavailable")
-	}
-	if len(html) > 2*1024*1024 {
-		return nil, fmt.Errorf("preview exceeds 2 MiB")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
@@ -36,12 +37,8 @@ func (r *Renderer) PNG(ctx context.Context, html string) ([]byte, error) {
 		return nil, e
 	}
 	defer os.RemoveAll(dir)
-	input, output := filepath.Join(dir, "index.html"), filepath.Join(dir, "preview.png")
-	if e = os.WriteFile(input, []byte(html), 0600); e != nil {
-		return nil, e
-	}
-	// All content is escaped by the dashboard renderer; CSP blocks scripts and network resources.
-	command := exec.CommandContext(ctx, r.Binary, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--hide-scrollbars", "--window-size=1440,1200", "--virtual-time-budget=1000", "--screenshot="+output, "file://"+input)
+	output := filepath.Join(dir, "preview.png")
+	command := exec.CommandContext(ctx, r.Binary, "--headless", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--hide-scrollbars", "--user-data-dir="+filepath.Join(dir, "profile"), "--window-size="+strconv.Itoa(width)+","+strconv.Itoa(height), "--virtual-time-budget=8000", "--screenshot="+output, url)
 	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	command.Cancel = func() error {
 		if command.Process == nil {

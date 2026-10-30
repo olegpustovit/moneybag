@@ -10,9 +10,9 @@ import (
 )
 
 type config struct {
-	Listen, PublicURL, MongoURI, MongoDB, SetupToken, LogFormat, Chromium string
-	Toolsets                                                              map[string]bool
-	SecretKey                                                             []byte
+	Listen, PublicURL, TailnetURL, MongoURI, MongoDB, SetupToken, LogFormat, Chromium string
+	Toolsets                                                                          map[string]bool
+	SecretKey                                                                         []byte
 }
 
 func env(key, def string) string {
@@ -35,13 +35,19 @@ func loadConfig() (config, error) {
 		}
 		return def
 	}
-	c := config{Listen: env("LISTEN", "127.0.0.1:6459"), PublicURL: strings.TrimRight(env("PUBLIC_URL", "https://moneybag.microapps.space"), "/"), MongoURI: env("MONGO_URI", "mongodb://127.0.0.1:27017/moneybag"), MongoDB: env("MONGO_DB", "moneybag"), SetupToken: env("SETUP_TOKEN", ""), LogFormat: env("LOG_FORMAT", "text"), Chromium: env("CHROMIUM_BIN", "")}
+	c := config{Listen: env("LISTEN", "127.0.0.1:6459"), PublicURL: strings.TrimRight(env("PUBLIC_URL", "https://moneybag.microapps.space"), "/"), TailnetURL: strings.TrimRight(env("TAILNET_URL", ""), "/"), MongoURI: env("MONGO_URI", "mongodb://127.0.0.1:27017/moneybag"), MongoDB: env("MONGO_DB", "moneybag"), SetupToken: env("SETUP_TOKEN", ""), LogFormat: env("LOG_FORMAT", "text"), Chromium: env("CHROMIUM_BIN", "")}
 	if _, _, e := net.SplitHostPort(c.Listen); e != nil {
 		return c, fmt.Errorf("MONEYBAG_LISTEN must be host:port")
 	}
 	u, e := url.Parse(c.PublicURL)
 	if e != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {
 		return c, fmt.Errorf("MONEYBAG_PUBLIC_URL must be an HTTPS origin or HTTP loopback origin")
+	}
+	if c.TailnetURL != "" {
+		u, e := url.Parse(c.TailnetURL)
+		if e != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Path != "" {
+			return c, fmt.Errorf("MONEYBAG_TAILNET_URL must be an HTTPS origin")
+		}
 	}
 	if c.MongoDB == "" || strings.ContainsAny(c.MongoDB, "/\\. \"$\x00") {
 		return c, fmt.Errorf("invalid MONEYBAG_MONGO_DB")

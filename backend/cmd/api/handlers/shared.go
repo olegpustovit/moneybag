@@ -44,7 +44,7 @@ func sharedOutput(view sharing.SharedView) (map[string]any, error) {
 	}
 	out := map[string]any{"title": view.Snapshot.Title, "version": view.Snapshot.Version, "role": view.Grant.Role, "mode": view.Grant.Mode, "at": view.Snapshot.At, "pages": pages}
 	if len(rendered.Pages) == 0 {
-		out["legacy_html"] = rendered.HTML
+		out["legacy_html"] = view.LegacyHTML
 		return out, nil
 	}
 	raw, err := json.Marshal(rendered.Values)

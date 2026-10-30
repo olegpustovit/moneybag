@@ -37,13 +37,15 @@ type snapshotState struct {
 
 // Snapshots keeps immutable read results in this single process.
 type Snapshots struct {
-	mu       sync.Mutex
-	revision func(context.Context, principal.Principal) (int64, error)
-	zone     *time.Location
-	items    map[snapshotKey]snapshotItem
-	order    []snapshotKey
-	pending  map[snapshotKey]*snapshotFlight
-	users    map[string]snapshotState
+	mu        sync.Mutex
+	revision  func(context.Context, principal.Principal) (int64, error)
+	revisions func(context.Context, principal.Principal) (audit.Revisions, error)
+	last      map[string]*lastView
+	zone      *time.Location
+	items     map[snapshotKey]snapshotItem
+	order     []snapshotKey
+	pending   map[snapshotKey]*snapshotFlight
+	users     map[string]snapshotState
 }
 
 func NewSnapshots(a *audit.Service) (*Snapshots, error) {
@@ -51,7 +53,7 @@ func NewSnapshots(a *audit.Service) (*Snapshots, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load snapshot timezone: %w", err)
 	}
-	return &Snapshots{revision: a.Revision, zone: zone, items: map[snapshotKey]snapshotItem{}, pending: map[snapshotKey]*snapshotFlight{}, users: map[string]snapshotState{}}, nil
+	return &Snapshots{revision: a.Revision, revisions: a.Revisions, last: map[string]*lastView{}, zone: zone, items: map[snapshotKey]snapshotItem{}, pending: map[snapshotKey]*snapshotFlight{}, users: map[string]snapshotState{}}, nil
 }
 
 // Changed invalidates readers both before and after a potentially partial write.
@@ -77,6 +79,10 @@ func (s *Snapshots) Changed(user string, finished bool) {
 		}
 	}
 	s.order = kept
+}
+
+func lastingKind(kind string) bool {
+	return kind == "render" || kind == "dashboard" || kind == "view"
 }
 
 func (s *Snapshots) memoEpoch(user string) (uint64, bool) {
@@ -117,7 +123,7 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 		return build()
 	}
 	now := time.Now()
-	day := now.In(s.zone).Format("2006-01-02") + "|" + now.Format("2006-01-02") + "|" + now.UTC().Format("2006-01-02")
+	day := s.day(now)
 	kept := s.order[:0]
 	for _, old := range s.order {
 		item, exists := s.items[old]
@@ -182,12 +188,12 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 			// Preserve dashboard metadata and renders when source snapshots churn.
 			evict := -1
 			for i, old := range s.order {
-				if old.kind != "render" && old.kind != "dashboard" {
+				if !lastingKind(old.kind) {
 					evict = i
 					break
 				}
 			}
-			if evict < 0 && (key.kind == "render" || key.kind == "dashboard") {
+			if evict < 0 && lastingKind(key.kind) {
 				evict = 0
 			}
 			if evict >= 0 {

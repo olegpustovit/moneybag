@@ -46,7 +46,9 @@ func parseTemplates() (*template.Template, error) {
 
 type Config struct {
 	PublicURL, SetupToken, Version string
-	Toolsets                       map[string]bool
+	// TailnetURL is a second browser origin; OAuth and share links keep using PublicURL.
+	TailnetURL string
+	Toolsets   map[string]bool
 }
 type Handler struct {
 	authLimit      authLimiter
@@ -124,7 +126,6 @@ func (h *Handler) security(w http.ResponseWriter) {
 }
 func (h *Handler) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /previews/{file}", h.preview)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -190,6 +191,12 @@ func (h *Handler) Handler() http.Handler {
 	mux.Handle("POST /api/dashboards/{id}/validate", h.browser(http.HandlerFunc(h.apiDashboardValidate)))
 	mux.HandleFunc("GET /api/expr/catalog", h.apiExpressionCatalog)
 	mux.HandleFunc("GET /api/session", h.apiSession)
+	mux.HandleFunc("GET /api/bootstrap", h.apiBootstrap)
+	mux.HandleFunc("GET /api/dashboards/{id}/view", h.apiDashboardView)
+	mux.HandleFunc("GET /render/{token}", h.renderShell)
+	mux.HandleFunc("GET /api/render/{token}/view", h.apiRenderView)
+	mux.HandleFunc("GET /api/render/{token}/cube", h.apiRenderCube)
+	mux.HandleFunc("POST /api/render/{token}/report", h.apiRenderReport)
 	mux.HandleFunc("GET /api/imports", h.apiImports)
 	mux.HandleFunc("GET /api/imports/count", h.apiImportCount)
 	mux.HandleFunc("GET /api/reconcile/count", h.apiReconcileCount)
@@ -209,7 +216,7 @@ func (h *Handler) Handler() http.Handler {
 			respond(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		})
 	}
-	for _, prefix := range []string{"GET /mcp", "GET /mcp/", "GET /oauth/", "GET /previews/"} {
+	for _, prefix := range []string{"GET /mcp", "GET /mcp/", "GET /oauth/"} {
 		mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	}
 	mux.HandleFunc("GET /", serveUI)
@@ -231,7 +238,7 @@ func (h *Handler) session(r *http.Request) (principal.Principal, identity.Sessio
 	return h.services.Identity.Session(r.Context(), c.Value)
 }
 func (h *Handler) csrf(r *http.Request, session identity.Session) bool {
-	if origin := r.Header.Get("Origin"); origin != "" && origin != h.cfg.PublicURL {
+	if origin := r.Header.Get("Origin"); origin != "" && !h.browserOrigin(origin) {
 		return false
 	}
 	token := r.Header.Get("X-CSRF-Token")
@@ -239,6 +246,11 @@ func (h *Handler) csrf(r *http.Request, session identity.Session) bool {
 		token = r.FormValue("csrf")
 	}
 	return subtle.ConstantTimeCompare([]byte(token), []byte(session.CSRF)) == 1 && token != ""
+}
+
+// browserOrigin accepts the app's own origins; agents and connectors stay on allowedOrigin.
+func (h *Handler) browserOrigin(origin string) bool {
+	return origin == h.cfg.PublicURL || h.cfg.TailnetURL != "" && origin == h.cfg.TailnetURL
 }
 func (h *Handler) browser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -270,8 +282,6 @@ func decode(r *http.Request, v any) error {
 	}
 	return nil
 }
-
-func Stylesheet() string { b, _ := webFS.ReadFile("web/preview-auth.css"); return string(b) }
 
 // consistency is a read-only GET for the signed-in session, so no CSRF token is needed.
 func (h *Handler) consistency(w http.ResponseWriter, r *http.Request) {

@@ -1,11 +1,9 @@
 package dashboard
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"html"
-	"html/template"
 	"math"
 	"regexp"
 	"sort"
@@ -18,17 +16,6 @@ func escape(v any) string { return html.EscapeString(fmt.Sprint(v)) }
 
 var holes = regexp.MustCompile(`\{\{([^}]+)\}\}`)
 var bold = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-var componentTemplate = template.Must(template.New("component").Parse(`<section class="cmp" style="grid-column:span {{.Span}}" data-component="{{.ID}}"><div class="ct"><span>{{.Title}}</span><span class="id">{{.Type}} · {{.ID}}</span></div>{{.Body}}</section>`))
-
-func componentHTML(c Component, span int, body string) string {
-	var b bytes.Buffer
-	_ = componentTemplate.Execute(&b, struct {
-		Span            int
-		ID, Title, Type string
-		Body            template.HTML
-	}{span, c.ID, c.Title, c.Type, template.HTML(body)})
-	return b.String()
-}
 
 // formats are the names allowed after "|" in a {{ ref | format }} placeholder.
 var formats = map[string]bool{"usd": true, "usd0": true, "eur": true, "eur0": true, "pct0": true, "date": true}
@@ -174,27 +161,27 @@ func (x *execution) rows(c Component) ([]map[string]any, error) {
 	}
 	return rows, nil
 }
-func (x *execution) render(c Component) (string, any, error) {
+func (x *execution) render(c Component) (any, error) {
 	switch c.Type {
 	case "kpi":
 		v, e := x.evalAt("value", c.Value, nil)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		t, e := x.tone("tone", c.Tone, nil)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		sub := ""
 		if c.Sub != "" {
 			// Expand placeholders in the source, never in the result: evaluated ledger text may contain "{{".
 			src, e := x.template("sub", c.Sub)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			s, e := x.evalAt("sub", src, nil)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			sub = fmt.Sprint(s)
 		}
@@ -202,7 +189,7 @@ func (x *execution) render(c Component) (string, any, error) {
 		if c.Delta != "" {
 			d, e := x.evalAt("delta", c.Delta, nil)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			direction := "neutral"
 			if n, err := numeric(d); err == nil {
@@ -220,71 +207,45 @@ func (x *execution) render(c Component) (string, any, error) {
 			sub += " · " + format(d, c.Format)
 		}
 		values["sub"] = sub
-		sparkline := ""
 		if c.Sparkline != "" {
 			result, err := x.evalAt("sparkline", c.Sparkline, nil)
 			if err != nil {
-				return "", nil, err
+				return nil, err
 			}
 			items, ok := result.([]any)
 			if !ok || len(items) > 600 {
-				return "", nil, &EvalError{Field: "sparkline", Expr: c.Sparkline, Err: fmt.Errorf("sparkline must be a list of at most 600 numbers")}
+				return nil, &EvalError{Field: "sparkline", Expr: c.Sparkline, Err: fmt.Errorf("sparkline must be a list of at most 600 numbers")}
 			}
 			numbers := make([]float64, len(items))
 			labels := make([]string, len(items))
 			for i, item := range items {
 				numbers[i], err = numeric(item)
 				if err != nil {
-					return "", nil, &EvalError{Field: "sparkline", Expr: c.Sparkline, Err: fmt.Errorf("sparkline point %d must be a finite number", i+1)}
+					return nil, &EvalError{Field: "sparkline", Expr: c.Sparkline, Err: fmt.Errorf("sparkline point %d must be a finite number", i+1)}
 				}
 				labels[i] = format(numbers[i], c.Format)
 			}
 			values["sparkline"] = numbers
 			values["sparkline_text"] = labels
-			if len(numbers) > 0 {
-				var points []string
-				scale := 1.0
-				for _, n := range numbers {
-					scale = math.Max(scale, math.Abs(n))
-				}
-				lo, hi := numbers[0]/scale, numbers[0]/scale
-				for _, n := range numbers {
-					lo, hi = math.Min(lo, n/scale), math.Max(hi, n/scale)
-				}
-				for i, n := range numbers {
-					y := 16.0
-					if hi > lo {
-						y = 30 - 28*(n/scale-lo)/(hi-lo)
-					}
-					points = append(points, fmt.Sprintf("%.2f,%.2f", 2+96*float64(i)/float64(max(1, len(numbers)-1)), y))
-				}
-				mark := `<polyline fill="none" stroke="currentColor" stroke-width="2" points="` + strings.Join(points, " ") + `"/>`
-				if len(numbers) == 1 {
-					mark = `<circle cx="2" cy="16" r="2" fill="currentColor"/>`
-				}
-				sparkline = `<svg width="100" height="32" viewBox="0 0 100 32" role="img" aria-label="` + escape("Trend: "+strings.Join(labels, ", ")) + `">` + mark + `</svg>`
-			}
 		}
-		return `<div class="kpi"><div class="v ` + t + `">` + escape(format(v, c.Format)) + `</div><div class="d">` + escape(sub) + `</div>` + sparkline + `</div>`, values, nil
+		return values, nil
 	case "text":
 		text, e := x.template("md", c.MD)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		safe := escape(text)
 		safe = bold.ReplaceAllString(safe, "<strong>$1</strong>")
 		safe = strings.ReplaceAll(safe, "\n", "<br>")
-		return `<div class="dashboard-note">` + safe + `</div>`, map[string]any{"type": "text", "html": safe}, nil
+		return map[string]any{"type": "text", "html": safe}, nil
 	case "table", "scenario_compare":
 		rows, e := x.rows(c)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		if len(c.Columns) < 1 || len(c.Columns) > 30 {
-			return "", nil, fmt.Errorf("table needs 1..30 columns")
+			return nil, fmt.Errorf("table needs 1..30 columns")
 		}
-		var b strings.Builder
-		b.WriteString(`<div class="tbl" tabindex="0" role="region" aria-label="` + escape(c.Title+" table") + `"><table><thead><tr>`)
 		columns := []map[string]any{}
 		for i, col := range c.Columns {
 			align := "left"
@@ -292,103 +253,64 @@ func (x *execution) render(c Component) (string, any, error) {
 			case "usd", "usd0", "eur", "eur0", "int", "number", "pct", "pct0", "mo":
 				align = "right"
 			}
-			if align == "right" {
-				b.WriteString(`<th class="r">` + escape(col.Label) + `</th>`)
-			} else {
-				b.WriteString(`<th>` + escape(col.Label) + `</th>`)
-			}
 			columns = append(columns, map[string]any{"key": fmt.Sprintf("c%d", i), "label": col.Label, "format": col.Format, "align": align})
 		}
-		b.WriteString(`</tr></thead><tbody>`)
 		values := []map[string]any{}
 		for _, r := range rows {
-			b.WriteString(`<tr>`)
 			row := map[string]any{}
 			for i, col := range c.Columns {
 				v, e := x.evalAt(fmt.Sprintf("columns/%d/value", i), col.Value, r)
 				if e != nil {
-					return "", nil, e
+					return nil, e
 				}
 				t, e := x.tone(fmt.Sprintf("columns/%d/tone", i), col.Tone, r)
 				if e != nil {
-					return "", nil, e
+					return nil, e
 				}
-				class := t
-				if columns[i]["align"] == "right" {
-					class += " r"
-				}
-				b.WriteString(`<td class="` + class + `">` + escape(format(v, col.Format)) + `</td>`)
 				row[fmt.Sprintf("c%d", i)] = map[string]any{"v": v, "t": format(v, col.Format), "tone": t}
 			}
 			values = append(values, row)
-			b.WriteString(`</tr>`)
 		}
-		if len(rows) == 0 {
-			b.WriteString(`<tr><td colspan="` + strconv.Itoa(len(c.Columns)) + `">No matching rows.</td></tr>`)
-		}
-		b.WriteString(`</tbody></table></div>`)
-		return b.String(), map[string]any{"type": c.Type, "columns": columns, "rows": values}, nil
+		return map[string]any{"type": c.Type, "columns": columns, "rows": values}, nil
 	case "budget_bars":
 		rows, e := x.rows(c)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
-		type bar struct {
-			Label         string
-			Actual, Limit float64
-			Average       any
-			Window        any
-			Accounts      any
-		}
-		bars := []bar{}
-		maxValue := 1.0
+		values := make([]map[string]any, 0, len(rows))
 		for _, r := range rows {
 			l, e := x.evalAt("label", c.Label, r)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			av, e := x.evalAt("actual", c.Actual, r)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			lv, e := x.evalAt("limit", c.Limit, r)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
-			a, e := numeric(av)
+			actual, e := numeric(av)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			limit, e := numeric(lv)
-			if e != nil || a < 0 || limit < 0 {
-				return "", nil, fmt.Errorf("budget bars need nonnegative numbers")
+			if e != nil || actual < 0 || limit < 0 {
+				return nil, fmt.Errorf("budget bars need nonnegative numbers")
 			}
-			bars = append(bars, bar{fmt.Sprint(l), a, limit, r["avg6"], r["window_months"], r["accounts"]})
-			maxValue = math.Max(maxValue, math.Max(a, limit))
-		}
-		var b strings.Builder
-		for _, r := range bars {
-			class := ""
-			if r.Actual > r.Limit {
-				class = "over"
-			}
-			fmt.Fprintf(&b, `<div class="bbar"><span>%s</span><span class="tr"><i class="%s" style="width:%.3f%%"></i><b style="left:calc(%.3f%% - 1px)"></b></span><span class="v">%s / %s</span></div>`, escape(r.Label), class, r.Actual/maxValue*100, r.Limit/maxValue*100, escape(format(r.Actual, "eur0")), escape(format(r.Limit, "eur0")))
-		}
-		b.WriteString(`<div class="legend"><span><i class="legend-ok"></i>within limit</span><span><i class="legend-neg"></i>over limit</span><span>│ limit</span></div>`)
-		values := make([]map[string]any, 0, len(bars))
-		for _, bar := range bars {
 			status := "within"
-			if bar.Actual > bar.Limit {
+			if actual > limit {
 				status = "over"
 			}
-			value := map[string]any{"label": bar.Label, "actual": bar.Actual, "limit": bar.Limit, "status": status, "actual_text": format(bar.Actual, "eur0"), "limit_text": format(bar.Limit, "eur0")}
-			if avg, err := numeric(bar.Average); err == nil {
+			value := map[string]any{"label": fmt.Sprint(l), "actual": actual, "limit": limit, "status": status, "actual_text": format(actual, "eur0"), "limit_text": format(limit, "eur0")}
+			if avg, err := numeric(r["avg6"]); err == nil {
 				value["average_text"] = format(avg, "eur0")
-				if months, err := numeric(bar.Window); err == nil && months > 0 && months == math.Trunc(months) {
+				if months, err := numeric(r["window_months"]); err == nil && months > 0 && months == math.Trunc(months) {
 					value["average_label"] = fmt.Sprintf("%g-month average", months)
 				}
 			}
-			switch accounts := bar.Accounts.(type) {
+			switch accounts := r["accounts"].(type) {
 			case []string:
 				if accounts != nil {
 					value["accounts"] = accounts
@@ -409,11 +331,11 @@ func (x *execution) render(c Component) (string, any, error) {
 			}
 			values = append(values, value)
 		}
-		return b.String(), map[string]any{"type": "budget", "rows": values}, nil
+		return map[string]any{"type": "budget", "rows": values}, nil
 	case "chart":
 		return x.chart(c)
 	default:
-		return "", nil, fmt.Errorf("unknown component type %q", c.Type)
+		return nil, fmt.Errorf("unknown component type %q", c.Type)
 	}
 }
 
@@ -458,22 +380,22 @@ func chartValue(c Component, points []chartPoint, names []string, reference *flo
 	return out
 }
 
-func (x *execution) chart(c Component) (string, any, error) {
+func (x *execution) chart(c Component) (any, error) {
 	if c.Encoding == nil {
-		return "", nil, fmt.Errorf("chart encoding required")
+		return nil, fmt.Errorf("chart encoding required")
 	}
 	if c.Mark != "bar" && c.Mark != "line" && c.Mark != "area" && c.Mark != "stack" && c.Mark != "donut" {
-		return "", nil, fmt.Errorf("chart mark must be bar, line, area, stack or donut")
+		return nil, fmt.Errorf("chart mark must be bar, line, area, stack or donut")
 	}
 	rows, e := x.rows(c)
 	if e != nil {
-		return "", nil, e
+		return nil, e
 	}
 	if len(rows) > 5000 {
-		return "", nil, fmt.Errorf("chart exceeds 5000 points")
+		return nil, fmt.Errorf("chart exceeds 5000 points")
 	}
 	if len(rows) == 0 {
-		return `<p class="cap">No data for this chart.</p>`, chartValue(c, []chartPoint{}, nil, nil, ""), nil
+		return chartValue(c, []chartPoint{}, nil, nil, ""), nil
 	}
 	field := func(axis Axis, r map[string]any) (any, error) {
 		if axis.Expr != "" {
@@ -486,227 +408,66 @@ func (x *execution) chart(c Component) (string, any, error) {
 		return v, nil
 	}
 	points := []chartPoint{}
-	categories := []string{}
 	series := []string{}
-	byX := map[string]bool{}
 	bySeries := map[string]bool{}
 	for _, r := range rows {
 		v, e := field(c.Encoding.X, r)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		y, e := field(c.Encoding.Y, r)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		n, e := numeric(y)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
 		seriesName := ""
 		if c.Encoding.Color != nil {
 			v, e := field(*c.Encoding.Color, r)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			seriesName = fmt.Sprint(v)
 		}
 		p := chartPoint{X: fmt.Sprint(v), Y: n, YText: format(n, c.Format), Series: seriesName}
 		points = append(points, p)
-		if !byX[p.X] {
-			categories = append(categories, p.X)
-			byX[p.X] = true
-		}
 		if !bySeries[p.Series] {
 			series = append(series, p.Series)
 			bySeries[p.Series] = true
 		}
 	}
-	color := func(i int) string { return fmt.Sprintf("var(--c%d)", i%5) }
-	colorIndex := map[string]int{}
-	for i, s := range series {
-		colorIndex[s] = i
-	}
-	var b strings.Builder
-	b.WriteString(`<div class="chart" tabindex="0" role="region" aria-label="` + escape(c.Title+" chart; scroll to see all values") + `"><svg viewBox="0 0 560 250" role="img" aria-label="` + escape(c.Title) + `"><title>` + escape(c.Title) + `</title>`)
-	if c.Mark == "donut" {
-		total := 0.0
-		for _, p := range points {
-			if p.Y < 0 {
-				return "", nil, fmt.Errorf("donut values must be nonnegative")
-			}
-			total += p.Y
-		}
-		if total <= 0 {
-			return `<p class="cap">No positive values to display.</p>`, chartValue(c, points, series, nil, ""), nil
-		}
-		offset := 0.0
-		for i, p := range points {
-			fraction := p.Y / total
-			fmt.Fprintf(&b, `<circle cx="150" cy="125" r="80" fill="none" stroke="%s" stroke-width="34" pathLength="100" stroke-dasharray="%.6f %.6f" stroke-dashoffset="%.6f" transform="rotate(-90 150 125)"><title>%s: %s</title></circle>`, color(i), fraction*100, 100-fraction*100, -offset*100, escape(p.X), escape(format(p.Y, c.Format)))
-			if i < 12 {
-				fmt.Fprintf(&b, `<rect x="280" y="%d" width="10" height="10" fill="%s"/><text x="300" y="%d">%s · %s</text>`, 20+i*18, color(i), 29+i*18, escape(p.X), escape(format(p.Y, c.Format)))
-			}
-			offset += fraction
-		}
-		b.WriteString(`</svg></div>`)
-		b.WriteString(chartData(c.Title, points, nil, ""))
-		return b.String(), chartValue(c, points, series, nil, ""), nil
-	}
-	low, high := 0.0, 1.0
-	totals := map[string]float64{}
 	for _, p := range points {
-		low = math.Min(low, p.Y)
-		high = math.Max(high, p.Y)
-		totals[p.X] += math.Max(0, p.Y)
-	}
-	if c.Mark == "stack" {
-		for _, v := range totals {
-			high = math.Max(high, v)
+		if p.Y < 0 && c.Mark == "donut" {
+			return nil, fmt.Errorf("donut values must be nonnegative")
+		}
+		if p.Y < 0 && c.Mark == "stack" {
+			return nil, fmt.Errorf("stack values must be nonnegative")
 		}
 	}
-	rule := 0.0
-	hasRule := c.Rule != nil
+	if c.Mark == "donut" {
+		return chartValue(c, points, series, nil, ""), nil
+	}
+	var reference *float64
 	ruleLabel := ""
-	if hasRule {
+	if c.Rule != nil {
 		v, e := x.evalAt("rule/y", c.Rule.Y, nil)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
-		rule, e = numeric(v)
+		rule, e := numeric(v)
 		if e != nil {
-			return "", nil, e
+			return nil, e
 		}
-		high = math.Max(high, rule)
-		low = math.Min(low, rule)
+		reference = &rule
 		if c.Rule.Label != "" {
 			v, e := x.evalAt("rule/label", c.Rule.Label, nil)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			ruleLabel = fmt.Sprint(v)
 		}
 	}
-	if high == low {
-		high = low + 1
-	}
-	step := niceStep((high - low) / 4)
-	low, high = math.Floor(low/step)*step, math.Ceil(high/step)*step
-	sy := func(v float64) float64 { return 12 + (high-v)/(high-low)*208 }
-	width := 492.0 / float64(len(categories))
-	catIndex := map[string]int{}
-	for i, c := range categories {
-		catIndex[c] = i
-	}
-	for v := low; v <= high+step/2; v += step {
-		y := sy(v)
-		fmt.Fprintf(&b, `<line x1="56" x2="548" y1="%.3f" y2="%.3f" class="chart-grid"/><text x="48" y="%.3f" text-anchor="end">%s</text>`, y, y, y+4, escape(format(v, "int")))
-	}
-	if c.Mark == "line" || c.Mark == "area" {
-		for _, s := range series {
-			var path strings.Builder
-			first, last := -1, -1
-			for _, p := range points {
-				if p.Series != s {
-					continue
-				}
-				i := catIndex[p.X]
-				px := 56 + (float64(i)+0.5)*width
-				command := "L"
-				if first < 0 {
-					command = "M"
-					first = i
-				}
-				last = i
-				fmt.Fprintf(&path, "%s%.3f %.3f ", command, px, sy(p.Y))
-			}
-			if first < 0 {
-				continue
-			}
-			if c.Mark == "area" {
-				fmt.Fprintf(&b, `<path d="%sL%.3f %.3f L%.3f %.3f Z" fill="%s" fill-opacity=".12"/>`, path.String(), 56+(float64(last)+0.5)*width, sy(0), 56+(float64(first)+0.5)*width, sy(0), color(colorIndex[s]))
-			}
-			fmt.Fprintf(&b, `<path d="%s" fill="none" stroke="%s" stroke-width="2"/>`, path.String(), color(colorIndex[s]))
-			for _, p := range points {
-				if p.Series == s {
-					fmt.Fprintf(&b, `<circle cx="%.3f" cy="%.3f" r="2.5" fill="%s"><title>%s %s: %s</title></circle>`, 56+(float64(catIndex[p.X])+0.5)*width, sy(p.Y), color(colorIndex[s]), escape(p.X), escape(s), escape(format(p.Y, c.Format)))
-				}
-			}
-		}
-	}
-	if c.Mark == "bar" || c.Mark == "stack" {
-		stack := map[string]float64{}
-		for _, p := range points {
-			bw := math.Min(32, width*0.7)
-			px := 56 + (float64(catIndex[p.X])+0.5)*width - bw/2
-			base := 0.0
-			if c.Mark == "stack" {
-				if p.Y < 0 {
-					return "", nil, fmt.Errorf("stack values must be nonnegative")
-				}
-				base = stack[p.X]
-				stack[p.X] += p.Y
-			} else if len(series) > 1 {
-				bw /= float64(len(series))
-				px += float64(colorIndex[p.Series]) * bw
-			}
-			top, bottom := sy(base+p.Y), sy(base)
-			if top > bottom {
-				top, bottom = bottom, top
-			}
-			fmt.Fprintf(&b, `<rect x="%.3f" y="%.3f" width="%.3f" height="%.3f" fill="%s"><title>%s %s: %s</title></rect>`, px, top, bw, math.Max(0.5, bottom-top), color(colorIndex[p.Series]), escape(p.X), escape(p.Series), escape(format(p.Y, c.Format)))
-		}
-	}
-	for i, c := range categories {
-		if i%max(1, (len(categories)+7)/8) == 0 || i == len(categories)-1 {
-			fmt.Fprintf(&b, `<text x="%.3f" y="242" text-anchor="middle">%s</text>`, 56+(float64(i)+0.5)*width, escape(c))
-		}
-	}
-	if hasRule {
-		fmt.Fprintf(&b, `<line x1="56" x2="548" y1="%.3f" y2="%.3f" stroke="var(--text2)" stroke-dasharray="5 4"/><text x="544" y="%.3f" text-anchor="end">%s</text>`, sy(rule), sy(rule), sy(rule)-5, escape(ruleLabel))
-	}
-	b.WriteString(`</svg>`)
-	if len(series) > 1 {
-		b.WriteString(`<div class="legend">`)
-		for i, s := range series {
-			fmt.Fprintf(&b, `<span><i style="background:%s"></i>%s</span>`, color(i), escape(s))
-		}
-		b.WriteString(`</div>`)
-	}
-	b.WriteString(`</div>`)
-	var reference *float64
-	if hasRule {
-		reference = &rule
-	}
-	b.WriteString(chartData(c.Title, points, reference, ruleLabel))
-	return b.String(), chartValue(c, points, series, reference, ruleLabel), nil
-}
-
-func chartData(title string, points []chartPoint, reference *float64, label string) string {
-	var b strings.Builder
-	b.WriteString(`<details class="chart-data"><summary>View chart data</summary><div class="tbl" tabindex="0" role="region" aria-label="` + escape(title+" chart data") + `"><table><caption>` + escape(title) + `</caption><thead><tr><th scope="col">Series</th><th scope="col">Category</th><th scope="col">Value</th></tr></thead><tbody>`)
-	for _, p := range points {
-		series := p.Series
-		if series == "" {
-			series = "Value"
-		}
-		b.WriteString(`<tr><th scope="row">` + escape(series) + `</th><td>` + escape(p.X) + `</td><td class="r">` + escape(strconv.FormatFloat(p.Y, 'f', -1, 64)) + `</td></tr>`)
-	}
-	b.WriteString(`</tbody>`)
-	if reference != nil {
-		b.WriteString(`<tfoot><tr><th colspan="2" scope="row">Reference: ` + escape(label) + `</th><td class="r">` + escape(strconv.FormatFloat(*reference, 'f', -1, 64)) + `</td></tr></tfoot>`)
-	}
-	b.WriteString(`</table></div></details>`)
-	return b.String()
-}
-
-// niceStep rounds a raw axis interval up to 1, 2 or 5 times a power of ten so ticks read as round numbers.
-func niceStep(raw float64) float64 {
-	magnitude := math.Pow(10, math.Floor(math.Log10(raw)))
-	for _, f := range []float64{1, 2, 5} {
-		if raw <= f*magnitude {
-			return f * magnitude
-		}
-	}
-	return 10 * magnitude
+	return chartValue(c, points, series, reference, ruleLabel), nil
 }

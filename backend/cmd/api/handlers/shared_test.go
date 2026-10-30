@@ -50,7 +50,7 @@ func TestSharedOutputOnlyExposesPlacedRenderedValues(t *testing.T) {
 	if points[0].(map[string]any)["y"] != float64(10) {
 		t.Fatal(points)
 	}
-	legacy, err := sharedOutput(sharing.SharedView{Snapshot: sharing.Snapshot{Rendered: dashboard.Rendered{HTML: "<p>frozen</p>"}}})
+	legacy, err := sharedOutput(sharing.SharedView{LegacyHTML: "<p>frozen</p>"})
 	if err != nil || legacy["legacy_html"] != "<p>frozen</p>" {
 		t.Fatal(legacy, err)
 	}
