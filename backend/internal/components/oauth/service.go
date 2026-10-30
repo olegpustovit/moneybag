@@ -407,7 +407,8 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 		{{Key: "$lookup", Value: bson.M{"from": "users", "localField": "grant.user_id", "foreignField": "_id", "pipeline": mongo.Pipeline{{{Key: "$project", Value: bson.M{"_id": 1}}}}, "as": "users"}}},
 		{{Key: "$project", Value: bson.M{"token": 1, "grant": 1, "users": 1}}},
 	}
-	cursor, err := s.repo.db.Collection("oauth_tokens").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(1))
+	// The unique token lookup returns at most one row; a two-row batch exhausts the cursor.
+	cursor, err := s.repo.db.Collection("oauth_tokens").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(2))
 	if err != nil {
 		return principal.Principal{}, principal.ErrForbidden
 	}

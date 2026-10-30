@@ -31,7 +31,7 @@ func TestBearerOneRead(t *testing.T) {
 	}
 	var reads atomic.Int64
 	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(&event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" {
+		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" || e.CommandName == "killCursors" {
 			reads.Add(1)
 		}
 	}}))
