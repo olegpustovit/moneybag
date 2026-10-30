@@ -9,3 +9,11 @@ func TestLintFlagsComponentsWithoutUnit(t *testing.T) {
 		t.Fatalf("lint: %+v", issues)
 	}
 }
+
+func TestLintFlagsIdentifiersInVisibleText(t *testing.T) {
+	spec := Spec{Components: []Component{{ID: "k", Type: "kpi", Format: "usd", Title: "Net (data.total)"}, {ID: "c", Type: "chart", Format: "usd", Title: "Monthly spend"}}}
+	issues := Lint(spec)
+	if len(issues) != 1 || issues[0].Field != "title" || issues[0].ComponentID != "k" {
+		t.Fatalf("lint: %+v", issues)
+	}
+}
