@@ -9,6 +9,7 @@ const check=(name,ok,detail='') => {if(ok)passed++;else failed++;console.log(`${
 // SECTION=a|b|c runs part of the script, because each browser run must fit its time limit.
 const SECTIONS={a:['home','data layer','nav','fixed','no chart library leftovers','details'],b:['filter and view','command bar','usage','hover prefetch'],c:['entries','changes','sign out'],d:['editing gone']},wanted=process.env.SECTION ? SECTIONS[process.env.SECTION] : null
 const attempt=async (name,work) => {if(wanted && !wanted.includes(name) && !(process.env.SECTION==='d' && name.startsWith('redirect')))return;try {await work()} catch(error){failed++;console.log(`FAIL ${name}: ${String(error.message).split('\n')[0].slice(0,160)}`)}}
+page.on('response',async r => {if(r.url().endsWith('/api/feedback'))console.log('  feedback answered',r.status(),(await r.text().catch(() => '')).slice(0,160))})
 const errors=[],requests=[];page.on('pageerror',e => errors.push(e.message));page.on('request',r => {if(r.url().startsWith(base))requests.push({url:r.url().slice(base.length),method:r.method(),body:r.postData() ?? ''})})
 await page.goto(`${base}/login`);await page.locator('[name=email]').fill(USER);await page.locator('[name=password]').fill(PASS);await page.locator('button[type=submit]').click();await page.waitForURL(u => !u.pathname.startsWith('/login'))
 const firstView=Date.now();await page.locator('main h1').first().waitFor({timeout:12000});console.log(`  first view with no cache: ${Date.now()-firstView} ms`)
