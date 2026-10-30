@@ -179,15 +179,15 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 	if flight.err == nil && ctx.Err() == nil && !flight.volatile && state.writes == 0 && state.generation == key.generation && canStore {
 		// shortcut: snapshots are capped at 64 entries; upgrade to byte-aware eviction if memory requires it.
 		if len(s.order) >= 64 {
-			// Preserve rendered dashboards when source snapshots churn during prewarming.
+			// Preserve dashboard metadata and renders when source snapshots churn.
 			evict := -1
 			for i, old := range s.order {
-				if old.kind != "render" {
+				if old.kind != "render" && old.kind != "dashboard" {
 					evict = i
 					break
 				}
 			}
-			if evict < 0 && key.kind == "render" {
+			if evict < 0 && (key.kind == "render" || key.kind == "dashboard") {
 				evict = 0
 			}
 			if evict >= 0 {

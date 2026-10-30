@@ -91,6 +91,49 @@ func TestSnapshotsKeepRendersDuringSourceChurn(t *testing.T) {
 	}
 }
 
+func TestSnapshotsKeepDashboardMetadataDuringSourceChurn(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	builds := map[string]int{}
+	read := func(kind, name string) {
+		t.Helper()
+		_, err := cache.read(expressions.WithVolatility(context.Background()), p, kind, name, nil, func() (any, error) { builds[kind+name]++; return name, nil }, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 7; i++ {
+		read("dashboard", fmt.Sprint(i))
+		read("render", fmt.Sprint(i))
+	}
+	for i := 0; i < 120; i++ {
+		read("source", fmt.Sprint(i))
+	}
+	for i := 0; i < 7; i++ {
+		read("dashboard", fmt.Sprint(i))
+		read("render", fmt.Sprint(i))
+		if builds["dashboard"+fmt.Sprint(i)] != 1 || builds["render"+fmt.Sprint(i)] != 1 {
+			t.Fatalf("dashboard %d evicted during source churn", i)
+		}
+	}
+	if len(cache.items) != 64 {
+		t.Fatalf("cache size: %d", len(cache.items))
+	}
+	for i := 7; i < 57; i++ {
+		read("dashboard", fmt.Sprint(i))
+	}
+	read("source", "not-retained")
+	read("source", "not-retained")
+	if builds["sourcenot-retained"] != 2 || len(cache.items) != 64 {
+		t.Fatal("source displaced protected cache entries")
+	}
+	read("dashboard", "new")
+	read("dashboard", "0")
+	if builds["dashboard0"] != 2 || len(cache.items) != 64 {
+		t.Fatal("new metadata must evict the oldest protected entry when full")
+	}
+}
+
 func TestSnapshotsDiscardOldRendersAfterWrites(t *testing.T) {
 	cache := testSnapshots()
 	owner := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
