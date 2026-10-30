@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { Profiler, StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { RouterProvider, useRouterState } from '@tanstack/react-router'
@@ -10,4 +10,5 @@ function App() {
   return <>{empty && <main className="loading" aria-busy="true">Loading workspace…</main>}<RouterProvider router={router} /></>
 }
 
-createRoot(document.getElementById('root')!).render(<StrictMode><QueryClientProvider client={queryClient}><App /></QueryClientProvider></StrictMode>)
+const app = <StrictMode><QueryClientProvider client={queryClient}><App /></QueryClientProvider></StrictMode>
+createRoot(document.getElementById('root')!).render(import.meta.env.MODE === 'profile' ? <Profiler id="app" onRender={(_id, phase, actualDuration, _baseDuration, _startTime, commitTime) => window.dispatchEvent(new CustomEvent('moneybag:react-commit',{detail:{phase,actualDuration,commitTime}}))}>{app}</Profiler> : app)
