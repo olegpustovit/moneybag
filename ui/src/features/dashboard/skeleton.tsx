@@ -1,20 +1,9 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DashboardGetOutput } from '../../lib/tools'
 import { Skeleton } from '../../components/ui/skeleton'
 
 type Spec = DashboardGetOutput['spec']
 type Page = NonNullable<Spec['pages']>[number]
 type Item = NonNullable<Spec['components']>[number]
-
-export function useDashboardSkeleton(pending:boolean):boolean {
- const [visible,setVisible]=useState(false),started=useRef(0)
- useLayoutEffect(() => {if(visible)started.current=performance.now()},[visible])
- useEffect(() => {
-  if(pending && !visible) {const timer=setTimeout(() => setVisible(true),150);return () => clearTimeout(timer)}
-  if(!pending && visible) {const timer=setTimeout(() => setVisible(false),Math.max(0,300-(performance.now()-started.current)));return () => clearTimeout(timer)}
- },[pending,visible])
- return visible
-}
 
 export function DashboardSkeleton({page,components}:{page:Page|undefined;components:Map<string,Item>}) {
  return <div className="dashboard-grid dashboard-skeleton" aria-hidden="true">{(page?.layout ?? []).flatMap((row,ri) => (row.cols ?? []).map((placement,ci) => {

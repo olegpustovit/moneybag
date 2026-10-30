@@ -9,7 +9,8 @@ import { DashboardEditor } from '../features/dashboard/editor'
 import { DateRange } from '../features/dashboard/date-range'
 import { componentValue } from '../features/dashboard/values'
 import { Component } from '../features/dashboard/component'
-import { DashboardSkeleton, useDashboardSkeleton } from '../features/dashboard/skeleton'
+import { DashboardSkeleton } from '../features/dashboard/skeleton'
+import { useLoadingSkeleton } from '../components/use-loading-skeleton'
 import { tableSort } from '../features/dashboard/table-sort'
 import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
 
@@ -51,7 +52,7 @@ function Dashboard() {
   for (const key of ['from','to','month'] as const) if (search[key] !== undefined) params[key] = search[key]
   if(search.all){params.from='';params.to=''}
   const preview = useQuery({ ...dashboardPreviewQuery(session, id, version, params), placeholderData: keepPreviousData })
-  const showSkeleton = useDashboardSkeleton(preview.isPending)
+  const showSkeleton = useLoadingSkeleton(preview.isPending)
   const pages = dashboard.spec.pages ?? []
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
   const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
