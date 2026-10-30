@@ -208,6 +208,27 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 	}
 	return out, nil
 }
+
+// HasLaterTarget reports whether a later write was recorded for the same target.
+// shortcut: failed or interrupted attempts also block undo, upgrade when outcomes can be checked efficiently.
+func (s *Service) HasLaterTarget(ctx context.Context, p principal.Principal, target Target, seq int64) (bool, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return false, err
+	}
+	db, err := mongodb.Shared(s.repo.DB, p)
+	if err != nil {
+		return false, err
+	}
+	err = db.Collection("events").FindOne(ctx, bson.M{"user_id": p.UserID, "target.coll": target.Collection, "target.id": target.ID, "seq": bson.M{"$gt": seq}}).Err()
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check later target events: %w", err)
+	}
+	return true, nil
+}
+
 func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Event, error) {
 	if err := p.Require("ledger:read"); err != nil {
 		return Event{}, err

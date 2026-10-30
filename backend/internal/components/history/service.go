@@ -82,6 +82,16 @@ func (s *Service) Undo(ctx context.Context, p principal.Principal, in UndoInput)
 		if event.Outcome == nil || event.Outcome.Status != "completed" {
 			return fmt.Errorf("only completed mutations can be undone; review failed or interrupted workflows first")
 		}
+		switch event.Tool {
+		case "dashboard_publish", "dashboard_unpublish", "dashboard_add_component", "dashboard_update_component", "dashboard_remove_component", "dashboard_compose", "dashboard_patch":
+			later, err := s.Audit.HasLaterTarget(tx, p, event.Target, event.Seq)
+			if err != nil {
+				return err
+			}
+			if later {
+				return fmt.Errorf("dashboard changed after this event: %w", principal.ErrConflict)
+			}
+		}
 		latest, e := s.Audit.List(tx, p, audit.ListInput{Limit: 1})
 		if e != nil {
 			return e

@@ -439,11 +439,53 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || len(published.Events) != 1 {
 		t.Fatal("publish event", published, e)
 	}
+	if _, e = a.Write(ctx, pa, "synthetic_other_target", audit.Target{Collection: "accounts", ID: "undo-publish"}, "", nil, nil, func(context.Context) error { return nil }); e != nil {
+		t.Fatal(e)
+	}
 	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: published.Events[0].ID, Reason: "Undo publish"}); e != nil {
 		t.Fatal(e)
 	}
 	if draft, e := dash.Get(ctx, pa, "undo-publish", "draft"); e != nil || draft.Version != edited.DraftVersion || draft.Status != "draft" {
 		t.Fatal("undoing a publish should restore its draft", draft.Version, draft.Status, e)
+	}
+	createShared("undo-stale", "1", map[string]dashboard.Query{})
+	_, e = dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-stale", Component: dashboard.Component{ID: "first", Type: "text", MD: "first"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	firstEvents, e := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_add_component", Target: "undo-stale", Limit: 1})
+	if e != nil || len(firstEvents.Events) != 1 {
+		t.Fatal("first edit event", firstEvents, e)
+	}
+	second, e := dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-stale", Component: dashboard.Component{ID: "second", Type: "text", MD: "second"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: firstEvents.Events[0].ID, Reason: "stale edit"}); !errors.Is(e, principal.ErrConflict) {
+		t.Fatal("stale edit undo should conflict", e)
+	}
+	if current, e := dash.Get(ctx, pa, "undo-stale", "draft"); e != nil || current.Version != second.DraftVersion || len(current.Spec.Components) != 3 {
+		t.Fatal("stale undo changed draft", current, e)
+	}
+	if _, e = dash.Publish(ctx, pa, "undo-stale", second.DraftVersion, "publish"); e != nil {
+		t.Fatal(e)
+	}
+	publishEvents, e := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_publish", Target: "undo-stale", Limit: 1})
+	if e != nil || len(publishEvents.Events) != 1 {
+		t.Fatal("publish event", publishEvents, e)
+	}
+	third, e := dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-stale", Component: dashboard.Component{ID: "third", Type: "text", MD: "third"}})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: publishEvents.Events[0].ID, Reason: "stale publication"}); !errors.Is(e, principal.ErrConflict) {
+		t.Fatal("stale publish undo should conflict", e)
+	}
+	if current, e := dash.Get(ctx, pa, "undo-stale", "draft"); e != nil || current.Version != third.DraftVersion {
+		t.Fatal("stale publish undo changed draft", current, e)
+	}
+	if current, e := dash.Get(ctx, pa, "undo-stale", "published"); e != nil || current.Version != second.DraftVersion {
+		t.Fatal("stale publish undo changed publication", current, e)
 	}
 	bulk, e := book.SetTags(ctx, pa, ledger.TagInput{Where: "true", Add: []string{"bulk:undo"}})
 	if e != nil || bulk.Updated < 2 {
