@@ -16,7 +16,7 @@ export const sessionQuery = queryOptions({
 
 let requestID = 0
 const protocol = '2026-07-28'
-export interface ToolInfo { name: string; description?: string; inputSchema: { properties?: Record<string, { type?: string | string[]; description?: string; enum?: unknown[] }>; required?: string[] } }
+export interface ToolInfo { name: string; description?: string; annotations?: { readOnlyHint?: boolean }; inputSchema: { properties?: Record<string, { type?: string | string[]; description?: string; enum?: unknown[] }>; required?: string[] } }
 type Envelope = { error?: { message: string }; result?: { isError?: boolean; structuredContent?: unknown; content?: { type: string; text?: string }[]; supportedVersions?: string[]; tools?: ToolInfo[]; nextCursor?: string } }
 async function rpc(session: Session, method: string, params: Record<string, unknown>): Promise<NonNullable<Envelope['result']>> {
   const response = await fetch(session.mcp_url, {
