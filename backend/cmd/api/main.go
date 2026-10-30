@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/gofiber/fiber/v3"
@@ -139,6 +140,27 @@ func run() error {
 	defer stopJobs()
 	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
+	app.Use(func(c fiber.Ctx) error {
+		if (c.Path() != "/mcp" && c.Path() != "/mcp/readonly") || c.Method() != "POST" {
+			return c.Next()
+		}
+		started := time.Now()
+		var request struct {
+			Method string `json:"method"`
+			Params struct {
+				Name      string `json:"name"`
+				Arguments struct {
+					DashboardID string `json:"dashboard_id"`
+				} `json:"arguments"`
+			} `json:"params"`
+		}
+		if json.Unmarshal(c.Body(), &request) != nil || request.Method != "tools/call" || request.Params.Name != "dashboard_preview" {
+			return c.Next()
+		}
+		err := c.Next()
+		log.Info("temporary preview request timing", "dashboard", request.Params.Arguments.DashboardID, "elapsed_ms", float64(time.Since(started).Microseconds())/1000)
+		return err
+	})
 	compress, e := handlers.Compression()
 	if e != nil {
 		return fmt.Errorf("configure HTTP compression: %w", e)
