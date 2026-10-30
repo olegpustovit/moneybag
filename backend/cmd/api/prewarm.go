@@ -20,6 +20,9 @@ type warmTask struct {
 	cancel context.CancelFunc
 }
 
+// prewarmDebounce is a var so tests need not wait for it.
+var prewarmDebounce = 2 * time.Second
+
 func prewarmer(parent context.Context, snapshots *dashboard.Snapshots, service warmDashboard, log *slog.Logger) (func(string, bool), func()) {
 	var mu sync.Mutex
 	var workers sync.WaitGroup
@@ -39,7 +42,7 @@ func prewarmer(parent context.Context, snapshots *dashboard.Snapshots, service w
 		}
 		ctx, cancel := context.WithCancel(parent)
 		task := &warmTask{cancel: cancel}
-		task.timer = time.AfterFunc(2*time.Second, func() {
+		task.timer = time.AfterFunc(prewarmDebounce, func() {
 			mu.Lock()
 			if stopped || tasks[user] != task {
 				mu.Unlock()

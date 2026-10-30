@@ -48,3 +48,5 @@ func TestPrewarmDebouncesAndSkipsDrafts(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 }
+
+func init() { prewarmDebounce = 100 * time.Millisecond }

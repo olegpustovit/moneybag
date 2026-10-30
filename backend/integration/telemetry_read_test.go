@@ -24,6 +24,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/cmd/api/handlers"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
@@ -31,6 +32,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
@@ -126,6 +128,8 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
 	h := &readHarness{ctx: ctx, db: db, audit: a, owner: owner, http: &http.Client{Transport: &http.Transport{DisableCompression: true}}}
 	h.services = mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Tables: tab, Dashboard: dash, Expr: expr, Sources: reader, Sharing: shares, Reconcile: rec, Imports: imports.NewService(imports.NewMongoRepository(db), book, nil, rec, a), Logger: slog.Default()}
+	h.services.Semantic = semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
+	h.services.Feedback = feedback.NewService(feedback.NewMongoRepository(db), a)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

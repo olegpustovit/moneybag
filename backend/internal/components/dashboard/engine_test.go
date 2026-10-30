@@ -430,6 +430,8 @@ func TestSourceMemoDoesNotCrossReaderBoundaries(t *testing.T) {
 }
 
 func TestEvaluationBudgetLeavesNoActiveReaders(t *testing.T) {
+	defer func(d time.Duration) { evalBudget = d }(evalBudget)
+	evalBudget = 200 * time.Millisecond
 	expr, _ := expressions.New()
 	reader := &deadlineReader{}
 	engine := Engine{Expr: expr, Reader: reader}

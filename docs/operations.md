@@ -2,6 +2,10 @@
 
 Production uses the existing standalone MongoDB on oracle-vm, one shared `moneybag` database and one API writer. Caddy and the MongoDB service are managed separately. Moneybag does not change their configuration.
 
+## Test
+
+`make test-integration` runs every Go test against a throwaway in-memory MongoDB in Docker in about 20 seconds. Point `MONEYBAG_TEST_MONGO_URI` at a remote `moneybag_test_` database only when you must: every round trip then costs network time and the suite takes minutes.
+
 ## Deploy
 
 Create `/home/snowbear/ci/moneybag/moneybag.env` with mode `0600` using `deploy/env.example`. Preserve its secret key across releases. Set `MONEYBAG_CHROMIUM_BIN` to a working Chromium installation; the VM already has `/opt/google/chrome/chrome`.

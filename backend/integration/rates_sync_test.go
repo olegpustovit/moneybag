@@ -187,7 +187,7 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	if e != nil || len(fresh) != 0 {
 		t.Fatal("fresh rates reported stale", fresh, e)
 	}
-	future := time.Now().UTC().Add(4 * time.Second).Truncate(time.Second)
+	future := time.Now().UTC().Add(2 * time.Second).Truncate(time.Second)
 	if _, e = prices.Set(ctx, p, rates.SetInput{Pair: "EUR/USD", Value: ledger.MustDecimal("2"), At: future.Format(time.RFC3339), Source: "Synthetic future quote"}); e != nil {
 		t.Fatal(e)
 	}

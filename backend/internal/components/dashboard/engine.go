@@ -24,7 +24,7 @@ import (
 type paramsKey struct{}
 
 // evalBudget bounds all queries of one dashboard.
-const evalBudget = 10 * time.Second
+var evalBudget = 10 * time.Second // a var so the budget test need not wait ten seconds
 
 type Reader interface {
 	Rows(context.Context, principal.Principal, string) ([]map[string]any, error)
