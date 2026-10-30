@@ -41,11 +41,12 @@ function Settings() {
   const { session } = Route.useRouteContext()
   const { data } = useSuspenseQuery(settingsQuery(session))
   const queryClient = useQueryClient()
+  const navigate = Route.useNavigate()
   const [confirm, setConfirm] = useState('')
   const [copied, setCopied] = useState(false)
   const [consoleOpen, setConsoleOpen] = useState(false)
   const revoke = useMutation({ mutationFn: (id: string) => settingsPost<{ ok: boolean }>(session, '/settings/revoke', { id }), onSuccess: async () => { setConfirm(''); await queryClient.invalidateQueries({ queryKey: settingsQuery(session).queryKey }) } })
-  const sync = useMutation({ mutationFn: (feed: string) => tool(session, 'feeds_sync', { feed }), onSuccess: (result) => { window.location.assign(`/imports/${encodeURIComponent(result.batch_id)}`) } })
+  const sync = useMutation({ mutationFn: (feed: string) => tool(session, 'feeds_sync', { feed }), onSuccess: async (result) => { await queryClient.invalidateQueries({queryKey:['imports',session.user.id]}); void navigate({to:'/imports/$batch',params:{batch:result.batch_id}}) } })
   const agents = data.agents ?? []
   const feeds = data.feeds ?? []
   return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SETTINGS</p><h1>Settings</h1><p className="description">Your account and connected agents.</p></div></header>
