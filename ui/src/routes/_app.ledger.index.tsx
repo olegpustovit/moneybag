@@ -48,7 +48,7 @@ const amountOf=(a:{c:string;v:string}) => {
 function rowOf(e:Entry,cube:Cube|null,agents:Map<string,string>):GridRow {
  const postings=e.postings ?? [],acct=(id:string) => cube?.accounts.find(a => a.id===id),flow=postings.filter(p => isFlow(p.account)),money_=postings.filter(p => !isFlow(p.account) && !p.account.startsWith('equity:'))
  const shown=flow[0] ?? money_.find(p => !p.amount.v.startsWith('-')) ?? postings[0],income=shown?.account.startsWith('income:'),transfer=!flow.length
- const total=flow.length>1 && flow.every(p => p.amount.c===flow[0].amount.c) ? {c:flow[0].amount.c,v:String(flow.reduce((n,p) => n+Number(p.amount.v),0))} : shown?.amount
+ const total=flow.length>1 && flow.every(p => p.amount.c===flow[0].amount.c) ? {c:flow[0].amount.c,v:flow.reduce((n,p) => n+Number(p.amount.v),0).toFixed(Math.max(2,...flow.map(p => p.amount.v.split('.')[1]?.length ?? 0)))} : shown?.amount
  const amt=total ? amountOf(income ? {c:total.c,v:total.v.replace(/^-/,'')} : total) : {text:'—',value:0}
  const estimated=flow.some(p => acct(p.account)?.estimated),imported=e.kind==='import' || (e.links ?? []).some(l => l.rel==='import')
  const by=e.actor.kind==='agent' ? agents.get(e.actor.id) ?? 'an agent' : e.actor.kind==='system' ? 'Moneybag' : 'you'

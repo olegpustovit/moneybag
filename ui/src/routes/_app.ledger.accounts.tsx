@@ -22,6 +22,7 @@ async function allAccounts(session:Session):Promise<Account[]> {
 }
 const nameOf=(a:Account) => a.display_name || a.name
 type Row={account:Account;value:number;text:string;native:string}
+const EMPTY='Nearly empty'
 function Group({title,rows,currency}:{title:string;rows:Row[];currency:string}) {
  const [open,setOpen]=useState(false),big=rows.filter(r => Math.abs(r.value)>=.005).sort((a,b) => Math.abs(b.value)-Math.abs(a.value)),small=rows.filter(r => Math.abs(r.value)<.005),shown=open ? [...big,...small] : big,total=rows.reduce((n,r) => n+r.value,0)
  const details=(r:Row) => openDetails({historyOf:r.account.id,target:{value:r.text,params:{account:r.account.id}},content:{title:nameOf(r.account),value:r.text,subtitle:r.account.note || humanKey(r.account.class ?? r.account.type),calculation:{summary:r.native ? `Holds ${r.native}, valued in ${currency} at today’s rate.` : 'Nothing is held here right now.',entries:<Link to="/ledger" search={{accounts:[r.account.id],t:'all'}}>See its entries</Link>},machine:[{label:'Account ID',value:r.account.id},...(r.account.pot ? [{label:'Pot',value:r.account.pot}] : []),...(r.account.note ? [{label:'Note',value:r.account.note,mono:false}] : []),...(r.account.location ? [{label:'Where',value:r.account.location,mono:false}] : [])]}})
@@ -42,6 +43,8 @@ function Accounts() {
  const byKey=new Map((balances.data.rows ?? []).map(r => [r.key,r])),rows:Row[]=accounts.data.map(account => {const b=byKey.get(account.id),value=Number(b?.value?.v ?? 0),amounts=(b?.amounts ?? []).filter(x => Number(x.v)!==0);return {account,value,text:b?.value ? moneyExact(Number(b.value.v)*100,currency) : amounts.length ? 'Not valued' : money(0,currency),native:amounts.filter(x => x.c!==currency).map(x => amountLabel(x,2)).join(' · ')}})
  const holds=rows.filter(r => r.account.type==='asset' || r.account.type==='liability'),groups=new Map<string,Row[]>()
  for(const r of holds){const key=r.account.type==='liability' ? 'Debts' : r.account.pot ? humanKey(r.account.pot,bootstrap.labels,'pot') : 'Other accounts';groups.set(key,[...(groups.get(key) ?? []),r])}
+ // Pots holding next to nothing share one box, so they don't push the real money off the page.
+ for(const [key,items] of [...groups])if(key!=='Debts' && Math.abs(items.reduce((n,r) => n+r.value,0))<1){groups.delete(key);groups.set(EMPTY,[...(groups.get(EMPTY) ?? []),...items])}
  const net=cube ? balanceAt(cube,cube.bounds.today) : null,sorted=[...groups.entries()].sort((a,b) => Math.abs(b[1].reduce((n,r) => n+r.value,0))-Math.abs(a[1].reduce((n,r) => n+r.value,0)))
  return <>
   <PageHead title="Ledger" description="Show me the entries and the accounts."/>

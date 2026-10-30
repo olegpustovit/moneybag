@@ -28,6 +28,7 @@ function Rates() {
    <div className="tm-sheet"><TimeBar state={time} bounds={bounds} hideCompare/></div>
    <div className="dashboard-grid">{pairs.map((pair,i) => {
     const s=rateSeries(cube,pair,time.range),first=s.values[0],last=s.values.at(-1),change=first && last ? (last-first)/first*100 : null
+    if(s.values.length<2)return <section className="panel" key={pair} style={{gridColumn:'span 6'}}><h2>{pairName(pair)}</h2><p className="muted">{last===undefined ? 'No quotes in this range.' : `One quote in this range: ${last}. A line needs two.`}</p></section>
     return <section className="panel" key={pair} style={{gridColumn:`span ${pairs.length===1 ? 12 : 6}`}}><TimeChart title={pairName(pair)} note={last!==undefined ? `Latest ${unitFormat('rate').full(last)}${change===null ? '' : `, ${change>=0 ? '+' : ''}${percent(change)} in this range`}` : 'No quotes in this range.'} mark="line" baseline="auto" format={unitFormat('rate')} xs={s.xs} series={[{key:pair,label:pairName(pair),color:COLORS[i%5],values:s.values}]} range={time.range} bounds={bounds} onRangeChange={(r,{final}) => time.setRange(r,{final})} onStepOut={time.zoomOut} syncKey="rates" height={220}/></section>
    })}</div>
   </>}
