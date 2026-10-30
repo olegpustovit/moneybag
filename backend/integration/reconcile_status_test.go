@@ -189,14 +189,14 @@ func TestReconcileStatusBatchedVerification(t *testing.T) {
 	if _, err = db.Collection("journal").InsertOne(ctx, entry); err != nil {
 		t.Fatal(err)
 	}
-	changed, err := s.Status(ctx, p, "bank")
+	changed, err := s.Recheck(ctx, p, "bank")
 	if err != nil || len(changed) != 1 || changed[0].LastOK != "2026-01-01" || len(changed[0].Discrepancies) != 1 || changed[0].Discrepancies[0].Diff.Value.String() != "-3.5" {
 		t.Fatalf("changed status: %+v, %v", changed, err)
 	}
 	if _, err = db.Collection("journal").DeleteOne(ctx, bson.M{"_id": "backdated"}); err != nil {
 		t.Fatal(err)
 	}
-	changed, err = s.Status(ctx, p, "bank")
+	changed, err = s.Recheck(ctx, p, "bank")
 	if err != nil || len(changed) != 1 || changed[0].LastOK != "2026-02-01" || len(changed[0].Discrepancies) != 0 {
 		t.Fatalf("restored status: %+v, %v", changed, err)
 	}

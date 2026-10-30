@@ -72,12 +72,22 @@ func registerWorkflows(r registration, s Services) {
 		}{v}, e
 	})
 	add(r, "balance_assert", "reconcile", "ledger:write", "Use this when you know a real account balance from a statement or cash count. Compares exact commodity amounts on YYYY-MM-DD and opens a discrepancy when they differ.", false, false, s.Reconcile.Assert)
-	add(r, "reconcile_status", "reconcile", "ledger:read", "Use this when checking whether the journal matches known balances. Returns last successful assertion and open discrepancies, optionally for one account.", true, false, func(ctx context.Context, p principal.Principal, in struct {
+	add(r, "reconcile_status", "reconcile", "ledger:read", "Use this when checking whether the journal matches known balances. Returns last successful assertion and open discrepancies, optionally for one account. Read-only: it reports the last verification, which runs nightly; after backdated entries, reversals or import undos call reconcile_verify first.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		Account string `json:"account,omitempty"`
 	}) (struct {
 		Accounts []reconcile.AccountStatus `json:"accounts"`
 	}, error) {
 		v, e := s.Reconcile.Status(ctx, p, in.Account)
+		return struct {
+			Accounts []reconcile.AccountStatus `json:"accounts"`
+		}{v}, e
+	})
+	add(r, "reconcile_verify", "reconcile", "ledger:write", "Use this after backdated entries, reversals or import undos. Rechecks known balances against the journal now, for one account or all, updates discrepancies and returns the same status as reconcile_status.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+		Account string `json:"account,omitempty"`
+	}) (struct {
+		Accounts []reconcile.AccountStatus `json:"accounts"`
+	}, error) {
+		v, e := s.Reconcile.Recheck(ctx, p, in.Account)
 		return struct {
 			Accounts []reconcile.AccountStatus `json:"accounts"`
 		}{v}, e
