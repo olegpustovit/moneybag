@@ -47,6 +47,127 @@ func TestSnapshotsInvalidateAcrossWriteAndIsolateOwners(t *testing.T) {
 	}
 }
 
+func TestSnapshotsKeepRendersDuringSourceChurn(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	builds := map[string]int{}
+	read := func(kind, name string) {
+		t.Helper()
+		_, err := cache.read(expressions.WithVolatility(context.Background()), p, kind, name, nil, func() (any, error) {
+			builds[kind+name]++
+			return name, nil
+		}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 7; i++ {
+		read("render", fmt.Sprint(i))
+	}
+	for i := 0; i < 100; i++ {
+		read("source", fmt.Sprint(i))
+	}
+	for i := 0; i < 7; i++ {
+		read("render", fmt.Sprint(i))
+		if builds["render"+fmt.Sprint(i)] != 1 {
+			t.Fatalf("render %d was evicted", i)
+		}
+	}
+	if len(cache.items) != 64 || len(cache.order) != 64 {
+		t.Fatalf("cache size: %d items, %d ordered", len(cache.items), len(cache.order))
+	}
+	for i := 7; i < 64; i++ {
+		read("render", fmt.Sprint(i))
+	}
+	read("source", "not-retained")
+	read("source", "not-retained")
+	if builds["sourcenot-retained"] != 2 || len(cache.items) != 64 {
+		t.Fatal("a full render cache must not grow or evict a render for a source")
+	}
+	read("render", "new")
+	read("render", "0")
+	if builds["render0"] != 2 || len(cache.items) != 64 {
+		t.Fatal("new renders must evict the oldest render when no sources remain")
+	}
+}
+
+func TestSnapshotsDiscardOldRendersAfterWrites(t *testing.T) {
+	cache := testSnapshots()
+	owner := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	other := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAW")
+	read := func(p principal.Principal, name string) {
+		t.Helper()
+		if _, err := cache.read(expressions.WithVolatility(context.Background()), p, "render", name, nil, func() (any, error) { return name, nil }, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(other, "other")
+	for range 12 {
+		cache.Changed(owner.UserID, false)
+		cache.Changed(owner.UserID, true)
+		for i := 0; i < 7; i++ {
+			read(owner, fmt.Sprint(i))
+		}
+		if len(cache.items) != 8 || len(cache.order) != 8 {
+			t.Fatalf("stale renders accumulated: %d items, %d ordered", len(cache.items), len(cache.order))
+		}
+	}
+	for key := range cache.items {
+		if key.user == other.UserID {
+			return
+		}
+	}
+	t.Fatal("another user's render was invalidated")
+}
+
+func TestSnapshotsPruneOldRevisionDayAndExpiry(t *testing.T) {
+	cache := testSnapshots()
+	owner := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	other := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAW")
+	var revision atomic.Int64
+	revision.Store(1)
+	cache.revision = func(_ context.Context, p principal.Principal) (int64, error) {
+		if p.UserID == owner.UserID {
+			return revision.Load(), nil
+		}
+		return 1, nil
+	}
+	read := func(p principal.Principal, kind, name string) {
+		t.Helper()
+		if _, err := cache.read(expressions.WithVolatility(context.Background()), p, kind, name, nil, func() (any, error) { return name, nil }, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read(owner, "render", "old")
+	read(other, "render", "other")
+	revision.Store(2)
+	read(owner, "render", "new")
+	for key := range cache.items {
+		if key.user == owner.UserID && key.revision == 1 {
+			t.Fatal("old owner revision was retained")
+		}
+	}
+	if len(cache.items) != 2 {
+		t.Fatalf("another user's cache was pruned: %d items", len(cache.items))
+	}
+	var currentDay string
+	for key := range cache.items {
+		currentDay = key.day
+	}
+	expired := snapshotKey{user: other.UserID, kind: "render", name: "expired", day: currentDay, revision: 1}
+	oldDay := snapshotKey{user: other.UserID, kind: "render", name: "old-day", day: "old", revision: 1}
+	cache.items[expired] = snapshotItem{value: 1, expires: time.Now().Add(-time.Second)}
+	cache.items[oldDay] = snapshotItem{value: 1}
+	cache.order = append(cache.order, expired, oldDay)
+	read(owner, "source", "current")
+	if _, ok := cache.items[expired]; ok {
+		t.Fatal("expired render was retained")
+	}
+	if _, ok := cache.items[oldDay]; ok {
+		t.Fatal("old-day render was retained")
+	}
+}
+
 func TestCachedSourceQueryCopiesResultsAndChargesOriginalCost(t *testing.T) {
 	cache := testSnapshots()
 	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")

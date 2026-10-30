@@ -68,6 +68,15 @@ func (s *Snapshots) Changed(user string, finished bool) {
 		state.writes++
 	}
 	s.users[user] = state
+	kept := s.order[:0]
+	for _, key := range s.order {
+		if key.user == user {
+			delete(s.items, key)
+		} else {
+			kept = append(kept, key)
+		}
+	}
+	s.order = kept
 }
 
 func (s *Snapshots) memoEpoch(user string) (uint64, bool) {
@@ -109,20 +118,21 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 	}
 	now := time.Now()
 	day := now.In(s.zone).Format("2006-01-02") + "|" + now.Format("2006-01-02") + "|" + now.UTC().Format("2006-01-02")
+	kept := s.order[:0]
+	for _, old := range s.order {
+		item, exists := s.items[old]
+		if !exists || old.day != day || (old.user == p.UserID && old.revision < revision) || (!item.expires.IsZero() && !now.Before(item.expires)) {
+			delete(s.items, old)
+		} else {
+			kept = append(kept, old)
+		}
+	}
+	s.order = kept
 	key := snapshotKey{user: p.UserID, kind: kind, name: name, params: string(encoded), day: day, revision: revision, generation: state.generation}
 	if item, ok := s.items[key]; ok {
-		if item.expires.IsZero() || now.Before(item.expires) {
-			s.mu.Unlock()
-			expressions.ExpireAt(ctx, item.expires)
-			return item.value, nil
-		}
-		delete(s.items, key)
-		for i, old := range s.order {
-			if old == key {
-				s.order = append(s.order[:i], s.order[i+1:]...)
-				break
-			}
-		}
+		s.mu.Unlock()
+		expressions.ExpireAt(ctx, item.expires)
+		return item.value, nil
 	}
 	if flight := s.pending[key]; flight != nil {
 		s.mu.Unlock()
@@ -167,13 +177,28 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 	s.mu.Lock()
 	state = s.users[p.UserID]
 	if flight.err == nil && ctx.Err() == nil && !flight.volatile && state.writes == 0 && state.generation == key.generation && canStore {
-		// shortcut: FIFO limits snapshots to 64 entries; upgrade to byte-aware eviction if memory requires it.
+		// shortcut: snapshots are capped at 64 entries; upgrade to byte-aware eviction if memory requires it.
 		if len(s.order) >= 64 {
-			delete(s.items, s.order[0])
-			s.order = s.order[1:]
+			// Preserve rendered dashboards when source snapshots churn during prewarming.
+			evict := -1
+			for i, old := range s.order {
+				if old.kind != "render" {
+					evict = i
+					break
+				}
+			}
+			if evict < 0 && key.kind == "render" {
+				evict = 0
+			}
+			if evict >= 0 {
+				delete(s.items, s.order[evict])
+				s.order = append(s.order[:evict], s.order[evict+1:]...)
+			}
 		}
-		s.items[key] = snapshotItem{value: flight.value, expires: flight.expires}
-		s.order = append(s.order, key)
+		if len(s.order) < 64 {
+			s.items[key] = snapshotItem{value: flight.value, expires: flight.expires}
+			s.order = append(s.order, key)
+		}
 	}
 	delete(s.pending, key)
 	close(flight.done)
