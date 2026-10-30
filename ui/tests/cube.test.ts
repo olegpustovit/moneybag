@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
+import { months as monthCount, annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
 import { compareWindow, dayFromIso as d, parseRange, type Range } from '../src/features/telemetry/time-grammar'
 import { money, moneyCompact, moneyExact, moneySigned, unitFormat } from '../src/features/telemetry/format'
 import { syntheticCube } from './fixtures/synthetic-cube'
@@ -116,4 +116,9 @@ for(let run=0;run<40;run++){
 times.sort((a,b) => a-b);const median=times[times.length>>1]
 console.log(`cube bench: ${heavy.size} rows, median ${median.toFixed(2)} ms, worst ${times.at(-1)!.toFixed(2)} ms`)
 assert.ok(median<16,`recalculation took ${median} ms`)
+// Same fixture as TestMonthsBetweenCountsDaysOverMonthLength in the Go semantic package.
+const mo=(a:string,b:string)=>monthCount({from:d(a),to:d(b)} as Range)
+assert.ok(Math.abs(mo('2026-08-02','2026-10-30')-(1+60/31))<1e-9)
+assert.ok(Math.abs(mo('2026-05-04','2026-08-01')-(1+60/31))<1e-9)
+assert.equal(mo('2026-07-01','2026-09-30'),3)
 console.log('cube ok')

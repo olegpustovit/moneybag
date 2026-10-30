@@ -20,6 +20,8 @@ export const promptSaveView=(page:string,viewState:Record<string,string>,suggest
 export const closeSaveView=() => set({saveView:null})
 // Pages describe themselves here so a question to an agent carries what the person is looking at.
 export const describePage=(page:PageContext) => {if(page.title!==state.page.title || page.lines.join('\n')!==state.page.lines.join('\n'))state={...state,page}}
+/** The search shortcut as this platform names it. */
+export const searchKey=typeof navigator!=='undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'
 export function agentPrompt(question:string,page:PageContext):string {
  return [`I'm looking at ${page.title ? `"${page.title}"` : 'a page'} in Moneybag: ${location.href}`,...page.lines,'',`My question: ${question || '(write your question here)'}`,'','Use the Moneybag MCP tools. Quote exact figures from metric_query, and tell me which entries they rest on.'].join('\n')
 }

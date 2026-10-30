@@ -73,3 +73,19 @@ func TestCubeFlowsStayUnderTheSizeBudget(t *testing.T) {
 		t.Fatal("flows do not balance", total)
 	}
 }
+
+// Same fixture as the months checks in ui/tests/cube.test.ts: both sides must agree.
+func TestMonthsBetweenCountsDaysOverMonthLength(t *testing.T) {
+	for _, c := range []struct {
+		from, to string
+		want     *big.Rat
+	}{
+		{"2026-08-02", "2026-10-30", new(big.Rat).Add(big.NewRat(1, 1), big.NewRat(60, 31))},
+		{"2026-05-04", "2026-08-01", new(big.Rat).Add(big.NewRat(1, 1), big.NewRat(60, 31))},
+		{"2026-07-01", "2026-09-30", big.NewRat(3, 1)},
+	} {
+		if got := monthsBetween(c.from, c.to); got.Cmp(c.want) != 0 {
+			t.Errorf("%s..%s = %s, want %s", c.from, c.to, got.RatString(), c.want.RatString())
+		}
+	}
+}

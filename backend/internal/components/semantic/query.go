@@ -735,13 +735,21 @@ func FormatValue(unit string, r *big.Rat) string {
 	return grouped(r, 0)
 }
 
-func monthsBetween(from, to string) int64 {
+// monthsBetween counts calendar months as the sum of days covered over days in each month, so whole months are exact
+// integers and equal-length windows compare fairly. Mirrored by months() in ui/src/features/telemetry/cube.ts.
+func monthsBetween(from, to string) *big.Rat {
 	a, e1 := time.Parse(day, from)
 	b, e2 := time.Parse(day, to)
-	if e1 != nil || e2 != nil {
-		return 1
+	if e1 != nil || e2 != nil || b.Before(a) {
+		return big.NewRat(1, 1)
 	}
-	return max(1, int64((b.Year()-a.Year())*12+int(b.Month())-int(a.Month())+1))
+	sum := new(big.Rat)
+	for m := time.Date(a.Year(), a.Month(), 1, 0, 0, 0, 0, time.UTC); !m.After(b); m = m.AddDate(0, 1, 0) {
+		end := m.AddDate(0, 1, -1)
+		lo, hi := max(a.Unix(), m.Unix()), min(b.Unix(), end.Unix())
+		sum.Add(sum, big.NewRat((hi-lo)/86400+1, int64(end.Day())))
+	}
+	return sum
 }
 
 // folded applies the metric's fold over time to a flow aggregate; balances already hold the period-end value.
@@ -750,7 +758,7 @@ func folded(m Metric, a aggregate, from, to string) *big.Rat {
 		return a.total
 	}
 	if m.Kind == "rate" || m.Additivity == "avg" {
-		return new(big.Rat).Quo(a.total, big.NewRat(monthsBetween(from, to), 1))
+		return new(big.Rat).Quo(a.total, monthsBetween(from, to))
 	}
 	if m.Additivity == "last" {
 		return a.lastMonth

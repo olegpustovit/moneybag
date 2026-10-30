@@ -117,7 +117,16 @@ export function goodWhen(m:CubeMetric):'up'|'down'|'neutral' {
  const lower=(id:string) => (id.startsWith('expenses:') || id.startsWith('income:'))===((m.sign || 1)!==-1),first=lower(a[0])
  return a.every(id => lower(id)===first) ? (first ? 'down' : 'up') : 'neutral'
 }
-const months=(r:Range) => Math.max(1,(new Date(r.to).getUTCFullYear()-new Date(r.from).getUTCFullYear())*12+new Date(r.to).getUTCMonth()-new Date(r.from).getUTCMonth()+1)
+// Sum of days covered over days in each month: whole months are exact integers (mirrors monthsBetween in semantic/query.go).
+export function months(r:Range):number {
+ const a=r.from,b=r.to;if(!(b>=a))return 1
+ let sum=0
+ for(let m=Date.UTC(new Date(a).getUTCFullYear(),new Date(a).getUTCMonth(),1);m<=b;){
+  const d=new Date(m),next=Date.UTC(d.getUTCFullYear(),d.getUTCMonth()+1,1),dim=(next-m)/DAY
+  sum+=((Math.min(b,next-DAY)-Math.max(a,m))/DAY+1)/dim;m=next
+ }
+ return sum
+}
 // The figure a metric shows for a range: flows sum, `avg` and `rate` read per month, `last` the closing month, balances the closing value.
 export function metricTotal(c:Cube,q:Query,m:CubeMetric,estimates?:EstimatePolicy):{total:number;estimated:number;entries:number} {
  const field=balanceField(m)

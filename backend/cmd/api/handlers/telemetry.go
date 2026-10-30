@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
@@ -124,6 +125,22 @@ func (h *Handler) apiChanges(w http.ResponseWriter, r *http.Request) {
 		w.Header().Del("ETag")
 		respond(w, http.StatusBadRequest, map[string]string{"error": e.Error()})
 		return
+	}
+	// Summaries quote the bank's payee text after " for "; show the alias instead when one matches.
+	if name, e := h.services.Semantic.PayeeNamer(r.Context(), p); e == nil {
+		alias := func(text string) string {
+			if i := strings.LastIndex(text, " for "); i >= 0 {
+				return text[:i+5] + name(text[i+5:])
+			}
+			return text
+		}
+		for i := range page.Groups {
+			g := &page.Groups[i]
+			g.Summary = alias(g.Summary)
+			for j := range g.Events {
+				g.Events[j].Summary = alias(g.Events[j].Summary)
+			}
+		}
 	}
 	respond(w, http.StatusOK, page)
 }

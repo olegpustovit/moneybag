@@ -45,6 +45,7 @@ type ChangeGroup struct {
 	Undoable bool          `json:"undoable"`
 	Targets  []Target      `json:"targets"`
 	Events   []ChangeEvent `json:"events"`
+	actorID  string
 }
 type ChangesPage struct {
 	Groups []ChangeGroup `json:"groups"`
@@ -57,7 +58,8 @@ var undoable = []string{"entry_post", "entry_reverse", "transfer_record", "recla
 // routine also recognizes system rate writes from before the routine field existed.
 func routine(e Event) bool { return e.Routine || e.Tool == "rate_set" && e.Actor.Kind == "system" }
 
-// Changes reads the feed newest first, collapsing a batch, or a run of routine writes by one tool and actor on one day, into one group.
+// Changes reads the feed newest first, collapsing a batch, a run of routine writes by one tool and actor on one day,
+// or consecutive writes by one actor and tool less than groupGap apart, into one group.
 // shortcut: filters run in Go over at most 2500 events per page, so a sparse q can return a short page with next set; add a text index if the feed outgrows it.
 func (s *Service) Changes(ctx context.Context, p principal.Principal, in ChangesInput, label func(principal.Actor) string) (ChangesPage, error) {
 	if err := p.Require("ledger:read"); err != nil {
@@ -137,7 +139,7 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 			if len(out.Groups) == limit {
 				return out, nil
 			}
-			group := ChangeGroup{ID: e.ID, At: e.At, Actor: ChangeActor{Kind: e.Actor.Kind, Label: label(e.Actor)}, Routine: routine(e), BatchID: e.BatchID, Targets: []Target{}, Events: []ChangeEvent{}}
+			group := ChangeGroup{ID: e.ID, At: e.At, Actor: ChangeActor{Kind: e.Actor.Kind, Label: label(e.Actor)}, Routine: routine(e), BatchID: e.BatchID, actorID: e.Actor.ID, Targets: []Target{}, Events: []ChangeEvent{}}
 			group.add(e, statuses[e.ID])
 			out.Groups = append(out.Groups, group)
 			out.Next = e.Seq
@@ -151,11 +153,24 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 	return out, nil
 }
 
+const groupGap = 10 * time.Minute
+
+// plurals words a run of one tool's writes; tools missing here fall back to "<summary>, N times".
+var plurals = map[string]string{
+	"entry_post": "Added %d entries", "entry_commit": "Posted %d entries", "entry_reverse": "Reversed %d entries", "entry_update": "Edited %d draft entries",
+	"reclassify": "Recategorized %d entries", "transfer_record": "Recorded %d transfers", "tags_set": "Changed tags on %d entries",
+	"import_edit": "Corrected %d staged statement rows", "db_update_cells": "Edited %d dataset rows", "rule_upsert": "Saved %d categorization rules",
+	"balance_assert": "Recorded %d balance checks", "budget_set_line": "Changed %d budget lines", "account_create": "Added %d accounts",
+}
+
 func sameGroup(g ChangeGroup, e Event) bool {
 	if e.BatchID != "" || g.BatchID != "" {
 		return e.BatchID == g.BatchID
 	}
 	last := g.Events[len(g.Events)-1]
+	if last.Tool == e.Tool && g.Actor.Kind == e.Actor.Kind && g.actorID == e.Actor.ID && last.At.Sub(e.At) < groupGap && e.At.Sub(last.At) < groupGap {
+		return true
+	}
 	return g.Routine && routine(e) && last.Tool == e.Tool && g.Actor.Kind == e.Actor.Kind && g.At.Format("2006-01-02") == e.At.Format("2006-01-02")
 }
 
@@ -171,9 +186,10 @@ func (g *ChangeGroup) add(e Event, status string) {
 	// A batch undoes event by event, so only a single-event group offers one undo.
 	g.Undoable = g.Count == 1 && status == "completed" && slices.Contains(undoable, e.Tool)
 	first := g.Events[0].Summary
-	same := true
+	same, sameTool := true, true
 	for _, event := range g.Events {
 		same = same && event.Summary == first
+		sameTool = sameTool && event.Tool == g.Events[0].Tool
 	}
 	rates, overview := true, ""
 	for _, event := range g.Events {
@@ -189,10 +205,16 @@ func (g *ChangeGroup) add(e Event, status string) {
 		g.Summary = overview
 	case rates:
 		g.Summary = fmt.Sprintf("Updated %d rate quotes", g.Count)
+	case sameTool && plurals[g.Events[0].Tool] != "":
+		g.Summary = fmt.Sprintf(plurals[g.Events[0].Tool], g.Count)
 	case same:
 		g.Summary = fmt.Sprintf("%s, %d times", first, g.Count)
 	default:
-		g.Summary = fmt.Sprintf("%s, and %d more changes", g.Events[g.Count-1].Summary, g.Count-1)
+		noun := "changes"
+		if g.Count == 2 {
+			noun = "change"
+		}
+		g.Summary = fmt.Sprintf("%s, and %d more %s", g.Events[g.Count-1].Summary, g.Count-1, noun)
 	}
 }
 

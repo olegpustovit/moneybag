@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../c
 import { Button } from '../components/ui/button'
 import { CommandBar, type CommandGroup, type CommandItem } from '../features/telemetry/command-bar'
 import { ShellOverlays } from '../features/telemetry/shell-overlays'
-import { askAgent } from '../features/telemetry/shell-store'
+import { askAgent, searchKey } from '../features/telemetry/shell-store'
 import { useCube } from '../features/telemetry/cube-store'
 import { homeDashboard, normalizeRoute } from '../features/telemetry/nav'
 
@@ -46,7 +46,7 @@ function Navigation({data,onNavigate,onSearch}:{data:Bootstrap;onNavigate?:() =>
   <div className="nav-footer">
    <Link to="/shared" onClick={onNavigate} className={path.startsWith('/shared') ? 'nav-link active' : 'nav-link'} title="Shared with me"><Share2 aria-hidden="true" size={16}/><span className="nav-label">Shared with me</span></Link>
    <Link to="/settings" onClick={onNavigate} className={path==='/settings' ? 'nav-link active' : 'nav-link'} title="Settings"><Settings aria-hidden="true" size={16}/><span className="nav-label">Settings</span></Link>
-   <button type="button" className="nav-link nav-action" title="Search and jump (Ctrl K)" onClick={() => {onNavigate?.();onSearch()}}><span className="nav-kbd" aria-hidden="true">⌘K</span><span className="nav-label">Search</span></button>
+   <button type="button" className="nav-link nav-action" title="Search and jump (Ctrl K)" onClick={() => {onNavigate?.();onSearch()}}><span className="nav-kbd" aria-hidden="true">{searchKey}</span><span className="nav-label">Search</span></button>
   </div>
  </div>
 }
