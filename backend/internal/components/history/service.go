@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
 	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/model"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -33,6 +36,9 @@ type Service struct {
 	Rates     *rates.Service
 	Sharing   *sharing.Service
 	Tables    *tables.Service
+	Semantic  *semantic.Service
+	Feedback  *feedback.Service
+	Admin     *admin.Service
 }
 type UndoInput struct {
 	EventID string `json:"event_id"`
@@ -119,6 +125,14 @@ func (s *Service) Undo(ctx context.Context, p principal.Principal, in UndoInput)
 			}
 			if later {
 				return fmt.Errorf("dashboard changed after this event: %w", principal.ErrConflict)
+			}
+		case "metric_upsert", "label_set", "payee_alias_upsert", "annotation_upsert", "nav_set":
+			later, err := s.Audit.HasLaterTarget(tx, p, event.Target, event.Seq)
+			if err != nil {
+				return err
+			}
+			if later {
+				return fmt.Errorf("this record changed after this event: %w", principal.ErrConflict)
 			}
 		}
 		latest, e := s.Audit.List(tx, p, audit.ListInput{Limit: 1})
@@ -471,6 +485,12 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 		in.Set.Skip = &old.Skip
 		_, e = s.Imports.Edit(ctx, p, in)
 		return e
+	case "metric_upsert", "label_set", "payee_alias_upsert", "annotation_upsert", "nav_set":
+		return s.Semantic.Restore(ctx, p, event)
+	case "feedback_resolve":
+		return s.Feedback.Reopen(ctx, p, id, reason)
+	case "user_disable":
+		return s.Admin.EnableUser(ctx, p, id, reason)
 	default:
 		return fmt.Errorf("this event has no direct inverse; use the linked domain events in its history")
 	}

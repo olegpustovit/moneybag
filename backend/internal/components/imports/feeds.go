@@ -125,6 +125,33 @@ func (s *Service) ConfigureFeed(ctx context.Context, p principal.Principal, in F
 	})
 	return feed, e
 }
+
+// HasFeedSecret says whether a person has entered a credential, without ever returning it.
+func (s *Service) HasFeedSecret(p principal.Principal, feed Feed) bool {
+	token, e := s.open(p.UserID, feed.ID, feed.TokenEncrypted)
+	return e == nil && token != ""
+}
+
+// SetFeedSecret stores a credential entered on the secure page, for a feed an agent already set up.
+func (s *Service) SetFeedSecret(ctx context.Context, p principal.Principal, id, token string) error {
+	if e := p.Require("import:write"); e != nil {
+		return e
+	}
+	if token == "" {
+		return fmt.Errorf("enter the credential")
+	}
+	var feed Feed
+	e := s.repo.db.Collection("feeds").FindOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}).Decode(&feed)
+	if errors.Is(e, mongo.ErrNoDocuments) {
+		return principal.ErrNotFound
+	}
+	if e != nil {
+		return e
+	}
+	_, e = s.ConfigureFeed(ctx, p, FeedInput{ID: id, URL: feed.URL, Account: feed.Account, Format: feed.Format, DateFormat: feed.DateFormat, Token: token})
+	return e
+}
+
 func (s *Service) Sync(ctx context.Context, p principal.Principal, id, since string) (StartResult, error) {
 	if e := p.Require("import:write"); e != nil {
 		return StartResult{}, e

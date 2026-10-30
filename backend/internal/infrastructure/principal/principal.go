@@ -21,9 +21,14 @@ type Principal struct {
 	Scopes []string `json:"scopes"`
 	Actor  Actor    `json:"actor"`
 	Admin  bool     `json:"is_admin"`
+	// GrantID names the OAuth connection behind an agent principal, so it can ask for more on its own behalf.
+	GrantID string `json:"-"`
 }
 
 var Scopes = []string{"ledger:read", "ledger:write", "import:write", "model:write", "dash:write", "dash:share"}
+
+// ScopeAdminUsers is left out of Scopes on purpose: no consent screen offers it, and an agent gets it only through the owner's confirmation page.
+const ScopeAdminUsers = "admin:users"
 
 func (p Principal) Require(scope string) error {
 	if p.Valid() != nil {

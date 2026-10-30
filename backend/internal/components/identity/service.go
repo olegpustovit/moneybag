@@ -29,6 +29,7 @@ type User struct {
 	Name      string    `json:"name" bson:"name"`
 	Admin     bool      `json:"is_admin" bson:"is_admin"`
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+	Disabled  bool      `json:"disabled,omitempty" bson:"disabled,omitempty"`
 }
 type credential struct {
 	ID   string `bson:"_id"`
@@ -163,7 +164,7 @@ func (s *Service) Login(ctx context.Context, email, password string) (User, erro
 		_ = passwordHash(password, make([]byte, 16))
 		return User{}, ErrCredentials
 	}
-	if subtle.ConstantTimeCompare(passwordHash(password, cred.Salt), cred.Hash) != 1 {
+	if subtle.ConstantTimeCompare(passwordHash(password, cred.Salt), cred.Hash) != 1 || u.Disabled {
 		return User{}, ErrCredentials
 	}
 	return u, nil
@@ -184,10 +185,17 @@ func (s *Service) Session(ctx context.Context, raw string) (principal.Principal,
 		return principal.Principal{}, session, e
 	}
 	u, e := s.User(ctx, session.UserID)
+	if e == nil && u.Disabled {
+		e = principal.ErrForbidden
+	}
 	return Principal(u), session, e
 }
 func Principal(u User) principal.Principal {
-	return principal.Principal{UserID: u.ID, Scopes: append([]string{}, principal.Scopes...), Actor: principal.Actor{Kind: "human", ID: u.ID}, Admin: u.Admin}
+	scopes := append([]string{}, principal.Scopes...)
+	if u.Admin {
+		scopes = append(scopes, principal.ScopeAdminUsers)
+	}
+	return principal.Principal{UserID: u.ID, Scopes: scopes, Actor: principal.Actor{Kind: "human", ID: u.ID}, Admin: u.Admin}
 }
 func (s *Service) Logout(ctx context.Context, raw string) error {
 	_, e := s.repo.db.Collection("sessions").DeleteOne(ctx, bson.M{"_id": Hash(raw)})
@@ -263,6 +271,29 @@ func (s *Service) ChangePassword(ctx context.Context, p principal.Principal, cur
 		_, e := s.repo.db.Collection("sessions").DeleteMany(tx, bson.M{"user_id": u.ID})
 		return e
 	})
+}
+
+// Users lists everyone on this server; callers enforce admin:users. Password material lives in another collection and never reaches it.
+func (s *Service) Users(ctx context.Context) ([]User, error) {
+	cur, e := s.repo.db.Collection("users").Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}}).SetLimit(500))
+	if e != nil {
+		return nil, e
+	}
+	out := []User{}
+	return out, cur.All(ctx, &out)
+}
+
+// SetDisabled blocks or restores a user; disabling also ends their sessions, and their agents stop at the next token check.
+func (s *Service) SetDisabled(ctx context.Context, id string, disabled bool) error {
+	r, e := s.repo.db.Collection("users").UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"disabled": disabled}})
+	if e == nil && r.MatchedCount != 1 {
+		return principal.ErrNotFound
+	}
+	if e != nil || !disabled {
+		return e
+	}
+	_, e = s.repo.db.Collection("sessions").DeleteMany(ctx, bson.M{"user_id": id})
+	return e
 }
 
 // EachUser is for operator maintenance; it is never exposed by an HTTP or MCP handler.
