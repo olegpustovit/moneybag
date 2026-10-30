@@ -729,7 +729,21 @@ func New(s Services, opts Options) *mcp.Server {
 		engine := dashboard.Engine{Expr: s.Expr, Reader: s.Sources}
 		return engine.Evaluate(ctx, p, in.Expr, data, params)
 	})
-	add(r, "audit_log", "audit", "ledger:read", "Use this when asked who changed what. Events are hash-chained per user and include durable workflow outcomes; missing outcome indicates interruption. Page with next_cursor.", true, false, s.Audit.List)
+	add(r, "audit_log", "audit", "ledger:read", "Use this when asked who changed what. Events are hash-chained per user and include durable workflow outcomes; missing outcome indicates interruption. Before/after payloads (full specs) are omitted unless include_payload is true. Page with next_cursor.", true, false, func(ctx context.Context, p principal.Principal, in struct {
+		audit.ListInput
+		IncludePayload bool `json:"include_payload,omitempty" jsonschema:"return full before/after payloads (default false: event metadata only)"`
+	}) (audit.Page, error) {
+		page, e := s.Audit.List(ctx, p, in.ListInput)
+		if e == nil && !in.IncludePayload {
+			for i := range page.Events {
+				page.Events[i].Before, page.Events[i].After = nil, nil
+				if o := page.Events[i].Outcome; o != nil {
+					o.Before, o.After = nil, nil
+				}
+			}
+		}
+		return page, e
+	})
 	add(r, "history_of", "audit", "ledger:read", "Use this when tracing a specific entry, rule, table or dashboard. Returns that target's audit events and outcomes; before/after payloads (full specs) are omitted unless include_payload is true.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		TargetID       string `json:"target_id"`
 		IncludePayload bool   `json:"include_payload,omitempty" jsonschema:"return full before/after payloads (default false: event metadata only)"`

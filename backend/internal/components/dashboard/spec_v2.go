@@ -260,13 +260,14 @@ func metricHint(e error) error {
 	return &EvalError{Field: "metric", Hint: "read metric ids with metric_list, or define one with metric_upsert", Err: e}
 }
 
-func (x *execution) renderMetric(c Component) (string, any, error) {
+// renderMetric returns plain JSON values, because a shared snapshot stores them in Mongo, which would otherwise rename struct fields.
+func (x *execution) renderMetric(c Component) (map[string]any, error) {
 	if e := x.metricAllowed(c.Metric); e != nil {
-		return "", nil, metricHint(e)
+		return nil, metricHint(e)
 	}
 	from, to, compare, e := x.metricRange(c)
 	if e != nil {
-		return "", nil, e
+		return nil, e
 	}
 	metrics := x.engine.Metrics
 	query := semantic.QueryInput{Metric: c.Metric, From: from, To: to, Compare: compare, Split: c.Split, Estimates: c.Estimates}
@@ -282,10 +283,10 @@ func (x *execution) renderMetric(c Component) (string, any, error) {
 		// The entries panel is one page; the drill-through opens the rest, and lint keeps long inline lists out.
 		entries, e := metrics.EntriesOf(x.ctx, x.p, query, where, 50)
 		if e != nil {
-			return "", nil, metricHint(e)
+			return nil, metricHint(e)
 		}
 		value["rows"], value["total"], value["ref"] = entries.Rows, entries.Total, entries.Ref
-		return "", value, nil
+		return native(value)
 	}
 	switch c.Type {
 	case "stat":
@@ -303,7 +304,7 @@ func (x *execution) renderMetric(c Component) (string, any, error) {
 		if c.Annotate != "" {
 			notes, e := metrics.Annotations(x.ctx, x.p, c.Annotate, from, to)
 			if e != nil {
-				return "", nil, e
+				return nil, e
 			}
 			value["annotations"] = notes
 		}
@@ -318,7 +319,7 @@ func (x *execution) renderMetric(c Component) (string, any, error) {
 	}
 	res, e := metrics.QueryWhere(x.ctx, x.p, query, where)
 	if e != nil {
-		return "", nil, metricHint(e)
+		return nil, metricHint(e)
 	}
 	value["unit"], value["label"], value["total"], value["text"] = res.Unit, res.Label, res.Total, res.Text
 	value["estimates"], value["formula"], value["entries"] = res.Estimates, res.Formula, res.Entries
@@ -349,7 +350,7 @@ func (x *execution) renderMetric(c Component) (string, any, error) {
 	default:
 		value["series"] = res.Series
 	}
-	return "", value, nil
+	return native(value)
 }
 
 // answer computes the page's lead facts into the reserved values key "answer".
@@ -379,6 +380,6 @@ func (x *execution) answer(spec Spec, values map[string]any) error {
 	if len(res.Facts) > 0 {
 		sentence = res.Facts[0].Sentence
 	}
-	values["answer"] = map[string]any{"type": "answer", "metric": res.Metric, "label": res.Label, "unit": res.Unit, "total": res.Total, "text": res.Text, "compare": res.Compare, "sentence": sentence, "facts": res.Facts}
-	return nil
+	values["answer"], e = native(map[string]any{"type": "answer", "metric": res.Metric, "label": res.Label, "unit": res.Unit, "total": res.Total, "text": res.Text, "compare": res.Compare, "sentence": sentence, "facts": res.Facts})
+	return e
 }

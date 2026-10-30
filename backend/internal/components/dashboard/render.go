@@ -176,7 +176,8 @@ func (x *execution) rows(c Component) ([]map[string]any, error) {
 }
 func (x *execution) render(c Component) (string, any, error) {
 	if metricTypes[c.Type] {
-		return x.renderMetric(c)
+		value, err := x.renderMetric(c)
+		return "", value, err
 	}
 	switch c.Type {
 	case "kpi":

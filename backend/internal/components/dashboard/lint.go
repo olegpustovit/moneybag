@@ -148,7 +148,13 @@ func lintComponent(spec Spec, index int, c Component, lc LintContext, add func(r
 	base := fmt.Sprintf("/components/%d", index)
 	resolved, evaluated := lc.Rendered.Resolved[c.ID]
 	if !evaluated {
+		// This panel failed validation before its templates ran. A template is never itself an identifier, so judge only the literal text around it.
 		resolved = c
+		resolved.Title = holes.ReplaceAllString(c.Title, "")
+		resolved.Columns = slices.Clone(c.Columns)
+		for j := range resolved.Columns {
+			resolved.Columns[j].Label = holes.ReplaceAllString(c.Columns[j].Label, "")
+		}
 	}
 	value, _ := lc.Rendered.Values[c.ID].(map[string]any)
 	if (c.Type == "kpi" || c.Type == "chart") && c.Format == "" {
@@ -344,10 +350,18 @@ func (s *Service) RunTests(ctx context.Context, p principal.Principal, spec Spec
 		return TestReport{}, e
 	}
 	report := TestReport{Results: []TestResult{}}
+	_, shared := s.engine.Reader.(interface{ AllowsMetric(string) bool })
 	for _, test := range spec.Tests {
 		result := TestResult{Ask: test.Ask, Metric: test.Metric}
 		if s.engine.Metrics == nil {
 			return TestReport{}, fmt.Errorf("metrics are not available here")
+		}
+		// A test totals any accounts it names, which would read past a share's granted sources.
+		if shared {
+			result.Msg = "only the dashboard's owner can run its tests"
+			report.Failed++
+			report.Results = append(report.Results, result)
+			continue
 		}
 		got, want, e := s.engine.Metrics.LedgerCheck(ctx, p, test.Metric, test.From, test.To, test.EqualsLedger.Accounts, test.EqualsLedger.Exclude)
 		switch {

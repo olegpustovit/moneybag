@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"maps"
+	"slices"
 	"sort"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
@@ -60,6 +61,9 @@ func (s *Service) Catalog(ctx context.Context, p principal.Principal, tableServi
 		if s.engine.Metrics != nil {
 			if out.Metrics, err = s.engine.Metrics.Metrics(ctx, p); err != nil {
 				return nil, err
+			}
+			if guard, ok := s.engine.Reader.(interface{ AllowsMetric(string) bool }); ok {
+				out.Metrics = slices.DeleteFunc(out.Metrics, func(m semantic.Metric) bool { return !guard.AllowsMetric(m.ID) })
 			}
 		}
 		for _, name := range []string{"sum", "avg", "mean", "min", "max", "count", "last", "median", "count_distinct", "percentile", "linear_slope"} {

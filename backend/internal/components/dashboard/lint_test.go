@@ -62,9 +62,14 @@ func TestLintEvaluatesTemplatesBeforeJudgingText(t *testing.T) {
 	if got := rulesOf(Lint(spec, leaky)); !slices.Contains(got, "no_raw_ids") {
 		t.Fatal("identifier in the evaluated text missed", got)
 	}
-	// Without an evaluation the raw template shows, and that is what is judged.
+	// A panel that never evaluated is reported by validation; its template still is not an identifier.
+	if got := rulesOf(Lint(spec, LintContext{})); slices.Contains(got, "no_raw_ids") {
+		t.Fatal("unevaluated template flagged", got)
+	}
+	// Literal text beside a template is still judged.
+	spec.Components[0].Title = "{{ data.x }} card_trend"
 	if got := rulesOf(Lint(spec, LintContext{})); !slices.Contains(got, "no_raw_ids") {
-		t.Fatal("unevaluated template missed", got)
+		t.Fatal("literal identifier missed", got)
 	}
 }
 
