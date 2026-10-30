@@ -52,7 +52,8 @@ export function decodeCube(wire:CubeWire):Cube {
   annotations:(wire.annotations ?? []).filter((x,i,all) => all.findIndex(y => y.label===x.label && y.from===x.from)===i),labels:wire.labels ?? {},metrics:wire.metrics ?? [],unvalued:wire.unvalued ?? 0,
   aliases:(wire.aliases ?? []).flatMap(a => {try {return [{re:new RegExp(a.pattern,'i'),name:a.name}]} catch {return []}}),dims:new Map(),colors:new Map(),mask:null}
 }
-export const label=(cube:Cube,value:string) => cube.labels[value] ?? value
+// Labels are stored as kind:key; a dimension value doesn't know its kind, and a trip value has lost its tag prefix.
+export const label=(cube:Cube,value:string) => cube.labels[value] ?? cube.labels[`category:${value}`] ?? cube.labels[`tag:trip:${value}`] ?? cube.labels[`tag:${value}`] ?? cube.labels[`pot:${value}`] ?? cube.labels[`account:${value}`] ?? value
 const lower=(a:Int32Array,x:number) => {let l=0,h=a.length;while(l<h){const m=(l+h)>>>1;if(a[m]<x)l=m+1;else h=m}return l}
 const span=(c:Cube,r:Range):[number,number] => [lower(c.d,Math.round((r.from-c.startMs)/DAY)),lower(c.d,Math.round((r.to-c.startMs)/DAY)+1)]
 

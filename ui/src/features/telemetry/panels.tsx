@@ -92,10 +92,10 @@ function RankedPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  const select=(key:string) => {if(ctx.explore.includes(split))ctx.addPill({field:split,op:'is',values:[key]});else void navigate({to:'/ledger',search:drillSearch(v.entries,range)})}
  let rows:RankedRow[]
  if(cube && cubeCanCompute(m,split) && !balanceField(m)){
-  const win=windowFor(c,ctx,range),moved=whatMoved(cube,{range,pills:ctx.pills},win,{by:split,measure:m,limit:40}).sort((a,b) => Math.abs(b.now)-Math.abs(a.now))
+  const win=windowFor(c,ctx,range),moved=whatMoved(cube,{range,pills:ctx.pills},win,{by:split,measure:m,limit:500}).sort((a,b) => Math.abs(b.now)-Math.abs(a.now))
   rows=moved.filter(x => x.now || x.before).map(x => ({key:x.key,label:x.label,value:x.now,text:metricText(ctx,m,x.now),compare:win?.available ? x.before : undefined,compareText:win?.available ? metricText(ctx,m,x.before) : undefined,color:split==='category' ? `var(${colorOf(cube,split,x.key)})` : undefined,estimated:x.key==='Estimated'}))
  } else rows=(v.series ?? []).map(p => ({key:p.name,label:p.name,value:tryNumber(p.value),text:p.text,estimated:p.estimated}))
- return <><Head title={title} fixed={c.fixed?.reason} onDetails={() => metricDetails(c,v,ctx,v.text ?? '')}/><RankedBars rows={rows} onSelect={select} selectLabel={ctx.explore.includes(split) ? 'Filter by' : 'See entries for'} noun={split==='payee' ? 'payees' : split==='account' ? 'accounts' : 'categories'} ariaLabel={title}/></>
+ return <><Head title={title} fixed={c.fixed?.reason} onDetails={() => metricDetails(c,v,ctx,v.text ?? '')}/><RankedBars rows={rows} onSelect={select} selectLabel={ctx.explore.includes(split) ? 'Filter by' : 'See entries for'} noun={split==='payee' ? 'payees' : split==='account' ? 'accounts' : split==='trip' ? 'trips' : 'categories'} ariaLabel={title}/></>
 }
 function SankeyPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  const m=metricOf(ctx,v.metric),cube=ctx.cube,split=(c.split ?? 'category') as Dimension,title=v.title ?? v.label,center=v.label ?? 'Total'

@@ -9,7 +9,9 @@ export function changeBetween(current:number,previous:number|null|undefined,good
  if(previous===null || previous===undefined || previous===0)return null
  const delta=current-previous,direction=delta>0 ? 'up' as const : delta<0 ? 'down' as const : 'flat' as const
  const good=goodWhen==='neutral' || delta===0 ? null : (delta>0)===(goodWhen==='up')
- return {direction,good,text:`${delta>0 ? '+' : delta<0 ? '−' : ''}${percent(Math.abs(delta)/Math.abs(previous)*100)}`,detail:`${delta>0 ? '+' : delta<0 ? '−' : ''}${format(Math.abs(delta))}`}
+ return {direction,good,
+  // A huge percentage means the earlier period barely has data, not that the number moved that much.
+  text:Math.abs(delta)/Math.abs(previous)>=5 ? `${delta>0 ? 'over +' : 'under −'}500%` : `${delta>0 ? '+' : delta<0 ? '−' : ''}${percent(Math.abs(delta)/Math.abs(previous)*100)}`,detail:`${delta>0 ? '+' : delta<0 ? '−' : ''}${format(Math.abs(delta))}`}
 }
 export type StatProps={label:string;value:string;change?:StatChange|null;comparison?:string;note?:ReactNode;spark?:ArrayLike<number|null>;sparkColor?:string;sparkLabel?:string;estimatedShare?:number;fixedRange?:string;href?:string;onOpen?:(event:MouseEvent) => void;openLabel?:string;onDetails?:() => void;
  /** A router link wrapping the value, for pages inside the app. */ entriesTo?:ReactNode;hideEmptyCompare?:boolean}

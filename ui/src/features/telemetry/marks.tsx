@@ -64,7 +64,7 @@ export function layoutSankey(nodes:SankeyNode[],links:SankeyLink[],width:number,
 export function Sankey({nodes,links,height=280,formatValue,onSelect,ariaLabel='Where the money went'}:{nodes:SankeyNode[];links:SankeyLink[];height?:number;formatValue:(value:number) => string;onSelect?:(key:string) => void;ariaLabel?:string}) {
  const box=useRef<HTMLDivElement>(null),[width,setWidth]=useState(0)
  useEffect(() => {const el=box.current;if(!el)return;const measure=() => setWidth(el.clientWidth);measure();const observer=new ResizeObserver(measure);observer.observe(el);return () => observer.disconnect()},[])
- const narrow=width<520,margin=narrow ? 78 : 140,fit=narrow ? 12 : 20,tall=narrow ? height+90 : height
+ const narrow=width<520,margin=narrow ? 78 : 200,fit=narrow ? 12 : 26,tall=Math.max(narrow ? height+90 : height,40+nodes.length*(narrow ? 40 : 28))
  const layout=width ? layoutSankey(nodes,links,width,tall,{marginLeft:margin,marginRight:margin,gap:narrow ? 26 : 14}) : null
  const cut=(s:string) => s.length>fit ? `${s.slice(0,fit-1)}…` : s
  return <div ref={box} className="tm-sankey" style={{height:tall}}>
