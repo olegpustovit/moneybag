@@ -5,15 +5,19 @@ const monthFormat=new Intl.DateTimeFormat('en-GB',{timeZone:'UTC',year:'numeric'
 
 export const commodityLabel=(code:string) => commodities[code] ?? code
 
-export function decimalLabel(value:string):string {
+export function decimalLabel(value:string,minimumFractionDigits=0):string {
  const normalized=value.replace(/^−/, '-')
  if(!/^-?\d+(\.\d+)?$/.test(normalized))return value.replace(/^-/, '−')
- const negative=normalized.startsWith('-'),[whole,fraction]=normalized.replace(/^-/, '').split('.')
- return `${negative ? '−' : ''}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction===undefined ? '' : `.${fraction}`}`
+ const negative=normalized.startsWith('-'),[whole,rawFraction='']=normalized.replace(/^-/, '').split('.'),fraction=rawFraction.padEnd(minimumFractionDigits,'0')
+ return `${negative ? '−' : ''}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction ? `.${fraction}` : ''}`
 }
 
-export const amountParts=(amount:{v:string;c:string}) => ({text:`${decimalLabel(amount.v)} ${commodityLabel(amount.c)}`,code:amount.c==='USD' ? amount.c : ''})
-export const amountLabel=(amount:{v:string;c:string}) => {const {text,code}=amountParts(amount);return code ? `${text} ${code}` : text}
+export const amountParts=(amount:{v:string;c:string},minimumFractionDigits=0) => ({text:`${decimalLabel(amount.v,minimumFractionDigits)} ${commodityLabel(amount.c)}`,code:amount.c==='USD' ? amount.c : ''})
+export const amountLabel=(amount:{v:string;c:string},minimumFractionDigits=0) => {const {text,code}=amountParts(amount,minimumFractionDigits);return code ? `${text} ${code}` : text}
+
+export function decimalPrecision(values:(string|undefined)[]):number {
+ return values.reduce<number>((max,value) => {const match=value?.match(/^[−-]?\d+(?:\.(\d+))?$/);return match ? Math.max(max,match[1]?.length ?? 0) : max},0)
+}
 
 export function dateLabel(value:string):string {
  if(!/^\d{4}-\d{2}(-\d{2})?$/.test(value))return value

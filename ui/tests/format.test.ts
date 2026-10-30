@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { accountLabel, amountLabel, commodityLabel, dateLabel, decimalLabel, fieldLabel, relativeTime } from '../src/lib/format'
+import { accountLabel, amountLabel, commodityLabel, dateLabel, decimalLabel, decimalPrecision, fieldLabel, relativeTime } from '../src/lib/format'
 
 assert.equal(amountLabel({v:'-9007199254740993.123456789',c:'EUR'}),'−9,007,199,254,740,993.123456789 €')
 assert.equal(amountLabel({v:'0.00',c:'USD'}),'0.00 $ USD')
@@ -20,3 +20,9 @@ assert.equal(fieldLabel('some_key'),'Some key')
 assert.equal(relativeTime('2026-10-30T08:00:00Z',Date.parse('2026-10-30T10:00:00Z')),'2 h ago')
 assert.equal(relativeTime('invalid'),undefined)
 assert.equal(relativeTime('2026-10-30T10:01:00Z',Date.parse('2026-10-30T10:00:00Z')),'Just now')
+
+assert.equal(decimalPrecision(['1','-2.10','0.123456789',undefined,'bad']),9)
+assert.equal(decimalLabel('−9007199254740993.1',3),'−9,007,199,254,740,993.100')
+assert.equal(decimalLabel('1.2345',2),'1.2345')
+assert.equal(decimalLabel('invalid',2),'invalid')
+assert.equal(amountLabel({v:'0.1',c:'USD'},2),'0.10 $ USD')

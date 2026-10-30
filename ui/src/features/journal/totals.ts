@@ -3,7 +3,7 @@ import { amountLabel } from '../../lib/format'
 type Amount={v:string;c:string}
 
 // Sum the displayed postings exactly, keeping commodities separate.
-export function postingTotals(amounts:(Amount|undefined)[]):string|undefined {
+export function postingTotals(amounts:(Amount|undefined)[],minimumFractionDigits=0):string|undefined {
  const totals=new Map<string,{value:bigint;scale:number}>()
  for(const amount of amounts) {
   if(!amount)continue
@@ -15,6 +15,6 @@ export function postingTotals(amounts:(Amount|undefined)[]):string|undefined {
  if(!totals.size)return undefined
  return [...totals].sort(([a],[b]) => a.localeCompare(b)).map(([currency,{value,scale}]) => {
   const negative=value<0n,digits=(negative ? -value : value).toString().padStart(scale+1,'0'),whole=scale ? digits.slice(0,-scale) : digits,fraction=scale ? digits.slice(-scale).replace(/0+$/,'') : ''
-  return amountLabel({v:`${negative ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`,c:currency})
+  return amountLabel({v:`${negative ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`,c:currency},minimumFractionDigits)
  }).join(' · ')
 }

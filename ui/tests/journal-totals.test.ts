@@ -5,3 +5,5 @@ assert.equal(postingTotals([{v:'10000000000000000',c:'EUR'},{v:'1.00000000000000
 assert.equal(postingTotals([{v:'1.20',c:'EUR'},{v:'-1.2',c:'EUR'},undefined]),'0 €')
 assert.equal(postingTotals([{v:'1e6',c:'EUR'}]),undefined)
 assert.equal(postingTotals([undefined]),undefined)
+
+assert.equal(postingTotals([{v:'1.20',c:'EUR'},{v:'-1.2',c:'EUR'},{v:'0.1',c:'USD'}],2),'0.00 € · 0.10 $ USD')
