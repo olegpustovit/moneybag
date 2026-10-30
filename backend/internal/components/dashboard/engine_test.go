@@ -439,3 +439,44 @@ func TestEvaluationBudgetLeavesNoActiveReaders(t *testing.T) {
 		t.Fatalf("budget: %v after %v, %d readers active", err, time.Since(start), reader.active.Load())
 	}
 }
+
+func TestPostingClassFilterPreservesExpressionBehavior(t *testing.T) {
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []map[string]any{{"class": "bank", "amount": float64(1)}, {"class": "expense", "amount": float64(2)}, {"class": "bank"}}
+	for _, tc := range []struct {
+		where string
+		want  int
+		fails bool
+	}{
+		{`row.class == 'expense' && row.amount > 0.0`, 1, false},
+		{`row.class == 'expense' || row.class == 'bank'`, 3, false},
+		{`row.class == 'expense' && unknown_function()`, 0, true},
+		{`row.class == 'expense' && row.missing > 0`, 0, true},
+	} {
+		x := &execution{ctx: context.Background(), engine: &Engine{Expr: expr, Reader: retainedReader{rows: rows}}, vars: map[string]any{"data": map[string]any{}}}
+		got, err := x.query(Query{From: "postings", Where: tc.where})
+		if tc.fails {
+			if err == nil {
+				t.Fatalf("%s: expected error", tc.where)
+			}
+			continue
+		}
+		if err != nil || len(got.([]map[string]any)) != tc.want {
+			t.Fatalf("%s: %v %v", tc.where, got, err)
+		}
+	}
+	for _, tc := range []struct {
+		row   map[string]any
+		fails bool
+	}{{map[string]any{"amount": float64(1)}, true}, {map[string]any{"class": float64(1)}, false}} {
+		x := &execution{ctx: context.Background(), engine: &Engine{Expr: expr, Reader: retainedReader{rows: []map[string]any{{"class": "bank"}, tc.row}}}, vars: map[string]any{"data": map[string]any{}}}
+		got, err := x.query(Query{From: "postings", Where: `row.class == 'expense' && true`})
+		if (err != nil) != tc.fails || err == nil && len(got.([]map[string]any)) != 0 {
+			t.Fatalf("class %v: %v %v", tc.row, got, err)
+		}
+	}
+
+}

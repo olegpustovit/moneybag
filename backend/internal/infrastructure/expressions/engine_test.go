@@ -183,3 +183,23 @@ func TestNativeValueMatchesProtobufConversion(t *testing.T) {
 		}
 	}
 }
+
+func TestRequiredClass(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ src, want string }{
+		{`row.class == 'expense'`, "expense"},
+		{`(row.class == 'expense' && row.amount > 0) && true`, "expense"},
+		{`row.class == 'expense' || row.class == 'bank'`, ""},
+		{`row.class != 'expense' && true`, ""},
+		{`row.class == params.class && true`, ""},
+		{`has(row.class) && row.class == 'expense'`, ""},
+		{`row.class == 'expense' &&`, ""},
+	} {
+		if got := e.RequiredClass(tc.src); got != tc.want {
+			t.Fatalf("%s: %q", tc.src, got)
+		}
+	}
+}

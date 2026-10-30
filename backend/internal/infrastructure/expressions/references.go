@@ -87,3 +87,33 @@ func (e *Engine) DataReferences(src string) ([]string, bool, error) {
 	}
 	return out, dynamic, nil
 }
+
+// RequiredClass recognizes a leading class equality that must hold for the filter to pass.
+// shortcut: only leading equalities are optimized; expand when profiling warrants it.
+func (e *Engine) RequiredClass(src string) string {
+	ast, issues := e.env.Parse(src)
+	if issues.Err() != nil {
+		return ""
+	}
+	node := ast.Expr()
+	for node.GetCallExpr() != nil && node.GetCallExpr().Function == "_&&_" && len(node.GetCallExpr().Args) == 2 {
+		node = node.GetCallExpr().Args[0]
+	}
+	call := node.GetCallExpr()
+	if call == nil || call.Function != "_==_" || len(call.Args) != 2 {
+		return ""
+	}
+	sel := call.Args[0].GetSelectExpr()
+	if sel == nil || sel.TestOnly || sel.Field != "class" || sel.Operand.GetIdentExpr().GetName() != "row" {
+		return ""
+	}
+	literal := call.Args[1].GetConstExpr()
+	if literal == nil {
+		return ""
+	}
+	value, ok := literal.ConstantKind.(*exprpb.Constant_StringValue)
+	if !ok {
+		return ""
+	}
+	return value.StringValue
+}

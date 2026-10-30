@@ -151,11 +151,20 @@ func (x *execution) query(q Query) (any, error) {
 		return nil, fmt.Errorf("source exceeds 250000 rows")
 	}
 	out := []map[string]any{}
+	class := ""
+	if q.From == "postings" && q.Where != "" && len(rows) > 1 {
+		class = x.engine.Expr.RequiredClass(q.Where)
+	}
 	for i, r := range rows {
 		if i%1000 == 0 && x.ctx.Err() != nil {
 			return nil, x.ctx.Err()
 		}
 		if q.Where != "" {
+			if i > 0 && class != "" {
+				if actual, ok := r["class"].(string); ok && actual != class {
+					continue
+				}
+			}
 			v, e := x.eval(q.Where, r)
 			if e != nil {
 				return nil, e
