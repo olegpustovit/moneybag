@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -465,6 +466,43 @@ func TestSourceCloneIsolatesNestedValues(t *testing.T) {
 	copy["tags"].([]any)[0] = "b"
 	if original["groups"].(map[string]any)["name"] != "original" || original["tags"].([]any)[0] != "a" {
 		t.Fatal("nested source values shared")
+	}
+}
+
+func TestQuerySharedRowsKeepPublicResultsIsolated(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	source := &Sources{Snapshots: cache}
+	ctx := expressions.WithVolatility(reqcache.With(context.Background()))
+	_, err := cache.read(ctx, p, "source", "journal", json.RawMessage("null"), func() (any, error) {
+		return []map[string]any{{"value": float64(1), "nested": map[string]any{"value": float64(7)}}}, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &Engine{Expr: expr, Reader: source}
+	data := map[string]Query{"a": {From: "journal", Derive: map[string]string{"value": "row.value + 1.0"}}, "b": {From: "journal"}}
+	result, err := engine.Evaluate(ctx, p, "[data.a[0].value, data.b[0].value, data.a[0].nested]", data, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := result.Value.([]any)
+	if values[0] != float64(2) || values[1] != float64(1) {
+		t.Fatalf("query rows were shared: %v", values)
+	}
+	values[2].(map[string]any)["value"] = float64(99)
+	public, err := source.Rows(ctx, p, "journal")
+	if err != nil || public[0]["value"] != float64(1) || public[0]["nested"].(map[string]any)["value"] != float64(7) {
+		t.Fatalf("source was changed: %v, %v", public, err)
+	}
+	public[0]["nested"].(map[string]any)["value"] = float64(88)
+	again, err := source.Rows(ctx, p, "journal")
+	if err != nil || again[0]["nested"].(map[string]any)["value"] != float64(7) {
+		t.Fatalf("public result was shared: %v, %v", again, err)
 	}
 }
 

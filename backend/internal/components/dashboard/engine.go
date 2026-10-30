@@ -130,6 +130,9 @@ func (x *execution) query(q Query) (any, error) {
 				x.memo = &sourceMemo{}
 			}
 			cached, e = x.memo.read(q.From, func() ([]map[string]any, error) {
+				if sources, ok := x.engine.Reader.(*Sources); ok {
+					return sources.sharedRows(x.ctx, x.p, q.From)
+				}
 				return x.engine.Reader.Rows(x.ctx, x.p, q.From)
 			})
 			if e != nil {

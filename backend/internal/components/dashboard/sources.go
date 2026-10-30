@@ -32,6 +32,19 @@ type Sources struct {
 }
 
 func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
+	rows, err := s.sharedRows(ctx, p, source)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]map[string]any, len(rows))
+	for i, row := range rows {
+		out[i] = cloneSourceValue(row).(map[string]any)
+	}
+	return out, nil
+}
+
+// sharedRows returns immutable rows for the query engine, which copies each row before deriving fields.
+func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
 	ctx = expressions.WithVolatility(ctx)
 	if strings.HasPrefix(source, "view:") {
 		id := strings.TrimPrefix(source, "view:")
@@ -78,14 +91,7 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	} else {
 		rows, err = reqcache.Do(ctx, "rows|"+p.UserID+"|"+source+"|"+string(params), read)
 	}
-	if err != nil {
-		return nil, err
-	}
-	out := make([]map[string]any, len(rows))
-	for i, row := range rows {
-		out[i] = cloneSourceValue(row).(map[string]any)
-	}
-	return out, nil
+	return rows, err
 }
 
 type viewResult struct {
