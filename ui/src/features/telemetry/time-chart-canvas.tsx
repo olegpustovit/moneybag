@@ -143,7 +143,8 @@ export default function TimeChartCanvas(props:CanvasProps) {
   const onDouble=() => model.current.onDouble?.()
   const onEnter=() => {hovering.current=true},onLeave=() => {hovering.current=false;tip.style.display='none'}
   let downX=0,downY=0
-  const onDown=(e:MouseEvent) => {downX=e.clientX;downY=e.clientY}
+  // Shift+drag zooms exactly like a plain drag, and must never start a text selection.
+  const onDown=(e:MouseEvent) => {downX=e.clientX;downY=e.clientY;if(e.shiftKey)e.preventDefault()}
   const onClick=(e:MouseEvent) => {if(Math.abs(e.clientX-downX)>4 || Math.abs(e.clientY-downY)>4)return;const i=u.cursor.idx;if(i!==null && i!==undefined)model.current.onPick?.(i)}
   // One finger inspects, two fingers pinch. touch-action:pan-y in CSS keeps vertical swipes as page scroll.
   let pinch:{d:number;center:number;moved:boolean}|null=null
