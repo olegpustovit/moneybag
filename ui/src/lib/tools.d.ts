@@ -847,6 +847,7 @@ export interface DashboardCreateOutput {
     [k: string]: unknown;
   };
   note: string;
+  published_at?: null | string;
   spec: {
     components:
       | null
@@ -1039,6 +1040,7 @@ export interface DashboardGetOutput {
     [k: string]: unknown;
   };
   note: string;
+  published_at?: null | string;
   spec: {
     components:
       | null
@@ -1165,6 +1167,7 @@ export interface DashboardListOutput {
         draft_version: number;
         id: string;
         publish_note?: string;
+        published_at?: null | string;
         published_by?: {
           id: string;
           kind: string;

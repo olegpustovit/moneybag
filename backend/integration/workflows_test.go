@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -428,6 +429,12 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	hist := &history.Service{Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Reconcile: rec}
 	testViewsTablesUnpublish(t, ctx, pa, pb, dash, tab, hist, sources, expr)
 	createShared("undo-publish", "1", map[string]dashboard.Query{})
+	if _, e = db.Collection("dashboards").UpdateOne(ctx, bson.M{"user_id": pa.UserID, "id": "undo-publish"}, bson.M{"$unset": bson.M{"published_at": ""}}); e != nil {
+		t.Fatal(e)
+	}
+	if legacy, err := dash.Get(ctx, pa, "undo-publish", "published"); err != nil || legacy.PublishedAt != nil {
+		t.Fatal("legacy publication has no invented timestamp", legacy.PublishedAt, err)
+	}
 	edited, e := dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-publish", Component: dashboard.Component{ID: "note", Type: "text", MD: "v2"}})
 	if e != nil {
 		t.Fatal(e)
@@ -435,6 +442,9 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	publishResult, e := dash.Publish(ctx, pa, "undo-publish", edited.DraftVersion, "Publish edit")
 	if e != nil {
 		t.Fatal(e)
+	}
+	if current, err := dash.Get(ctx, pa, "undo-publish", "published"); err != nil || current.PublishedAt == nil || time.Since(*current.PublishedAt) > time.Minute || current.Author != pa.Actor {
+		t.Fatal("publication attribution", current.PublishedAt, current.Author, err)
 	}
 	if edited.EventID == "" || publishResult.EventID == "" {
 		t.Fatal("dashboard writes must return audit event IDs", edited, publishResult)
@@ -448,6 +458,9 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 	if _, e = hist.Undo(ctx, pa, history.UndoInput{EventID: published.Events[0].ID, Reason: "Undo publish"}); e != nil {
 		t.Fatal(e)
+	}
+	if restored, err := dash.Get(ctx, pa, "undo-publish", "published"); err != nil || restored.Version == edited.DraftVersion || restored.PublishedAt == nil || restored.Author != pa.Actor {
+		t.Fatal("undo publication attribution", restored.Version, restored.PublishedAt, restored.Author, err)
 	}
 	if draft, e := dash.Get(ctx, pa, "undo-publish", "draft"); e != nil || draft.Version != edited.DraftVersion || draft.Status != "draft" {
 		t.Fatal("undoing a publish should restore its draft", draft.Version, draft.Status, e)

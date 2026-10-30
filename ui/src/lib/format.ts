@@ -30,3 +30,13 @@ export function accountLabel(id:string,name?:string):{name:string;trail:string} 
 export function fieldLabel(key:string):string {
  return labels[key] ?? key.replaceAll('_',' ').replace(/^./,letter => letter.toLocaleUpperCase())
 }
+
+export function relativeTime(value:string, now=Date.now()):string | undefined {
+ const parsed=Date.parse(value)
+ if(!Number.isFinite(parsed))return undefined
+ const seconds=Math.max(0,Math.floor((now-parsed)/1000))
+ if(seconds<60)return 'Just now'
+ if(seconds<3600)return `${Math.floor(seconds/60)} min ago`
+ if(seconds<86400)return `${Math.floor(seconds/3600)} h ago`
+ return `${Math.floor(seconds/86400)} d ago`
+}

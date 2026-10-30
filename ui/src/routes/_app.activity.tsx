@@ -1,19 +1,20 @@
 import { useState, type FormEvent } from 'react'
-import { infiniteQueryOptions, queryOptions, useInfiniteQuery, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
+import { infiniteQueryOptions, useInfiniteQuery, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Input } from '../components/ui/input'
 import { Skeleton } from '../components/ui/skeleton'
 import { activityVerb, reversible } from '../features/activity/verbs'
-import { ApiError, tool, type Session } from '../lib/api'
+import { agentsQuery } from '../lib/queries'
+import { tool, type Session } from '../lib/api'
 import type { AuditLogInput, AuditLogOutput } from '../lib/tools'
 
 type Event=NonNullable<AuditLogOutput['events']>[number]
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().catch(undefined)
 const schema=z.object({actor:z.string().max(200).optional().catch(undefined),tool:z.string().max(200).optional().catch(undefined),target:z.string().max(200).optional().catch(undefined),from:date,to:date})
 const auditQuery=(session:Session,filters:AuditLogInput) => infiniteQueryOptions({queryKey:['activity',session.user.id,filters],queryFn:({pageParam}) => tool(session,'audit_log',{...filters,cursor:pageParam || undefined,limit:100}),initialPageParam:0,getNextPageParam:(page) => page.next_cursor || undefined})
-const agentsQuery=(session:Session) => queryOptions({queryKey:['activity-agents',session.user.id],queryFn:async ():Promise<{client_id:string;client_name:string}[]> => {const response=await fetch('/api/activity/agents',{credentials:'same-origin'});if(!response.ok)throw new ApiError('Could not load activity agents.',response.status);return ((await response.json()) as {agents:{client_id:string;client_name:string}[]}).agents}})
+
 export const Route=createFileRoute('/_app/activity')({validateSearch:schema,loaderDeps:({search}) => search,loader:async ({context,deps}) => {const filters=toFilters(deps);await Promise.all([context.queryClient.infiniteQuery({...auditQuery(context.session,filters),staleTime:'static'}),context.queryClient.query({...agentsQuery(context.session),staleTime:'static'})])},pendingMs:150,pendingMinMs:300,pendingComponent:ActivityPending,errorComponent:ActivityError,component:Activity})
 function ActivityPending() {return <section role="status" aria-busy="true"><span className="sr-only">Loading activity…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / ACTIVITY</p><h1>Activity</h1><p className="description">Changes and their outcomes across your workspace.</p></div></header><div aria-hidden="true"><div className="activity-filters activity-loading-filters">{['Actor ID','Tool','Target ID','From (UTC)','To (UTC)'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}</div><div className="activity-days activity-loading-events">{Array.from({length:8},(_,index) => <div className="activity-event" key={index}><div><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/></div></div>)}</div></div></section>}
 function toFilters(search:z.infer<typeof schema>):AuditLogInput {return {actor:search.actor,tool:search.tool,target:search.target,from:search.from ? `${search.from}T00:00:00Z` : undefined,to:search.to ? `${search.to}T23:59:59.999Z` : undefined}}

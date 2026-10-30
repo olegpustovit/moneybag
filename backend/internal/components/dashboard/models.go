@@ -85,6 +85,7 @@ type Spec struct {
 }
 type Head struct {
 	PublishedBy      principal.Actor `json:"published_by,omitempty" bson:"published_by,omitempty"`
+	PublishedAt      *time.Time      `json:"published_at,omitempty" bson:"published_at,omitempty"`
 	PublishNote      string          `json:"publish_note,omitempty" bson:"publish_note,omitempty"`
 	Archived         bool            `json:"archived,omitempty" bson:"archived,omitempty"`
 	Key              string          `json:"-" bson:"_id"`

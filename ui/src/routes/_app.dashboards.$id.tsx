@@ -12,7 +12,8 @@ import { Component } from '../features/dashboard/component'
 import { DashboardSkeleton } from '../features/dashboard/skeleton'
 import { useLoadingSkeleton } from '../components/use-loading-skeleton'
 import { tableSort } from '../features/dashboard/table-sort'
-import { dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
+import { relativeTime } from '../lib/format'
+import { agentsQuery, dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery } from '../lib/queries'
 
 const validDate=(value:string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value
 const date = z.string().refine(value => value==='' || validDate(value)).optional().catch(undefined)
@@ -57,6 +58,9 @@ function Dashboard() {
   },enableBeforeUnload:() => dirtyRef.current})
   const { version, head } = Route.useLoaderData()
   const { data: dashboard } = useSuspenseQuery(dashboardSpecQuery(session, id, version))
+  const agents = useQuery({...agentsQuery(session),enabled:dashboard.author.kind==='agent'})
+  const author = dashboard.author.kind==='agent' ? agents.data?.find(agent => agent.client_id===dashboard.author.id)?.client_name || 'Connected agent' : dashboard.author.kind==='human' || dashboard.author.kind==='user' ? dashboard.author.id===session.user.id ? 'You' : 'Collaborator' : dashboard.author.kind || 'Unknown'
+  const publishedAt = dashboard.published_at && relativeTime(dashboard.published_at)
   const params: Record<string, string> = {}
   for (const key of ['from','to','month'] as const) if (search[key] !== undefined) params[key] = search[key]
   if(search.all){params.from='';params.to=''}
@@ -70,7 +74,7 @@ function Dashboard() {
   const range = readsParam(reads,'from') || readsParam(reads,'to')
   const month = readsParam(reads,'month')
   return <>
-    <header className="page-header"><div><p className="breadcrumb"><Link to="/">DASHBOARDS</Link> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.author.kind === 'user' ? 'You' : dashboard.author.id}</>}</p></div>
+    <header className="page-header"><div><p className="breadcrumb"><Link to="/">DASHBOARDS</Link> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.status==='published' ? 'Published' : 'Edited'} by {author}</>}{publishedAt && <> · <time dateTime={dashboard.published_at || undefined} title={new Date(dashboard.published_at!).toLocaleString()}>{publishedAt}</time></>}</p></div>
       <div className="dashboard-toolbar">{head && head.published_version > 0 && head.draft_version > 0 && <label>Version <select value={version} onChange={(event) => void navigate({ search: (old) => ({ ...old, version: event.target.value === 'draft' ? 'draft' : 'published' }) })}><option value="published">Published</option><option value="draft">Draft</option></select></label>}<Button size="sm" onClick={() => {setSelected(undefined);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit</Button><DashboardActions session={session} id={id} head={head} onPublished={() => {void navigate({search:(old) => ({...old,version:'published',edit:undefined})});void router.invalidate()}} onUndoPublication={() => {void navigate({search:(old) => ({...old,version:'draft',edit:undefined})});void router.invalidate()}}/></div>
     </header>
     {(range || month) && <DateRange range={range} month={month} values={search} defaults={{from:typeof dashboard.spec.params?.from==='string' && validDate(dashboard.spec.params.from) ? dashboard.spec.params.from : undefined,to:typeof dashboard.spec.params?.to==='string' && validDate(dashboard.spec.params.to) ? dashboard.spec.params.to : undefined,month:typeof dashboard.spec.params?.month==='string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dashboard.spec.params.month) ? dashboard.spec.params.month : undefined}} onChange={value => void navigate({search:old => ({...old,from:value.from,to:value.to,month:value.month,all:value.all || undefined})})}/>}

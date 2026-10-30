@@ -67,11 +67,12 @@ func (s *Service) head(ctx context.Context, p principal.Principal, id string) (H
 }
 
 type GetResult struct {
-	Spec    Spec            `json:"spec"`
-	Version int             `json:"version"`
-	Status  string          `json:"status"`
-	Author  principal.Actor `json:"author"`
-	Note    string          `json:"note"`
+	Spec        Spec            `json:"spec"`
+	Version     int             `json:"version"`
+	Status      string          `json:"status"`
+	Author      principal.Actor `json:"author"`
+	Note        string          `json:"note"`
+	PublishedAt *time.Time      `json:"published_at,omitempty"`
 }
 
 func (s *Service) UseSnapshots(cache *Snapshots) { s.snapshots = cache }
@@ -156,7 +157,11 @@ func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string
 			v.Note = h.PublishNote
 		}
 	}
-	return GetResult{v.Spec, n, status, v.Author, v.Note}, e
+	result := GetResult{Spec: v.Spec, Version: n, Status: status, Author: v.Author, Note: v.Note}
+	if status == "published" {
+		result.PublishedAt = h.PublishedAt
+	}
+	return result, e
 }
 
 type CreateInput struct {
@@ -530,7 +535,7 @@ func (s *Service) publish(ctx context.Context, p principal.Principal, id string,
 			return fmt.Errorf("publish gate failed: %s", strings.Join(reasons, "; "))
 		}
 		eventID, e := s.audit.Write(tx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, note, h, out, func(tx context.Context) error {
-			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note}
+			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note, "published_at": time.Now().UTC()}
 			if h.DraftVersion == version {
 				update["draft_version"] = 0
 			}
