@@ -57,7 +57,7 @@ export function layoutSankey(nodes:SankeyNode[],links:SankeyLink[],width:number,
  const ribbons=live.filter(l => placed.has(l.from) && placed.has(l.to)).sort((a,b) => placed.get(a.from)!.y-placed.get(b.from)!.y || placed.get(a.to)!.y-placed.get(b.to)!.y).map(l => {
   const a=placed.get(l.from)!,b=placed.get(l.to)!,h=Math.max(.75,l.value*scale),y0=a.y+a.out+h/2,y1=b.y+b.in+h/2;a.out+=h;b.in+=h
   const x0=a.x+nodeWidth,x1=b.x,mx=(x0+x1)/2
-  return {from:l.from,to:l.to,value:l.value,h,d:`M${x0.toFixed(1)} ${y0.toFixed(1)} C${mx.toFixed(1)} ${y0.toFixed(1)} ${mx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`,color:a.col>0 ? b.color ?? a.color : a.color ?? b.color}
+  return {from:l.from,to:l.to,value:l.value,h,d:`M${x0.toFixed(1)} ${y0.toFixed(1)} C${mx.toFixed(1)} ${y0.toFixed(1)} ${mx.toFixed(1)} ${y1.toFixed(1)} ${x1.toFixed(1)} ${y1.toFixed(1)}`,color:a.col>0 || a.color==='var(--ink)' ? b.color ?? a.color : a.color ?? b.color}
  })
  return {nodes:[...placed.values()],ribbons,columns}
 }

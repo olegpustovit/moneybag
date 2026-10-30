@@ -52,7 +52,7 @@ function StatPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
   const win=windowFor(c,ctx,ctx.range),q={range:ctx.range,pills:ctx.pills},now=metricTotal(ctx.cube,q,m,policyOf(c,m)),prev=win?.available ? metricTotal(ctx.cube,{range:win,pills:ctx.pills},m,policyOf(c,m)).total : null
   const fmt=(x:number) => metricText(ctx,m,x)
   if(!exact)text=fmt(now.total)
-  change=changeBetween(now.total,prev,goodWhen(m),fmt);comparison=win?.label;share=now.total ? now.estimated/now.total : 0
+  change=changeBetween(now.total,prev,goodWhen(m),fmt);comparison=win?.label;share=now.total && m.unit!=='int' ? now.estimated/now.total : 0
   spark=balanceField(m) ? balanceSeries(ctx.cube,ctx.range,{field:balanceField(m)!,maxPoints:60}).values : timeseries(ctx.cube,q,{measure:m,estimates:policyOf(c,m)}).total
  } else if(v.compare && v.compare.direction){
   const pct=v.compare.delta_pct,dir=v.compare.direction==='up' ? 'up' as const : v.compare.direction==='down' ? 'down' as const : 'flat' as const
@@ -101,7 +101,7 @@ function SankeyPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  const m=metricOf(ctx,v.metric),cube=ctx.cube,split=(c.split ?? 'category') as Dimension,title=v.title ?? v.label,center=v.label ?? 'Total'
  let links:{from:string;to:string;value:number;text:string}[]
  if(cube && cubeCanCompute(m,split) && !balanceField(m)){
-  links=whatMoved(cube,{range:ctx.range,pills:ctx.pills},null,{by:split,measure:m,limit:12}).filter(x => x.now).map(x => x.now<0 ? {from:x.label,to:center,value:-x.now,text:metricText(ctx,m,-x.now)} : {from:center,to:x.label,value:x.now,text:metricText(ctx,m,x.now)})
+  links=whatMoved(cube,{range:ctx.range,pills:ctx.pills},null,{by:split,measure:m,limit:12}).filter(x => x.now).map(x => {const inward=(m.sign===-1)===(x.now>0),value=Math.abs(x.now),text=metricText(ctx,m,value);return inward ? {from:x.label,to:center,value,text} : {from:center,to:x.label,value,text}})
  } else links=(v.links ?? []).map(l => ({from:l.from,to:l.to,value:tryNumber(l.value),text:l.text}))
  const names=[...new Set(links.flatMap(l => [l.from,l.to]))],text=new Map(links.flatMap(l => [[l.from===center ? l.to : l.from,l.text]])),totalIn=links.filter(l => l.to===center).reduce((n,l) => n+l.value,0),totalOut=links.filter(l => l.from===center).reduce((n,l) => n+l.value,0)
  const unitIsCents=!!(cube && cubeCanCompute(m,split) && !balanceField(m)),fmt=(x:number) => unitIsCents ? money(x,cube!.base) : compactNumber(x)

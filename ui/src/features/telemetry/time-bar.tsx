@@ -90,7 +90,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
  const [draft,setDraft]=useState<string|null>(null),input=useRef<HTMLInputElement>(null),fieldId=useId(),statusId=useId(),compareId=useId()
  const list=presets ?? defaultPresets(bounds)
  const isCanonical=/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/.test(state.text),activePreset=list.find(p => {const r=parseRange(p.text,bounds);return r && r.from===state.range.from && r.to===state.range.to})
- const shown=draft ?? (activePreset && isCanonical ? activePreset.label : isCanonical ? rangeLabel(state.range) : friendlyTime(state.text))
+ const shown=draft ?? (activePreset && isCanonical ? friendlyTime(activePreset.text) : isCanonical ? rangeLabel(state.range) : friendlyTime(state.text))
  const parsed=draft===null ? null : parseTime(draft,bounds)
  const settled=`${rangeLabel(state.range)} · ${rangeDays(state.range).toLocaleString('en-US')} ${rangeDays(state.range)===1 ? 'day' : 'days'}`
  const status=!parsed ? settled : parsed.ok ? `${rangeLabel(parsed.range)} · ${rangeDays(parsed.range).toLocaleString('en-US')} ${rangeDays(parsed.range)===1 ? 'day' : 'days'} · press Enter` : parsed.message
