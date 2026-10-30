@@ -475,6 +475,36 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, err
 	})
+	add(r, "dashboard_apply", "dashboard", "dash:write", "Use this to edit a dashboard draft with JSON Patch ops, like dashboard_patch. Set validate_only to check the ops and get the validation without writing. Set if_version to the draft version you read; a stale draft is rejected.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+		DashboardID  string          `json:"dashboard_id"`
+		Ops          json.RawMessage `json:"ops" jsonschema:"RFC6902 operations: a JSON array, or a string containing that array"`
+		IfVersion    int             `json:"if_version,omitempty"`
+		ValidateOnly bool            `json:"validate_only,omitempty"`
+	}) (dashboard.EditResult, error) {
+		ops := in.Ops
+		if in.IfVersion > 0 {
+			guarded, e := withVersionGuard(ops, in.IfVersion)
+			if e != nil {
+				return dashboard.EditResult{}, e
+			}
+			ops = guarded
+		}
+		if in.ValidateOnly {
+			access, e := s.Sharing.Access(ctx, p, in.DashboardID, false)
+			if e != nil {
+				return dashboard.EditResult{}, e
+			}
+			v, e := access.Dashboard.PatchPreview(ctx, access.Principal, access.ID, ops)
+			return dashboard.EditResult{Validation: v}, e
+		}
+		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+			return access.Dashboard.Patch(tx, access.Principal, access.ID, ops)
+		})
+		if access.Grant != nil {
+			result.EventID = ""
+		}
+		return result, err
+	})
 	add(r, "dashboard_validate", "dashboard", "ledger:read", "Use this before preview or publish. Compiles every CEL expression, evaluates all rows, checks layout references and renders every component within the server budget.", true, false, func(ctx context.Context, p principal.Principal, in DashboardInput) (dashboard.Validation, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {

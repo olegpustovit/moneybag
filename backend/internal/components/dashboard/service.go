@@ -417,45 +417,82 @@ func (s *Service) UpdateComponent(ctx context.Context, p principal.Principal, id
 	})
 }
 func (s *Service) Patch(ctx context.Context, p principal.Principal, id string, ops json.RawMessage) (EditResult, error) {
+	patch, e := decodePatch(ops)
+	if e != nil {
+		return EditResult{}, e
+	}
+	return s.edit(ctx, p, id, "dashboard_patch", func(spec *Spec) error {
+		return applyPatch(spec, patch)
+	})
+}
+
+// PatchPreview applies ops to the current draft in memory and validates the result without writing.
+func (s *Service) PatchPreview(ctx context.Context, p principal.Principal, id string, ops json.RawMessage) (Validation, error) {
+	patch, e := decodePatch(ops)
+	if e != nil {
+		return Validation{}, e
+	}
+	old, e := s.Get(ctx, p, id, "")
+	if e != nil {
+		return Validation{}, e
+	}
+	encoded, e := json.Marshal(old.Spec)
+	if e != nil {
+		return Validation{}, e
+	}
+	var spec Spec
+	if e = json.Unmarshal(encoded, &spec); e != nil {
+		return Validation{}, e
+	}
+	if e = applyPatch(&spec, patch); e != nil {
+		return Validation{}, e
+	}
+	spec.ID = id
+	return s.ValidateSpec(ctx, p, spec)
+}
+
+func decodePatch(ops json.RawMessage) (jsonpatch.Patch, error) {
 	// ops may arrive as a JSON string containing the array.
 	var text string
 	if json.Unmarshal(ops, &text) == nil {
 		ops = json.RawMessage(text)
 	}
 	if len(ops) > 1<<20 {
-		return EditResult{}, fmt.Errorf("patch exceeds 1 MiB")
+		return nil, fmt.Errorf("patch exceeds 1 MiB")
 	}
 	patch, e := jsonpatch.DecodePatch(ops)
 	if e != nil {
-		return EditResult{}, fmt.Errorf("invalid RFC6902 patch: %w", e)
+		return nil, fmt.Errorf("invalid RFC6902 patch: %w", e)
 	}
 	if len(patch) > 500 {
-		return EditResult{}, fmt.Errorf("at most 500 patch operations")
+		return nil, fmt.Errorf("at most 500 patch operations")
 	}
-	return s.edit(ctx, p, id, "dashboard_patch", func(spec *Spec) error {
-		b, _ := json.Marshal(spec)
-		next := b
-		for i, op := range patch {
-			path, _ := op.Path()
-			var e error
-			if next, e = (jsonpatch.Patch{op}).Apply(next); e == nil {
-				continue
-			}
-			if errors.Is(e, jsonpatch.ErrMissing) {
-				return fmt.Errorf("op %d: path %s not found", i, path)
-			}
-			return fmt.Errorf("op %d (%s %s): %w", i, op.Kind(), path, e)
+	return patch, nil
+}
+
+func applyPatch(spec *Spec, patch jsonpatch.Patch) error {
+	b, _ := json.Marshal(spec)
+	next := b
+	for i, op := range patch {
+		path, _ := op.Path()
+		var e error
+		if next, e = (jsonpatch.Patch{op}).Apply(next); e == nil {
+			continue
 		}
-		// Decode into a fresh Spec: decoding into the old one merges maps, so removed queries would survive.
-		var patched Spec
-		decoder := json.NewDecoder(strings.NewReader(string(next)))
-		decoder.DisallowUnknownFields()
-		if e = decoder.Decode(&patched); e != nil {
-			return fmt.Errorf("invalid spec: %w", e)
+		if errors.Is(e, jsonpatch.ErrMissing) {
+			return fmt.Errorf("op %d: path %s not found", i, path)
 		}
-		*spec = patched
-		return nil
-	})
+		return fmt.Errorf("op %d (%s %s): %w", i, op.Kind(), path, e)
+	}
+	// Decode into a fresh Spec: decoding into the old one merges maps, so removed queries would survive.
+	var patched Spec
+	decoder := json.NewDecoder(strings.NewReader(string(next)))
+	decoder.DisallowUnknownFields()
+	if e := decoder.Decode(&patched); e != nil {
+		return fmt.Errorf("invalid spec: %w", e)
+	}
+	*spec = patched
+	return nil
 }
 func (s *Service) Preview(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {
 	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
