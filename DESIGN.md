@@ -46,22 +46,22 @@ colors:
   draft-text: "#946600"
 typography:
   headline:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "24px"
     fontWeight: 650
     lineHeight: 1.2
     letterSpacing: "-0.015em"
   title:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "16px"
     fontWeight: 620
   body:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "15px"
     fontWeight: 400
     lineHeight: 1.5
   table:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.5
@@ -76,17 +76,17 @@ typography:
     fontWeight: 600
     letterSpacing: "0.07em"
   data:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "26px"
     fontWeight: 600
     lineHeight: 1.5
     letterSpacing: "-0.015em"
   button:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "13px"
     fontWeight: 500
   input:
-    fontFamily: "Geist,system-ui,sans-serif"
+    fontFamily: "Geist,\"Geist Fallback\",system-ui,sans-serif"
     fontSize: "13px"
     fontWeight: 400
 rounded:
@@ -158,7 +158,7 @@ components:
 
 The Moneybag workspace is square, quiet and dense: a practical finance interface for repeated reading, editing and comparison. Its visual authority is the supplied Moneybag artifact and the durable brand commitments in PRODUCT.md. The implementation uses flat paper and recessed surfaces, fine shared borders, compact controls and restrained semantic color.
 
-The workspace follows the system light or dark preference. Responsive layouts preserve task access with a scrolling workspace navigation, single-column panels and locally scrolling data. Geist serves interface text; Geist Mono distinguishes operational labels, identifiers and code. There is no separate display-type role or decorative image layer.
+The workspace follows the system light or dark preference. Responsive layouts preserve task access with a scrolling workspace navigation, single-column panels and locally scrolling data. Geist serves interface text, with a build-generated metric-adjusted Arial fallback; Geist Mono distinguishes operational labels, identifiers and code. There is no separate display-type role or decorative image layer.
 
 **Key Characteristics:**
 
@@ -201,7 +201,7 @@ Neutral paper and recessed surfaces carry most of the interface; color identifie
 
 ## Typography
 
-**Body Font:** Geist Variable, with system sans fallback, recorded in `typography.body`.
+**Body Font:** Geist Variable, with metric-adjusted Arial and system sans fallbacks, recorded in `typography.body`.
 
 **Label/Mono Font:** Geist Mono Variable with a system monospace fallback, recorded in `typography.label` and `typography.identifier`.
 

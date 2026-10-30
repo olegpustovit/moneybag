@@ -5,7 +5,7 @@
 @font-face { font-family: Geist; src: url("../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Geist Mono"; src: url("../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @theme inline {
-  --font-sans: Geist, system-ui, sans-serif; --font-mono: "Geist Mono", ui-monospace, monospace;
+  --font-sans: Geist, "Geist Fallback", system-ui, sans-serif; --font-mono: "Geist Mono", ui-monospace, monospace;
   --radius: 0px; --radius-sm: 0px; --radius-md: 0px; --radius-lg: 0px; --radius-xl: 0px;
   --color-background: var(--bg); --color-foreground: var(--text); --color-popover: var(--paper); --color-popover-foreground: var(--text);
   --color-primary: var(--ink); --color-primary-foreground: var(--bg); --color-secondary: var(--sunk); --color-secondary-foreground: var(--text);

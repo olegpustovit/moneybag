@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-30T04:14:54.517524Z",
+  "generatedAt": "2026-10-30T04:32:06.084517Z",
   "title": "Design System: Moneybag",
   "extensions": {
     "colorMeta": {
@@ -668,7 +668,7 @@
       "refersTo": "button-primary",
       "description": "Default action.",
       "html": "<button class=\"ds-button\">Save changes</button>",
-      "css": ".ds-button{height:32px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;border:1px solid transparent;border-radius:0;background:var(--ink,#111214);color:var(--bg,#fff);font:500 14px Geist,system-ui,sans-serif;cursor:pointer}.ds-button:hover{opacity:.8}.ds-button:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
+      "css": ".ds-button{height:32px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;border:1px solid transparent;border-radius:0;background:var(--ink,#111214);color:var(--bg,#fff);font:500 14px Geist,\"Geist Fallback\",system-ui,sans-serif;cursor:pointer}.ds-button:hover{opacity:.8}.ds-button:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
       "name": "Ghost Button",
@@ -676,7 +676,7 @@
       "refersTo": "button-ghost",
       "description": "Low-emphasis action.",
       "html": "<button class=\"ds-ghost\">Cancel</button>",
-      "css": ".ds-ghost{height:32px;padding:0 10px;border:1px solid transparent;border-radius:0;background:transparent;color:var(--text,#111214);font:500 14px Geist,system-ui,sans-serif;cursor:pointer}.ds-ghost:hover{background:var(--hover,#f1f2f4)}.ds-ghost:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
+      "css": ".ds-ghost{height:32px;padding:0 10px;border:1px solid transparent;border-radius:0;background:transparent;color:var(--text,#111214);font:500 14px Geist,\"Geist Fallback\",system-ui,sans-serif;cursor:pointer}.ds-ghost:hover{background:var(--hover,#f1f2f4)}.ds-ghost:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
       "name": "Input",
@@ -684,7 +684,7 @@
       "refersTo": "input",
       "description": "Text entry.",
       "html": "<label class=\"ds-field\">Name<input class=\"ds-input\" value=\"Example\"></label>",
-      "css": ".ds-field{display:grid;gap:6px;font:13px Geist,system-ui,sans-serif;color:var(--text,#111214)}.ds-input{height:32px;padding:4px 10px;border:1px solid var(--bd,#e4e5e8);border-radius:0;background:transparent;color:inherit;font:14px Geist,system-ui,sans-serif}.ds-input:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
+      "css": ".ds-field{display:grid;gap:6px;font:13px Geist,\"Geist Fallback\",system-ui,sans-serif;color:var(--text,#111214)}.ds-input{height:32px;padding:4px 10px;border:1px solid var(--bd,#e4e5e8);border-radius:0;background:transparent;color:inherit;font:14px Geist,\"Geist Fallback\",system-ui,sans-serif}.ds-input:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
       "name": "Navigation",
@@ -692,7 +692,7 @@
       "refersTo": "navigation",
       "description": "Workspace links with active marker.",
       "html": "<nav class=\"ds-nav\"><a class=\"ds-link ds-current\" href=\"#\">Dashboards</a><a class=\"ds-link\" href=\"#\">Journal</a></nav>",
-      "css": ".ds-nav{background:var(--sunk,#f6f6f7);font:13px Geist,system-ui,sans-serif}.ds-link{display:block;min-height:32px;padding:6px 16px;color:var(--text2,#55595f);text-decoration:none}.ds-link:hover{background:var(--hover,#f1f2f4)}.ds-current{background:var(--paper,#fff);color:var(--text,#111214);box-shadow:inset 3px 0 var(--ink,#111214)}.ds-link:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
+      "css": ".ds-nav{background:var(--sunk,#f6f6f7);font:13px Geist,\"Geist Fallback\",system-ui,sans-serif}.ds-link{display:block;min-height:32px;padding:6px 16px;color:var(--text2,#55595f);text-decoration:none}.ds-link:hover{background:var(--hover,#f1f2f4)}.ds-current{background:var(--paper,#fff);color:var(--text,#111214);box-shadow:inset 3px 0 var(--ink,#111214)}.ds-link:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
       "name": "Draft Badge",
@@ -708,12 +708,12 @@
       "refersTo": "dashboard-panel",
       "description": "A KPI inside the dashboard grid.",
       "html": "<section class=\"ds-panel\"><h2>Balance</h2><div class=\"ds-value\">1,250.00</div><p>Example</p></section>",
-      "css": ".ds-panel{padding:14px 16px;border:1px solid var(--bd,#e4e5e8);background:var(--paper,#fff);color:var(--text,#111214);font-family:Geist,system-ui,sans-serif}.ds-panel h2{margin:0 0 14px;color:var(--text2,#55595f);font-size:12px;font-weight:600}.ds-value{font-size:26px;font-weight:600;letter-spacing:-.015em;font-variant-numeric:tabular-nums}.ds-panel p{margin:5px 0 0;color:var(--text2,#55595f);font-size:12px}"
+      "css": ".ds-panel{padding:14px 16px;border:1px solid var(--bd,#e4e5e8);background:var(--paper,#fff);color:var(--text,#111214);font-family:Geist,\"Geist Fallback\",system-ui,sans-serif}.ds-panel h2{margin:0 0 14px;color:var(--text2,#55595f);font-size:12px;font-weight:600}.ds-value{font-size:26px;font-weight:600;letter-spacing:-.015em;font-variant-numeric:tabular-nums}.ds-panel p{margin:5px 0 0;color:var(--text2,#55595f);font-size:12px}"
     }
   ],
   "narrative": {
     "northStar": "The Moneybag workspace",
-    "overview": "The Moneybag workspace is square, quiet and dense: a practical finance interface for repeated reading, editing and comparison. Flat paper and recessed surfaces, fine borders, compact controls and restrained semantic color keep data in focus.\n\nLight, dark and system themes share the same interface. Geist serves interface text and Geist Mono distinguishes operational labels and code. The desktop sidebar becomes an icon rail on tablet and a navigation sheet on mobile.",
+    "overview": "The Moneybag workspace is square, quiet and dense: a practical finance interface for repeated reading, editing and comparison. Flat paper and recessed surfaces, fine borders, compact controls and restrained semantic color keep data in focus.\n\nLight, dark and system themes share the same interface. Geist serves interface text with a build-generated, metric-adjusted Arial fallback and Geist Mono distinguishes operational labels and code. The desktop sidebar becomes an icon rail on tablet and a navigation sheet on mobile.",
     "keyCharacteristics": [
       "Square geometry and shared 1px borders.",
       "Compact Geist typography with tabular financial numbers.",
