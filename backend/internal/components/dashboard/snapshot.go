@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -131,9 +130,6 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 	s.order = kept
 	key := snapshotKey{user: p.UserID, kind: kind, name: name, params: string(encoded), day: day, revision: revision, generation: state.generation}
 	if item, ok := s.items[key]; ok {
-		if kind == "render" && name == "spending-live" {
-			slog.Info("temporary render cache", "hit", true)
-		}
 		s.mu.Unlock()
 		expressions.ExpireAt(ctx, item.expires)
 		return item.value, nil
@@ -173,7 +169,6 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 			panic(failure)
 		}
 	}()
-	started := time.Now()
 	flight.value, flight.err = build()
 	flight.abandoned = ctx.Err() != nil
 	flight.volatile = expressions.Volatile(ctx)
@@ -181,9 +176,6 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 	canStore := cacheable == nil || flight.err == nil && cacheable(flight.value)
 	s.mu.Lock()
 	state = s.users[p.UserID]
-	if kind == "render" && name == "spending-live" {
-		slog.Info("temporary render cache", "hit", false, "build_us", time.Since(started).Microseconds(), "volatile", flight.volatile, "cacheable", canStore, "error", flight.err != nil, "writes", state.writes)
-	}
 	if flight.err == nil && ctx.Err() == nil && !flight.volatile && state.writes == 0 && state.generation == key.generation && canStore {
 		// shortcut: snapshots are capped at 64 entries; upgrade to byte-aware eviction if memory requires it.
 		if len(s.order) >= 64 {
