@@ -10,7 +10,7 @@ const features=tableFeatures({rowSortingFeature,sortedRowModel:createSortedRowMo
 function preferences(key:string):{visibility:ColumnVisibilityState;sizing:ColumnSizingState} {
  try {const data=JSON.parse(localStorage.getItem(key) || '{}');return {visibility:data.visibility && typeof data.visibility==='object' ? data.visibility : {},sizing:data.sizing && typeof data.sizing==='object' ? data.sizing : {}}} catch {return {visibility:{},sizing:{}}}
 }
-export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, renderCell, sorters, requiredColumns, unsortable, onFilterChange, initialSizing, externalFilterRef, onRowActivate, onScroll, footer, forceVirtual, resetKey, totalOverrides, totalLabel }: { value:Value; storageKey:string; sort?:string; onSortChange?:(sort:string|undefined)=>void; regionLabel?:string; renderCell?:(row:Value['rows'][number],column:string)=>ReactNode; sorters?:Record<string,(a:Value['rows'][number],b:Value['rows'][number])=>number>; requiredColumns?:string[]; unsortable?:string[]; onFilterChange?:()=>void; initialSizing?:ColumnSizingState; externalFilterRef?:RefObject<HTMLInputElement|null>; onRowActivate?:(row:Value['rows'][number])=>void; onScroll?:(element:HTMLDivElement)=>void; footer?:ReactNode; forceVirtual?:boolean; resetKey?:string; totalOverrides?:Record<string,{value:string;title:string}>; totalLabel?:string }) {
+export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, renderCell, sorters, requiredColumns, unsortable, onFilterChange, initialSizing, externalFilterRef, onRowActivate, onScroll, onNextPage, footer, forceVirtual, resetKey, totalOverrides, totalLabel }: { value:Value; storageKey:string; sort?:string; onSortChange?:(sort:string|undefined)=>void; regionLabel?:string; renderCell?:(row:Value['rows'][number],column:string)=>ReactNode; sorters?:Record<string,(a:Value['rows'][number],b:Value['rows'][number])=>number>; requiredColumns?:string[]; unsortable?:string[]; onFilterChange?:()=>void; initialSizing?:ColumnSizingState; externalFilterRef?:RefObject<HTMLInputElement|null>; onRowActivate?:(row:Value['rows'][number])=>void; onScroll?:(element:HTMLDivElement)=>void; onNextPage?:()=>void; footer?:ReactNode; forceVirtual?:boolean; resetKey?:string; totalOverrides?:Record<string,{value:string;title:string}>; totalLabel?:string }) {
  const key=`moneybag:table:${storageKey}`
  const [initial]=useState(() => preferences(key))
  const [localSorting,setLocalSorting]=useState<SortingState>([])
@@ -40,6 +40,15 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
  const top=visible[0]?.start ?? 0,bottom=visible.length ? virtual.getTotalSize()-visible[visible.length-1].end : 0
  const rendered=virtualized ? visible.map(item => ({row:rows[item.index],index:item.index})) : rows.map((row,index) => ({row,index}))
  const activeRow=rendered.some(item => item.index===focus.row) ? focus.row : rendered[0]?.index
+ const pendingFocus=useRef<{row:number;col:number;source:HTMLTableCellElement}|undefined>(undefined)
+ useLayoutEffect(() => {
+  const pending=pendingFocus.current
+  if(!pending || pending.row>=rows.length)return
+  pendingFocus.current=undefined
+  if(document.activeElement!==pending.source)return
+  virtual.scrollToIndex(pending.row,{align:'auto'})
+  requestAnimationFrame(() => {if(document.activeElement!==pending.source && document.activeElement!==document.body)return;const target=scroll.current?.querySelector<HTMLTableCellElement>(`tbody tr[data-row="${pending.row}"] td:nth-child(${pending.col+1})`);target?.focus({preventScroll:true});target?.scrollIntoView({block:'nearest',inline:'nearest'})})
+ },[rows.length,virtual])
  function tableKey(event:KeyboardEvent<HTMLTableElement>) {
   if(event.key==='/' && !event.ctrlKey && !event.metaKey && !event.altKey && !(event.target instanceof HTMLInputElement)) {event.preventDefault();(externalFilterRef ?? filterRef).current?.focus();return}
   if(!(event.target instanceof HTMLTableCellElement))return
@@ -47,6 +56,8 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
   const moves:Record<string,[number,number]>={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]}
   const move=moves[event.key];if(!move)return
   event.preventDefault();const source=event.target,row=Number(source.parentElement?.dataset.row)+move[0],col=source.cellIndex+move[1]
+  if(row===rows.length && move[0]===1 && onNextPage){pendingFocus.current={row,col,source};onNextPage();return}
+  pendingFocus.current=undefined
   if(row<0 || row>=rows.length || col<0 || col>=table.getVisibleLeafColumns().length)return
   const focusCell=() => {const target=scroll.current?.querySelector<HTMLTableCellElement>(`tbody tr[data-row="${row}"] td:nth-child(${col+1})`);if(target){target.focus({preventScroll:true});target.scrollIntoView({block:'nearest',inline:'nearest'});return true}return false}
   if(!focusCell() && virtualized){virtual.scrollToIndex(row,{align:'auto'});requestAnimationFrame(() => {if(document.activeElement===source)focusCell()})}
