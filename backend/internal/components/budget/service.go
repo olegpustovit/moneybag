@@ -283,6 +283,37 @@ func (s *Service) set(ctx context.Context, p principal.Principal, in SetInput) (
 	})
 	return SetResult{line, id}, e
 }
+
+type monthReadWindow struct{ from, to string }
+type monthReadWindowKey struct{}
+
+// WithMonthReadWindow shares grouped journal rows only within the supplied read range.
+func WithMonthReadWindow(ctx context.Context, from, to string) context.Context {
+	return context.WithValue(ctx, monthReadWindowKey{}, monthReadWindow{from, to})
+}
+
+type monthRow struct {
+	ID struct {
+		Date      string         `bson:"date"`
+		Account   string         `bson:"account"`
+		Commodity string         `bson:"commodity"`
+		Price     *ledger.Amount `bson:"price"`
+	} `bson:"_id"`
+	Amount ledger.Decimal `bson:"amount"`
+}
+
+func (s *Service) monthRows(ctx context.Context, p principal.Principal, from, to string) ([]monthRow, error) {
+	match := bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$gte": from, "$lte": to}}
+	cur, err := s.repo.db.Collection("journal").Aggregate(ctx, bson.A{bson.M{"$match": match}, bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:"}}}, bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}}, bson.M{"$limit": 5001}})
+	if err != nil {
+		return nil, err
+	}
+	defer cur.Close(ctx)
+	var rows []monthRow
+	err = cur.All(ctx, &rows)
+	return rows, err
+}
+
 func (s *Service) Months(ctx context.Context, p principal.Principal, from, to string) ([]Month, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
@@ -297,23 +328,33 @@ func (s *Service) Months(ctx context.Context, p principal.Principal, from, to st
 			mapping[a] = l.ID
 		}
 	}
-	match := bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$gte": from, "$lte": to}}
-	cur, e := s.repo.db.Collection("journal").Aggregate(ctx, bson.A{bson.M{"$match": match}, bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:"}}}, bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}}, bson.M{"$limit": 5001}})
-	if e != nil {
-		return nil, e
+	var rows []monthRow
+	window, shared := ctx.Value(monthReadWindowKey{}).(monthReadWindow)
+	shared = shared && from >= window.from && to <= window.to && from <= to
+	if shared {
+		key := fmt.Sprintf("budget-months|%p|%d:%s|%s|%s", s.repo.db, len(p.UserID), p.UserID, window.from, window.to)
+		rows, e = reqcache.Do(ctx, key, func() ([]monthRow, error) { return s.monthRows(ctx, p, window.from, window.to) })
+		if e != nil && ctx.Err() != nil {
+			return nil, e
+		}
+		if e == nil && len(rows) <= 5000 {
+			filtered := make([]monthRow, 0, len(rows))
+			for _, row := range rows {
+				if row.ID.Date >= from && row.ID.Date <= to {
+					filtered = append(filtered, row)
+				}
+			}
+			rows = filtered
+		} else {
+			// shortcut: retry narrow ranges when the shared window fails or exceeds the cap; use streaming grouping if large windows are common.
+			shared = false
+		}
 	}
-	defer cur.Close(ctx)
-	var rows []struct {
-		ID struct {
-			Date      string         `bson:"date"`
-			Account   string         `bson:"account"`
-			Commodity string         `bson:"commodity"`
-			Price     *ledger.Amount `bson:"price"`
-		} `bson:"_id"`
-		Amount ledger.Decimal `bson:"amount"`
-	}
-	if e = cur.All(ctx, &rows); e != nil {
-		return nil, e
+	if !shared {
+		rows, e = s.monthRows(ctx, p, from, to)
+		if e != nil {
+			return nil, e
+		}
 	}
 	if len(rows) > 5000 {
 		return nil, fmt.Errorf("monthly query exceeds 5000 rows")
