@@ -359,3 +359,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `cc43508b2267-20261030044536` passed public health and the service is active.
 
 - Visible-series chart labels: line, area, grouped bar and stacked charts now show direct labels when one to four series are visible, even if the chart has more series hidden through the legend. Restoring a fifth series removes the labels again; color assignments remain stable. The production-build browser regression covered five-to-four-to-five transitions for line charts and desktop/mobile grouped and stacked bars, alongside drilldowns, brushing and table behavior; `make check` passed. Real-data chart verification and the remaining SPA/P0 gates remain open.
+  Deployment: release `cf031f66d48f-20261030044758` passed public health and the service is active.
