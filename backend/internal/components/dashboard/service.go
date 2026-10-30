@@ -481,7 +481,7 @@ func applyPatch(spec *Spec, patch jsonpatch.Patch) error {
 			continue
 		}
 		if errors.Is(e, jsonpatch.ErrMissing) {
-			return fmt.Errorf("op %d: path %s not found", i, path)
+			return fmt.Errorf("op %d: path %s not found; read valid paths with dashboard_summary or dashboard_get", i, path)
 		}
 		return fmt.Errorf("op %d (%s %s): %w", i, op.Kind(), path, e)
 	}
