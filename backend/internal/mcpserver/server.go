@@ -387,6 +387,24 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, nil
 	})
+	add(r, "dashboard_summary", "dashboard", "ledger:read", "Use this to see a dashboard's pages, components and data sources without the full spec. Use dashboard_get when you need the CEL.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (dashboardSummary, error) {
+		v, e := versionRef(in.Version)
+		if e != nil {
+			return dashboardSummary{}, e
+		}
+		access, e := s.Sharing.Access(ctx, p, in.ID, false)
+		if e != nil {
+			return dashboardSummary{}, e
+		}
+		result, err := access.Dashboard.Get(ctx, access.Principal, access.ID, v)
+		if err == nil && access.Grant != nil {
+			err = s.Sharing.RecordEditorRead(ctx, p, access)
+		}
+		if err != nil {
+			return dashboardSummary{}, err
+		}
+		return summarizeDashboard(result), nil
+	})
 	add(r, "dashboard_create", "dashboard", "dash:write", "Use this when creating a dashboard draft. Optional from_template is budget-vs-actual or forecast. It belongs to your authenticated user.", false, false, s.Dashboard.Create)
 	add(r, "dashboard_add_component", "dashboard", "dash:write", "Use this when adding a KPI, table, chart, budget_bars, scenario_compare or text note. New components append a layout row by default; a missing named page is added. Spans are 1..12.", false, false, func(ctx context.Context, p principal.Principal, in dashboard.AddInput) (dashboard.EditResult, error) {
 		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
