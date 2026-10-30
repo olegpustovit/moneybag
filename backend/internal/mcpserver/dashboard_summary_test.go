@@ -32,3 +32,16 @@ func TestSummarizeDashboardListsLayoutComponents(t *testing.T) {
 		t.Fatalf("components: %+v", out.Components)
 	}
 }
+
+func TestCapTableRowsKeepsCountAndTruncates(t *testing.T) {
+	rows := make([]map[string]any, 120)
+	values := map[string]any{"t": map[string]any{"type": "table", "rows": rows}, "k": map[string]any{"type": "kpi"}}
+	capTableRows(values, 50)
+	table := values["t"].(map[string]any)
+	if len(table["rows"].([]map[string]any)) != 50 || table["row_count"] != 120 || table["rows_truncated"] != true {
+		t.Fatalf("capped table: %v", table)
+	}
+	if _, ok := values["k"].(map[string]any)["rows_truncated"]; ok {
+		t.Fatal("non-table value changed")
+	}
+}

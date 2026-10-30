@@ -538,6 +538,7 @@ func New(s Services, opts Options) *mcp.Server {
 		if e != nil {
 			return dashboard.Rendered{}, e
 		}
+		capTableRows(rendered.Values, maxAgentTableRows)
 		if in.ValuesOnly {
 			rendered.HTML = ""
 			return rendered, e

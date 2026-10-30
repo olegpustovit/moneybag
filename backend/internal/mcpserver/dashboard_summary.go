@@ -2,6 +2,25 @@ package mcpserver
 
 import "github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 
+const maxAgentTableRows = 50
+
+// capTableRows keeps agent responses small; the browser still gets every row from the service.
+func capTableRows(values map[string]any, limit int) {
+	for _, value := range values {
+		table, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		rows, ok := table["rows"].([]map[string]any)
+		if !ok || len(rows) <= limit {
+			continue
+		}
+		table["row_count"] = len(rows)
+		table["rows"] = rows[:limit]
+		table["rows_truncated"] = true
+	}
+}
+
 type dashboardSummary struct {
 	ID         string             `json:"id"`
 	Title      string             `json:"title"`
