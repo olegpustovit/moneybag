@@ -100,15 +100,17 @@ function ToolConsole({ session }: { session: Session }) {
   const [name, setName] = useState('')
   const [parseError, setParseError] = useState('')
   const [expression, setExpression] = useState('')
+  const [database, setDatabase] = useState('')
   const run = useMutation({ mutationFn: (args: Record<string, unknown>) => invokeTool(session, name, args) })
   const selected: ToolInfo | undefined = catalog.data?.find((item) => item.name === name)
+  const formulaKey = name === 'expr_eval' ? 'expr' : ['db_query', 'db_delete_rows', 'tags_set'].includes(name) ? 'where' : ''
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
     const args: Record<string, unknown> = {}
     try {
       for (const [key, schema] of Object.entries(selected?.inputSchema.properties ?? {})) {
-        const value = name === 'expr_eval' && key === 'expr' ? expression : data.get(key)
+        const value = key === formulaKey ? expression : data.get(key)
         if (value === null || value === '') continue
         if (textType(schema.type)) args[key] = value
         else args[key] = JSON.parse(String(value)) as unknown
@@ -118,5 +120,5 @@ function ToolConsole({ session }: { session: Session }) {
       run.mutate(args)
     } catch { setParseError('Enter valid JSON for non-text values.') }
   }
-  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setExpression(''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={name === 'expr_eval' && key === 'expr' ? undefined : `tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel>{name === 'expr_eval' && key === 'expr' ? <FormulaInput session={session} label="expr" role="value" value={expression} onChange={setExpression}/> : <Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={textType(schema.type) ? undefined : 'JSON value'} />}<p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
+  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setExpression(''); setDatabase(''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={key === formulaKey ? undefined : `tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel>{key === formulaKey ? <FormulaInput session={session} label={key} role={key === 'where' ? 'where' : 'value'} from={name === 'tags_set' ? 'journal' : database ? `table:${database}` : undefined} value={expression} onChange={setExpression}/> : <Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={textType(schema.type) ? undefined : 'JSON value'} onChange={key === 'db' && formulaKey === 'where' ? event => setDatabase(event.target.value) : undefined} />}<p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
 }
