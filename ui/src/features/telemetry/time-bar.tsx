@@ -94,7 +94,7 @@ export function HistoryNavigator({bounds,range,onChange,xs,values,bands,label='F
     if(len>=full)setScale(null);else {const s=Math.max(bounds.start,Math.min(bounds.today-len,snap((a+b)/2-len/2)));setScale({start:s,today:s+len})}
     onChange({from:a,to:b},{final:true})
    }
-  } else if(!d.moved){if(d.mode==='new'){const l=range.to-range.from;let a=d.a0-Math.round(l/2/DAY)*DAY;a=Math.max(vb.start,Math.min(vb.today-l,a));onChange({from:a,to:a+l},{final:true})}}
+  } else if(!d.moved){if(d.mode==='new' && !scale){const l=range.to-range.from;let a=d.a0-Math.round(l/2/DAY)*DAY;a=Math.max(vb.start,Math.min(vb.today-l,a));onChange({from:a,to:a+l},{final:true})}}
   else emit(d.last,true)
   if(sel.current)sel.current.hidden=true
   hideTip();delete box.current!.dataset.drag;drag.current=null;if(box.current?.hasPointerCapture(e.pointerId))box.current.releasePointerCapture(e.pointerId)
