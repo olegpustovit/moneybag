@@ -8,7 +8,7 @@ export type ColumnType='text'|'money'|'number'|'date'|'pct'|'days'|'count'
 export type GridColumn={key:string;label:string;type?:ColumnType;total?:boolean;cell?:'spark'|'bar';machine?:boolean;width?:string;sortable?:boolean;currency?:string;format?:string;
  /** On a phone, where headers are gone, says what the value is. For numbers that mean nothing on their own. */ phoneLabel?:boolean}
 /** A cell is a raw value, or the server's `{v,t,tone}` where `t` is already formatted. */
-export type GridValue=string|number|null|undefined|number[]|{v:unknown;t:string;tone?:string}
+export type GridValue=string|number|null|undefined|number[]|{v:unknown;t:string;orig?:string;tone?:string}
 export type GridRow=Record<string,GridValue>
 export type GridSort={key:string;desc:boolean}|null
 const NUMERIC=new Set<ColumnType>(['money','number','pct','days','count'])

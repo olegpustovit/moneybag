@@ -136,7 +136,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,pre
  const invalid=!!parsed && !parsed.ok && parsed.reason!=='empty'
  const warm=(r:Range|null) => {if(r)prefetch?.(r)},hot=(direction:number) => ({onPointerEnter:() => warm(stepRange(state.range,direction,bounds)),onFocus:() => warm(stepRange(state.range,direction,bounds))})
  // A date commits as soon as it is a real day inside the history; the other end follows so from never passes to.
- const editParsed=edit ? parseTime(edit.value,bounds) : null,editError=editParsed && !editParsed.ok && editParsed.reason!=='empty' ? editParsed.message : null
+ const editParsed=edit ? parseTime(edit.value,bounds) : null,editError=editParsed && !editParsed.ok && editParsed.reason!=='empty' ? editParsed.reason==='unreadable' ? 'Not a date. Try 11 Apr 2026.' : editParsed.message : null
  // A typed day is a one-day range, so a month or year works too: the start takes its first day, the end its last.
  const commitDate=(side:'from'|'to') => {
   if(edit?.side===side && editParsed?.ok){const t=editParsed.range[side],{from,to}=state.range;if(t!==state.range[side])state.setRange(side==='from' ? {from:t,to:Math.max(t,to)} : {from:Math.min(t,from),to:t},{final:true})}
