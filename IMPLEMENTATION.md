@@ -312,3 +312,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `7b81c7f1b842-20261030032937` passed its public health check and the service is active.
 
 - Journal draft guard: unsaved-change warnings now clear when date, payee, tags, post choice and editable posting fields return to their initial values, including after adding and removing a posting. Existing cost and price data remain preserved. Desktop/mobile synthetic tests covered restored new and existing drafts, reload without a warning, rejected cancellation and Back for real edits, and successful saves; account-picker and pagination regressions and `make check` passed. The guard compares the entered text exactly, so equivalent differently formatted text remains a change. Full SPA/P0 acceptance remains open.
+  Deployment: release `b9c61830c557-20261030033244` passed its public health check and the service is active.
