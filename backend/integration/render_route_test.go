@@ -24,6 +24,10 @@ func (h *readHarness) renderReq(t *testing.T, method, path, body string, cookies
 	req.Header.Set("Origin", "https://public.example.test")
 	req.Header.Set("X-CSRF-Token", "render") // the fixed value: even a correct CSRF must not unlock writes
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("MCP-Protocol-Version", "2026-07-28")
+	req.Header.Set("Mcp-Method", "tools/call")
+	req.Header.Set("Mcp-Name", mcpName(body))
 	res, err := (&http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}).Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -31,6 +35,17 @@ func (h *readHarness) renderReq(t *testing.T, method, path, body string, cookies
 	defer res.Body.Close()
 	data, _ := io.ReadAll(res.Body)
 	return res.StatusCode, string(data), res.Header
+}
+
+func mcpName(body string) string {
+	if strings.Contains(body, "entry_post") {
+		return "entry_post"
+	}
+	return "whoami"
+}
+
+func mcpCall(name string) string {
+	return `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"` + name + `","arguments":{},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"t","version":"1"},"io.modelcontextprotocol/clientCapabilities":{}}}}`
 }
 
 func (h *readHarness) docCounts(t *testing.T) map[string]int64 {
@@ -78,6 +93,9 @@ func TestRouteRenderIsReadOnly(t *testing.T) {
 	if status, body, _ = h.renderReq(t, "GET", "/api/bootstrap", "", cookie, &http.Cookie{Name: "moneybag_session", Value: h.cookie}); strings.Contains(body, "render_token") {
 		t.Fatal("a normal session must win", status)
 	}
+	if status, body, _ = h.renderReq(t, "POST", "/api/mcp", mcpCall("whoami"), cookie); status != 200 || strings.Contains(body, `"isError":true`) || !strings.Contains(body, "ledger:read") || strings.Contains(body, "ledger:write") {
+		t.Fatal("render mcp read", status, body)
+	}
 	for _, path := range []string{"/api/session", "/api/cube", "/api/changes"} {
 		if status, body, _ = h.renderReq(t, "GET", path, "", cookie); status != 200 {
 			t.Fatal(path, status, body)
@@ -92,11 +110,17 @@ func TestRouteRenderIsReadOnly(t *testing.T) {
 		"POST /settings/invite", "POST /settings/revoke", "POST /settings/password", "POST /settings/feed", "POST /settings/agents/stop", "POST /settings/agents/resume",
 		"POST /logout", "POST /confirm/x", "POST /secure/feed/x",
 	}
-	payloads := []string{`{"path":"/budget","note":"n","target":{}}`, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"entry_post","arguments":{}}}`, `{}`}
+	payloads := []string{`{"path":"/budget","note":"n","target":{}}`, mcpCall("entry_post"), `{}`}
 	for _, route := range mutating {
 		method, path, _ := strings.Cut(route, " ")
 		for _, payload := range payloads {
-			status, _, _ := h.renderReq(t, method, path, payload, cookie)
+			status, body, _ := h.renderReq(t, method, path, payload, cookie)
+			if path == "/api/mcp" { // read tools answer here; a write tool must come back as an error and change nothing
+				if strings.Contains(payload, "entry_post") && !strings.Contains(body, "rror") && !strings.Contains(body, "not found") && !strings.Contains(body, "unknown") {
+					t.Fatal("entry_post over the render cookie answered", status, body)
+				}
+				continue
+			}
 			if status != 401 && status != 403 && status != 404 && status != 302 && status != 303 {
 				t.Fatal(route, "answered", status)
 			}

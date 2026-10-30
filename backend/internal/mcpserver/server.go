@@ -562,6 +562,9 @@ func New(s Services, opts Options) *mcp.Server {
 	})
 	add(r, "dashboard_render", "dashboard", "ledger:read", "Use this to see a published or draft dashboard as an image of the real page in the browser, at width (default 1440) with optional params. Returns the PNG plus layout, checks (overflow, label_collisions, empty_panels, time_scope_applies), lint, tests, timing_ms and validation. Fix validation errors first. An error means the page failed to load or report. With route, renders that app page (read-only, with the shell) instead.", true, false, func(ctx context.Context, p principal.Principal, in renderInput) (renderOutput, error) {
 		if in.Route != "" {
+			if _, e := preview.ValidRoute(in.Route); e != nil {
+				return renderOutput{}, e
+			}
 			if e := in.validate(); e != nil {
 				return renderOutput{}, e
 			}

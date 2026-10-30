@@ -204,7 +204,23 @@ func (h *Handler) Handler() http.Handler {
 	mux.Handle("PUT /api/saved-views", h.browserMethods(http.HandlerFunc(h.apiSavedViewPut)))
 	mux.Handle("DELETE /api/saved-views", h.browserMethods(http.HandlerFunc(h.apiSavedViewDelete)))
 	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
-	mux.Handle("POST /api/mcp", h.browser(browserTransport))
+	// The SPA reads its pages through tools; a render capture gets only the read-only toolset, so no tool can write.
+	readTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.readonly }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 1024 * 1024})
+	mux.Handle("POST /api/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if _, e := r.Cookie("moneybag_session"); e != nil {
+			if _, session, ok := h.renderCookie(r); ok {
+				p := session.Principal
+				p.Scopes, p.Admin = []string{"ledger:read"}, false
+				if r.Header.Get("X-CSRF-Token") != renderCSRF {
+					respond(w, 403, map[string]string{"error": "reload this page and retry"})
+					return
+				}
+				readTransport.ServeHTTP(w, r.WithContext(principal.With(r.Context(), p)))
+				return
+			}
+		}
+		h.browser(browserTransport).ServeHTTP(w, r)
+	}))
 	mux.Handle("POST /api/expr/check", h.browser(http.HandlerFunc(h.apiExpressionCheck)))
 	mux.Handle("POST /api/dashboards/{id}/validate", h.browser(http.HandlerFunc(h.apiDashboardValidate)))
 	mux.HandleFunc("GET /api/expr/catalog", h.apiExpressionCatalog)
@@ -252,7 +268,7 @@ func (h *Handler) Handler() http.Handler {
 func (h *Handler) session(r *http.Request) (principal.Principal, identity.Session, error) {
 	c, e := r.Cookie("moneybag_session")
 	if e != nil {
-		if _, session, ok := h.renderCookie(r); ok {
+		if _, session, ok := h.renderCookie(r); ok && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			// Reads only, and only ledger:read: every POST, PUT and DELETE under /api and /settings fails here, before any handler or CSRF check.
 			p := session.Principal
 			p.Scopes, p.Admin = []string{"ledger:read"}, false
@@ -269,7 +285,7 @@ const renderCSRF = "render"
 // renderCookie returns the live route token a headless capture carries; dashboard and grant tokens grant nothing.
 func (h *Handler) renderCookie(r *http.Request) (string, preview.Session, bool) {
 	c, e := r.Cookie("moneybag_render")
-	if e != nil || h.services.Previews == nil || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+	if e != nil || h.services.Previews == nil {
 		return "", preview.Session{}, false
 	}
 	session, e := h.services.Previews.Resolve(c.Value)
