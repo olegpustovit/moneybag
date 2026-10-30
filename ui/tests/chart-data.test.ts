@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { chartNumber, chartRows, journalFilter, previousValue } from '../src/features/dashboard/chart-data'
+import { chartNumber, chartRows, foldChart, journalFilter, previousValue } from '../src/features/dashboard/chart-data'
 const rows=chartRows([{x:'a',y:1,series:'x'},{x:'b',y:3,series:'x'},{x:'a',y:2,series:'y'},{x:'a',y:4,series:'x'}],[{name:'x',color_index:0},{name:'y',color_index:1}])
 assert.deepEqual(rows,[{x:'a',s0:1,s1:2},{x:'b',s0:3},{x:'a',s0:4}])
 assert.equal(previousValue(rows,2,'s0'),3)
@@ -16,3 +16,25 @@ assert.equal(journalFilter({kind:'month',field:'month'},'2025-13'),undefined)
 assert.deepEqual(journalFilter({kind:'category',field:'account'},'expenses:food'),{account:'expenses:food'})
 assert.equal(journalFilter({kind:'category',field:'label'},'expenses:food'),undefined)
 assert.equal(journalFilter({kind:'category',field:'account'},'Food'),undefined)
+
+const series=Array.from({length:7},(_,i)=>({name:`s${i}`,color_index:i%5}))
+const chart={type:'chart' as const,mark:'bar' as const,x:{kind:'category',field:'category'},series,points:series.flatMap((item,i)=>[{x:'a',series:item.name,y:i+1},{x:'b',series:item.name,y:(i+1)*10}]),y_format:'int'}
+const folded=foldChart(chart)
+assert.deepEqual(folded.series.map(s=>s.name),['s0','s1','s2','s3','s4','Other'])
+assert.deepEqual(folded.points.filter(point=>point.series==='Other').map(point=>[point.x,point.y]),[['a',13],['b',130]])
+assert.equal(folded.series.at(-1)?.color_index,5)
+assert.equal(chart.points.length,14)
+const duplicate=foldChart({...chart,points:[...chart.points,{x:'a',series:'s5',y:2},{x:'a',series:'s6',y:3}]})
+assert.deepEqual(duplicate.points.filter(point=>point.series==='Other' && point.x==='a').map(point=>point.y),[13,5])
+const named=foldChart({...chart,series:series.map((s,i)=>i===1?{...s,name:'Other'}:s),points:chart.points.map(p=>p.series==='s1'?{...p,series:'Other'}:p)})
+assert.deepEqual(named.series.map(s=>s.name),['s0','s2','s3','s4','Other'])
+assert.equal(named.points.find(p=>p.x==='a' && p.series==='Other')?.y,15)
+const pie=foldChart({...chart,mark:'donut',points:series.map((item,i)=>({x:item.name,series:'',y:i+1}))})
+assert.deepEqual(pie.points.map(p=>[p.x,p.y]),[['s0',1],['s1',2],['s2',3],['s3',4],['s4',5],['Other',13]])
+const overflow={...chart,points:chart.points.map(p=>p.series==='s5'||p.series==='s6'?{...p,y:Number.MAX_VALUE}:p)}
+assert.equal(foldChart(overflow),overflow)
+const mixed=foldChart({...chart,points:chart.points.filter(p=>p.series!=='s6' || p.x!=='b').map(p=>p.series==='s5' && p.x==='a'?{...p,y:-7}:p)})
+assert.deepEqual(mixed.points.filter(p=>p.series==='Other').map(p=>[p.x,p.y]),[['a',0],['b',60]])
+const pieWithOther=foldChart({...chart,mark:'donut',points:series.map((item,i)=>({x:i===1?'Other':item.name,series:'',y:i+1}))})
+assert.equal(pieWithOther.points.filter(p=>p.x==='Other').length,1)
+assert.equal(pieWithOther.points.find(p=>p.x==='Other')?.y,15)

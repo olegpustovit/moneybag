@@ -23,3 +23,25 @@ export function chartNumber(value:number,format:string):string {
  const number=new Intl.NumberFormat('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}).format(value).replace('-', '−')
  return `${format.startsWith('usd') || format==='USD' ? '$' : format.startsWith('eur') || format==='EUR' ? '€' : ''}${number}${format.startsWith('pct') ? '%' : format==='mo' ? ' mo' : ''}`
 }
+
+// Fold overflow series or donut categories into a single additive Other mark.
+export function foldChart(value:ChartValue):ChartValue {
+ const donut=value.mark==='donut'
+ const names=donut ? [...new Set(value.points.map(point => point.x))] : value.series.map(item => item.name)
+ if(names.length<=5)return value
+ const kept=new Set(names.slice(0,5).filter(name => name!=='Other'))
+ const points:ChartValue['points']=[],groups=new Map<string,ChartValue['points']>(),counts=new Map<string,Map<string,number>>()
+ for(const point of value.points) {
+  const name=donut ? point.x : point.series
+  if(kept.has(name)){points.push({...point});continue}
+  const x=donut ? 'Other' : point.x
+  let index=0
+  if(!donut){let byX=counts.get(name);if(!byX){byX=new Map();counts.set(name,byX)}index=byX.get(x) ?? 0;byX.set(x,index+1)}
+  let group=groups.get(x);if(!group){group=[];groups.set(x,group)}
+  if(!group[index]){group[index]={...point,x,series:donut ? point.series : 'Other',y:0};points.push(group[index])}
+  group[index].y+=point.y
+  // shortcut: unrepresentable sums keep the original chart; use decimal chart values if extreme values matter.
+  if(!Number.isFinite(group[index].y))return value
+ }
+ return {...value,points,series:donut ? value.series : [...value.series.slice(0,5).filter(item => item.name!=='Other'),{name:'Other',color_index:5}]}
+}
