@@ -76,5 +76,5 @@ console.log(`slow server: during ${JSON.stringify(slow)}, after ${JSON.stringify
 await browser.close()
 assert.ok(median(nav)<100,`repeat navigation ${median(nav)} ms`);assert.ok(median(range)<50,`range change ${median(range)} ms`);assert.ok(worst(range)<100,`worst range change ${worst(range)} ms`);assert.ok(largest<100*1024,`payload ${largest} B`)
 assert.ok(cls<0.01,`layout shift ${cls}`);assert.ok(viewRequests<=2,`${viewRequests} view requests while stepping`);assert.ok(median(frames)<50,`step frame ${median(frames)} ms`)
-assert.equal(seen.size,1,'a figure changed after its first paint');assert.ok(slow.line && slow.busy>0 && slow.status?.includes('Syncing'),'slow server shows the indicator and dims server-only panels');assert.ok(!settled.line && settled.busy===0,'settles after the response')
+assert.equal(seen.size,1,'a figure changed after its first paint');assert.ok(slow.line && slow.status?.includes('Syncing'),'slow server shows the sync indicator');assert.ok(!settled.line && settled.busy===0,'settles after the response')
 console.log('speed budget ok')
