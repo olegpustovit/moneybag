@@ -63,10 +63,32 @@ func TestChangeGroupWording(t *testing.T) {
 	if g.Summary != "Updated 2 rate quotes" || g.Undoable || g.Status != "failed" {
 		t.Fatalf("%+v", g)
 	}
-	if sameGroup(ChangeGroup{Events: []ChangeEvent{{Tool: "rate_set"}}}, Event{Tool: "rate_set"}) {
+	if sameGroup(ChangeGroup{Events: []ChangeEvent{{Tool: "rate_set"}}}, Event{Tool: "rate_set", At: time.Time{}.Add(time.Hour)}) {
 		t.Fatal("non-routine events grouped")
 	}
 	if !sameGroup(ChangeGroup{BatchID: "x", Events: []ChangeEvent{{Tool: "a"}}}, Event{Tool: "b", BatchID: "x"}) || sameGroup(ChangeGroup{BatchID: "x", Events: []ChangeEvent{{Tool: "a"}}}, Event{Tool: "a"}) {
 		t.Fatal("batch grouping")
+	}
+}
+
+func TestRunsByOneActorAndToolCollapse(t *testing.T) {
+	at := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	ev := func(id string, ago time.Duration, tool, actor string) Event {
+		return Event{ID: id, Tool: tool, At: at.Add(-ago), Actor: principal.Actor{Kind: "agent", ID: actor}, Summary: "Added an entry for X"}
+	}
+	g := ChangeGroup{Actor: ChangeActor{Kind: "agent"}, actorID: "a", Targets: []Target{}, Events: []ChangeEvent{}}
+	g.add(ev("1", 0, "entry_post", "a"), "completed")
+	for i := 1; i < 142; i++ {
+		e := ev("n", time.Duration(i)*time.Minute, "entry_post", "a")
+		if !sameGroup(g, e) {
+			t.Fatalf("event %d did not group", i)
+		}
+		g.add(e, "completed")
+	}
+	if g.Summary != "Added 142 entries" || g.Undoable || g.Count != 142 {
+		t.Fatalf("%+v", g.Summary)
+	}
+	if sameGroup(g, ev("x", 142*time.Minute+11*time.Minute, "entry_post", "a")) || sameGroup(g, ev("y", 142*time.Minute, "entry_post", "b")) || sameGroup(g, ev("z", 142*time.Minute, "reclassify", "a")) {
+		t.Fatal("grouped across the gap, actor or tool")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"math"
 	"math/big"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -316,4 +317,27 @@ func (s *Service) cubeRates(ctx context.Context, p principal.Principal, b *book,
 		}
 	}
 	return nil
+}
+
+// PayeeNamer returns the readable name for a bank's payee text, or the text itself when no alias matches.
+func (s *Service) PayeeNamer(ctx context.Context, p principal.Principal) (func(string) string, error) {
+	rows, e := list[PayeeAlias](ctx, s.repo.db.Collection("payee_aliases"), p.UserID, "pattern")
+	if e != nil {
+		return nil, e
+	}
+	var patterns []*regexp.Regexp
+	var names []string
+	for _, a := range rows {
+		if re, e := regexp.Compile("(?i)" + a.Pattern); e == nil {
+			patterns, names = append(patterns, re), append(names, a.Name)
+		}
+	}
+	return func(payee string) string {
+		for i, re := range patterns {
+			if re.MatchString(payee) {
+				return names[i]
+			}
+		}
+		return payee
+	}, nil
 }
