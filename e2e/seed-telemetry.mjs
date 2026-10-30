@@ -83,6 +83,7 @@ const METRICS=[
  metric('fixed','Fixed costs','eur','flow','sum','exclude',['expenses:home:','expenses:utilities:','expenses:subscriptions:'],{dimensions:['category','payee']}),
  metric('income','Money in','eur','flow','sum','include',['income:'],{sign:-1,dimensions:['category','payee']}),
  metric('net_worth','Net worth','eur','balance','last','include',['assets:','liabilities:']),
+ metric('net_worth_ex_gold','Net worth without gold','eur','balance','last','include',['assets:','liabilities:'],{where:"row.commodity != 'XAU_g'"}),
  metric('burn','Monthly burn','eur','rate','avg','include',['expenses:'],{description:'Average spending per calendar month.'}),
  metric('entries','Entries','int','flow','sum','include',['expenses:']),
 ]

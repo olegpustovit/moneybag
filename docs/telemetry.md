@@ -59,6 +59,8 @@ Optional `aliases` (omitted when none) are the payee aliases as `{pattern,name}`
 - `GET|PUT|DELETE /api/saved-views` (CSRF on writes) → personal views. `PUT {id?,name,page,state}`, `DELETE ?id=`. Not shared, not audited as finance writes.
 - `POST /api/usage` (CSRF, so send it with `fetch(..., {keepalive:true})`) with `{path,dashboard}` → page views for `usage_get`. Not audited, so a beacon never invalidates a cached view.
 
+`balances.gold` is the part of `net` held as `XAU_g`, so `net - gold` equals the `net_worth_ex_gold` metric (`row.commodity != 'XAU_g'`) to the cent. The browser recognises that one metric and computes it from the cube, so it follows the range and the currency switch.
+
 ### Display currency
 
 A small EUR / USD control in the TimeBar row (and on Ledger Accounts and Future) is a per-viewer choice kept in `localStorage`; it hides when the cube has no `EUR/USD` rates. `inCurrency(cube,'USD')` converts once per cube: every flow value and daily balance becomes integer USD cents at the quote on or before the row's date (the first quote for earlier dates), so totals, series, compare and ranked bars follow with no other change. Server-rendered text is EUR, so in USD the panels use cube figures; panels the cube cannot compute keep their own labelled figures. The Details drawer still shows the exact EUR figure and says so. Budget stays EUR. Presets always include `this month` right after `30d`.

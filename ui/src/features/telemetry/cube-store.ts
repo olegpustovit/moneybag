@@ -42,7 +42,7 @@ export const cubeKey=(scope:string) => ['telemetry-cube',scope] as const
 export async function loadCube(scope:string,onFresh:(cube:Cube) => void,signal?:AbortSignal):Promise<Cube> {
  const cached=await readCached(scope)
  let local:Cube|null=null
- if(cached)try {local=decodeCube(cached.wire)} catch {await clearCached(scope)}
+ if(cached?.wire.balances?.gold)try {local=decodeCube(cached.wire)} catch {await clearCached(scope)}
  if(!local){const got=await fetchCube(null,signal);if(!got)throw new Error('The server had no cube to send.');return store(scope,got)}
  const refresh=fetchCube(cached!.etag).then(async got => {if(got)onFresh(await store(scope,got))})
  // A failed refresh keeps the stale cube on screen; the next mount tries again.

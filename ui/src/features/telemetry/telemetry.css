@@ -329,7 +329,7 @@ i.tm-dash { width:14px; height:0; border-top:2px dashed var(--text3); background
 .tm-difference { display:flex; justify-content:space-between; gap:12px; width:100%; padding:6px 4px 8px; border:0; background:none; color:var(--text2); font:inherit; font-size:12.5px; font-variant-numeric:tabular-nums; cursor:pointer; text-align:left; }
 .tm-difference:hover { background:var(--hover); }
 /* Accounts */
-.tm-account-net { margin-bottom:16px; border:1px solid var(--bd); max-width:380px; }
+.tm-account-net { margin-bottom:16px; border:1px solid var(--bd); max-width:460px; }
 .tm-account-net .tm-stat { margin:0; border:0; }
 .tm-account-net .tm-spark, .tm-account-net .tm-stat-note, .tm-account-net .tm-stat-change { display:none; }
 .tm-account-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr)); gap:16px; align-items:start; }

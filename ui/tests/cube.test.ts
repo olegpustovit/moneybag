@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert'
 import { months as monthCount, alignCompare, annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
 import { compareWindow, dayFromIso as d, parseRange, type Range } from '../src/features/telemetry/time-grammar'
-import { inCurrency } from '../src/features/telemetry/cube'
+import { balanceField, cubeCanCompute, metricTotal, inCurrency } from '../src/features/telemetry/cube'
 import { money, moneyCompact, moneyExact, moneySigned, unitFormat } from '../src/features/telemetry/format'
 import { syntheticCube } from './fixtures/synthetic-cube'
 
@@ -131,6 +131,13 @@ assert.equal(usd.base,'USD');assert.deepEqual(Array.from(usd.v),[1100,1100,1100,
 assert.equal(inCurrency(fxu,'USD'),usd);assert.equal(inCurrency(fxu,'EUR'),fxu);assert.equal(fxu.v[0],1000)
 assert.equal(totals(usd,{range:{from:fxu.startMs,to:fxu.endMs}}).out,4500)
 const bigUsd=performance.now();inCurrency(heavy,'USD');assert.ok(performance.now()-bigUsd<16,'USD conversion of the large fixture is fast')
+// Net worth without gold: the cube's gold column, recognised by its one where clause, follows the range and the USD view.
+const noGoldMetric={id:'nwx',label:'Net worth without gold',unit:'eur',kind:'balance',additivity:'last',estimates:'include',accounts:['assets:','liabilities:'],where:"row.commodity != 'XAU_g'"}
+assert.equal(balanceField(noGoldMetric),'exGold');assert.ok(cubeCanCompute(noGoldMetric));assert.ok(!cubeCanCompute({...noGoldMetric,where:"row.commodity != 'EUR'"}))
+const fxg=decodeCube({revision:1,as_of:'2026-01-06',base:'EUR',start:'2026-01-01',end:'2026-01-06',accounts:[],payees:[''],tag_sets:[[]],flows:{d:[],a:[],p:[],t:[],v:[],n:[]},
+ balances:{d:[0,5],net:[10000,10000],assets:[10000,10000],liabilities:[0,0],gold:[4000,3000]},rates:{'EUR/USD':{d:[2,5],v:[1.1,1.2]}},metrics:[],annotations:[],labels:{}})
+const at=(c:typeof fxg,day:string) => metricTotal(c,{range:{from:c.startMs,to:d(day)}},noGoldMetric).total
+assert.equal(at(fxg,'2026-01-01'),6000);assert.equal(at(fxg,'2026-01-06'),7000);assert.equal(at(inCurrency(fxg,'USD'),'2026-01-01'),6600);assert.equal(at(inCurrency(fxg,'USD'),'2026-01-06'),8400)
 console.log('cube ok')
 assert.deepEqual(alignCompare([0,5,6],2),[5,6])
 assert.deepEqual(alignCompare([5,6],3),[null,5,6])

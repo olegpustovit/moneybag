@@ -46,11 +46,11 @@ function Accounts() {
  for(const r of holds){const key=r.account.type==='liability' ? 'Debts' : r.account.pot ? humanKey(r.account.pot,bootstrap.labels,'pot') : 'Other accounts';groups.set(key,[...(groups.get(key) ?? []),r])}
  // Pots holding next to nothing share one box, so they don't push the real money off the page.
  for(const [key,items] of [...groups])if(key!=='Debts' && Math.abs(items.reduce((n,r) => n+r.value,0))<1){groups.delete(key);groups.set(EMPTY,[...(groups.get(EMPTY) ?? []),...items])}
- const net=cube ? balanceAt(cube,cube.bounds.today) : null,sorted=[...groups.entries()].sort((a,b) => Math.abs(b[1].reduce((n,r) => n+r.value,0))-Math.abs(a[1].reduce((n,r) => n+r.value,0)))
+ const net=cube ? balanceAt(cube,cube.bounds.today) : null,noGold=cube ? balanceAt(cube,cube.bounds.today,'exGold') : null,sorted=[...groups.entries()].sort((a,b) => Math.abs(b[1].reduce((n,r) => n+r.value,0))-Math.abs(a[1].reduce((n,r) => n+r.value,0)))
  return <>
   <PageHead title="Ledger" description="Show me the entries and the accounts.">{switchable && <CurrencySwitch value={currency}/>}</PageHead>
   <SubNav of="ledger"/>
-  {net!==null && <div className="tm-stats tm-account-net"><Stat label="Net worth today" value={money(net,currency)} hideEmptyCompare/></div>}
+  {net!==null && <div className="tm-stats tm-account-net"><Stat label="Net worth today" value={money(net,currency)} hideEmptyCompare/>{noGold!==null && <Stat label="Without gold" value={money(noGold,currency)} hideEmptyCompare/>}</div>}
   {sorted.length ? <div className="tm-account-groups">{sorted.map(([title,items]) => <Group key={title} title={title} rows={items} currency={currency}/>)}</div> : <Empty title="No accounts yet">An agent sets these up when it imports your first statement.</Empty>}
  </>
 }

@@ -6,7 +6,7 @@ export type CubeAccount={id:string;label:string;category:string;type:string;pot:
 export type Annotation={id:string;label:string;from:string;to:string;kind?:string;tag_rule?:string}
 export type CubeWire={revision:number;as_of:string;base:string;start:string;end:string;accounts:CubeAccount[];payees:string[];tag_sets:string[][];
  flows:{d:number[];a:number[];p:number[];t:number[];v:number[];n:number[]};
- balances:{d:number[];net:number[];assets:number[];liabilities:number[];estimated_until?:string};
+ balances:{d:number[];net:number[];assets:number[];liabilities:number[];gold?:number[];estimated_until?:string};
  rates:Record<string,{d:number[];v:number[]}>;metrics:CubeMetric[];annotations:Annotation[];labels:Record<string,string>;aliases?:{pattern:string;name:string}[];unvalued?:number}
 export type CubeMetric={id:string;label:string;description?:string;unit:string;kind:string;additivity:string;estimates:string;accounts?:string[]|null;exclude?:string[]|null;sign?:number;where?:string;dimensions?:string[]|null}
 export type Dimension='category'|'account'|'payee'|'trip'|'type'|'pot'|'source'|'class'|'estimate'
@@ -19,7 +19,7 @@ export type DimIndex={values:string[];row:Int32Array}
 export type Cube={revision:number;asOf:string;base:string;startMs:number;endMs:number;bounds:Bounds;size:number;
  d:Int32Array;a:Int32Array;p:Int32Array;t:Int32Array;v:Float64Array;n:Int32Array;
  accounts:CubeAccount[];payees:string[];tagSets:string[][];cls:Uint8Array;est:Uint8Array;
- balances:{d:Int32Array;net:Float64Array;assets:Float64Array;liabilities:Float64Array;estimatedUntil:number|null};
+ balances:{d:Int32Array;net:Float64Array;assets:Float64Array;liabilities:Float64Array;exGold:Float64Array;estimatedUntil:number|null};
  rates:Record<string,{d:Int32Array;v:Float64Array}>;annotations:Annotation[];labels:Record<string,string>;metrics:CubeMetric[];aliases:{re:RegExp;name:string}[];unvalued:number;dims:Map<Dimension,DimIndex>;colors:Map<Dimension,Map<string,string>>;mask:{key:string;mask:Uint8Array|null}|null}
 export type Totals={in:number;out:number;net:number;estimated:number;entries:number}
 export type SeriesOut={key:string;label:string;color:string;values:Float64Array;estimated?:boolean}
@@ -46,7 +46,7 @@ export function decodeCube(wire:CubeWire):Cube {
  return {revision:wire.revision,asOf:wire.as_of,base:wire.base,startMs,endMs,bounds:{today:asOf,start:startMs,end:endMs},size,
   d:column(Int32Array,f.d,order),a:column(Int32Array,f.a,order),p:column(Int32Array,f.p,order),t:column(Int32Array,f.t,order),v:column(Float64Array,f.v,order),n:column(Int32Array,f.n,order),
   accounts,payees:wire.payees,tagSets:wire.tag_sets,cls,est,
-  balances:{d:Int32Array.from(b?.d ?? []),net:Float64Array.from(b?.net ?? []),assets:Float64Array.from(b?.assets ?? []),liabilities:Float64Array.from(b?.liabilities ?? []),estimatedUntil:b?.estimated_until ? dayFromIso(b.estimated_until) : null},
+  balances:{d:Int32Array.from(b?.d ?? []),net:Float64Array.from(b?.net ?? []),assets:Float64Array.from(b?.assets ?? []),liabilities:Float64Array.from(b?.liabilities ?? []),exGold:Float64Array.from(b?.gold ? b.net.map((n,i) => n-b.gold![i]) : []),estimatedUntil:b?.estimated_until ? dayFromIso(b.estimated_until) : null},
   rates:Object.fromEntries(Object.entries(wire.rates ?? {}).map(([k,r]) => [k,{d:Int32Array.from(r.d),v:Float64Array.from(r.v)}])),
   // A stored annotation and the trip tag it describes both arrive; one band per trip is enough.
   annotations:(wire.annotations ?? []).filter((x,i,all) => all.findIndex(y => y.label===x.label && y.from===x.from)===i),labels:wire.labels ?? {},metrics:wire.metrics ?? [],unvalued:wire.unvalued ?? 0,
@@ -107,11 +107,13 @@ export function weights(c:Cube,m:Measure):Float64Array {
 }
 // Only what the cube can reproduce: valued flows with no CEL filter, or net worth from its balance columns. The rest stays on the server's figure.
 export const balanceField=(m:CubeMetric):BalanceField|null => {
- if(m.kind!=='balance' || m.where || m.exclude?.length)return null
+ if(m.kind!=='balance' || m.exclude?.length)return null
  const a=m.accounts ?? [],assets=a.includes('assets:'),debts=a.includes('liabilities:')
+ // shortcut: recognises this one where clause; add a metric field if more balance variants appear.
+ if(m.where)return m.where==="row.commodity != 'XAU_g'" && a.length===2 && assets && debts ? 'exGold' : null
  return a.length===2 && assets && debts ? 'net' : a.length===1 && assets ? 'assets' : a.length===1 && debts ? 'liabilities' : null
 }
-export const cubeCanCompute=(m:CubeMetric|undefined,split?:string):m is CubeMetric => !!m && !m.where && (m.unit==='eur' || m.unit==='int') && (m.kind==='flow' || m.kind==='rate' || balanceField(m)!==null) && (!split || ['category','account','payee','trip','type','pot','source','class'].includes(split))
+export const cubeCanCompute=(m:CubeMetric|undefined,split?:string):m is CubeMetric => !!m && (!m.where || balanceField(m)==='exGold') && (m.unit==='eur' || m.unit==='int') && (m.kind==='flow' || m.kind==='rate' || balanceField(m)!==null) && (!split || ['category','account','payee','trip','type','pot','source','class'].includes(split))
 // Polarity from the ledger's signs, as the server's lowerIsGood reads it: spending and income with sign 1 are good when they fall; assets and debts run the other way.
 export function goodWhen(m:CubeMetric):'up'|'down'|'neutral' {
  const a=m.accounts ?? [];if(!a.length)return 'neutral'
@@ -157,7 +159,7 @@ export function inCurrency(c:Cube,code:'EUR'|'USD'):Cube {
  const r=c.rates['EUR/USD'];if(code!=='USD' || c.base!=='EUR' || !r?.d.length)return c
  const hit=usdCubes.get(c);if(hit)return hit
  const convert=(days:Int32Array,from:Float64Array) => {const out=new Float64Array(from.length);let k=0;for(let i=0;i<out.length;i++){while(k+1<r.d.length && r.d[k+1]<=days[i])k++;out[i]=Math.round(from[i]*r.v[k])}return out}
- const b=c.balances,out:Cube={...c,base:'USD',v:convert(c.d,c.v),balances:{...b,net:convert(b.d,b.net),assets:convert(b.d,b.assets),liabilities:convert(b.d,b.liabilities)},mask:null}
+ const b=c.balances,out:Cube={...c,base:'USD',v:convert(c.d,c.v),balances:{...b,net:convert(b.d,b.net),assets:convert(b.d,b.assets),liabilities:convert(b.d,b.liabilities),exGold:convert(b.d,b.exGold)},mask:null}
  usdCubes.set(c,out);return out
 }
 // Colour follows the entity: slots go by all-time rank across the whole cube, so a range or filter can never reshuffle them.
@@ -231,9 +233,9 @@ export function suggestValues(c:Cube,q:Query,field:Dimension,prefix='',limit=10)
  return out.sort((x,y) => y.total-x.total).slice(0,limit)
 }
 export function estimateSplit(c:Cube,q:Query):{recorded:number;estimated:number;share:number} {const t=totals(c,q);return {recorded:t.out-t.estimated,estimated:t.estimated,share:t.out ? t.estimated/t.out : 0}}
-export type BalanceField='net'|'assets'|'liabilities'
+export type BalanceField='net'|'assets'|'liabilities'|'exGold'
 // Balances list only changed days, so the value at any day is the last one at or before it.
-export function balanceAt(c:Cube,t:number,field:BalanceField='net'):number|null {const i=lower(c.balances.d,Math.round((t-c.startMs)/DAY)+1)-1;return i<0 ? null : c.balances[field][i]}
+export function balanceAt(c:Cube,t:number,field:BalanceField='net'):number|null {const i=lower(c.balances.d,Math.round((t-c.startMs)/DAY)+1)-1;return i<0 ? null : c.balances[field][i] ?? null}
 export function balanceSeries(c:Cube,r:Range,{field='net',maxPoints=1400}:{field?:BalanceField;maxPoints?:number}={}):{xs:number[];values:number[]} {
  const days=Math.round((r.to-r.from)/DAY)+1,step=Math.max(1,Math.ceil(days/maxPoints)),xs:number[]=[],values:number[]=[],b=c.balances,arr=b[field]
  let i=lower(b.d,Math.round((r.from-c.startMs)/DAY)+1)-1
