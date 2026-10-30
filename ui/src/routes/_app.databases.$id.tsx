@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type KeyboardEvent } from 'react'
 import { queryOptions, useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { Button } from '../components/ui/button'
@@ -22,7 +22,7 @@ function DatabasePending() {
  const columns=[{label:'Select',numeric:false},{label:'Row ID',numeric:false},...(table?.columns ?? []).map(column => ({label:`${column.id}${column.formula ? ' ƒ' : ''}`,numeric:column.type==='number'}))]
  return <section role="status" aria-busy="true"><span className="sr-only">Loading database rows…</span><header className="page-header"><div><p className="breadcrumb">DATABASES / {id}</p><h1>{table?.name || id}</h1><p className="description">Edit rows and computed columns.</p></div><div className="setting-actions"><Skeleton className="skeleton-bar journal-loading-action"/><Skeleton className="skeleton-bar journal-loading-action"/></div></header><div aria-hidden="true"><div className="grid-filter grid-loading-filter"><div><span>Where expression</span><Skeleton className="skeleton-bar"/></div><Skeleton className="skeleton-bar"/></div><div className="skeleton-table grid-loading-table"><table style={{minWidth:`${Math.max(4,columns.length)*140}px`}}><thead><tr>{columns.map(column => <th key={column.label}>{column.label}</th>)}</tr></thead><tbody>{Array.from({length:8},(_,row) => <tr key={row}>{columns.map(column => <td key={column.label}><Skeleton className={`skeleton-bar ${column.numeric ? 'numeric' : ''}`}/></td>)}</tr>)}</tbody></table></div></div></section>
 }
-function DatabaseError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load this database</h1><p>{error instanceof Error ? error.message : String(error)}</p><div className="setting-actions"><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button><a href={window.location.pathname}>Clear filter</a></div></section>}
+function DatabaseError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter(),{id}=Route.useParams();return <section className="dashboard-error"><h1>Could not load this database</h1><p>{error instanceof Error ? error.message : String(error)}</p><div className="setting-actions"><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button><Link to="/databases/$id" params={{id}} search={{}}>Clear filter</Link></div></section>}
 function Database() {const {id}=Route.useParams(),{where}=Route.useSearch();return <DatabaseGrid key={`${id}:${where ?? ''}`} id={id}/>}
 function DatabaseGrid({id}:{id:string}) {
  const {session}=Route.useRouteContext(),search=Route.useSearch(),navigate=Route.useNavigate(),client=useQueryClient()

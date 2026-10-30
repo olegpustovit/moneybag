@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, useBlocker, useRouter } from '@tanstack/react-router'
+import { Link, createFileRoute, useBlocker, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
@@ -70,7 +70,7 @@ function Dashboard() {
   const range = readsParam(reads,'from') || readsParam(reads,'to')
   const month = readsParam(reads,'month')
   return <>
-    <header className="page-header"><div><p className="breadcrumb"><a href="/">DASHBOARDS</a> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.author.kind === 'user' ? 'You' : dashboard.author.id}</>}</p></div>
+    <header className="page-header"><div><p className="breadcrumb"><Link to="/">DASHBOARDS</Link> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.author.kind === 'user' ? 'You' : dashboard.author.id}</>}</p></div>
       <div className="dashboard-toolbar">{head && head.published_version > 0 && head.draft_version > 0 && <label>Version <select value={version} onChange={(event) => void navigate({ search: (old) => ({ ...old, version: event.target.value === 'draft' ? 'draft' : 'published' }) })}><option value="published">Published</option><option value="draft">Draft</option></select></label>}<Button size="sm" onClick={() => {setSelected(undefined);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit</Button><DashboardActions session={session} id={id} head={head} onPublished={() => {void navigate({search:(old) => ({...old,version:'published',edit:undefined})});void router.invalidate()}} onUndoPublication={() => {void navigate({search:(old) => ({...old,version:'draft',edit:undefined})});void router.invalidate()}}/></div>
     </header>
     {(range || month) && <DateRange range={range} month={month} values={search} defaults={{from:typeof dashboard.spec.params?.from==='string' && validDate(dashboard.spec.params.from) ? dashboard.spec.params.from : undefined,to:typeof dashboard.spec.params?.to==='string' && validDate(dashboard.spec.params.to) ? dashboard.spec.params.to : undefined,month:typeof dashboard.spec.params?.month==='string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(dashboard.spec.params.month) ? dashboard.spec.params.month : undefined}} onChange={value => void navigate({search:old => ({...old,from:value.from,to:value.to,month:value.month,all:value.all || undefined})})}/>}

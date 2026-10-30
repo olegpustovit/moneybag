@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { Link, createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { toast } from 'sonner'
 import { Button } from '../components/ui/button'
@@ -41,7 +41,7 @@ function Budgets() {
     <Dialog open={open} onOpenChange={setOpen}><DialogContent className="account-dialog"><DialogHeader><DialogTitle>Add budget line</DialogTitle><DialogDescription>Set a monthly limit and map expense accounts.</DialogDescription></DialogHeader><NewLine session={session} onDone={() => setOpen(false)}/></DialogContent></Dialog>
   </>
 }
-function BudgetBar({line,window}:{line:Line;window:string}) {const max=Math.max(1,line.actual,line.limit);const accounts=line.accounts ?? [];return <div className="budget-chart-line"><div className="budget-chart-label"><strong>{line.name}</strong><span>{euro.format(line.actual)} / {euro.format(line.limit)} · {line.status==='over' ? 'Over' : 'Within'}</span></div><div className="budget-track" role="img" tabIndex={0} aria-label={`${line.name}: ${euro.format(line.actual)} actual, ${euro.format(line.limit)} limit, ${line.status}. Average ${window}: ${euro.format(line.avg6)}. Accounts: ${accounts.join(', ') || 'none'}`} title={`${line.name}: ${euro.format(line.actual)} actual, ${euro.format(line.limit)} limit, ${line.status}. Average ${window}: ${euro.format(line.avg6)}. Accounts: ${accounts.join(', ') || 'none'}`}><i className={line.status} style={{width:`${Math.max(0,line.actual)/max*100}%`}}/><b style={{left:`${line.limit/max*100}%`}}/></div>{accounts.length>0 && <div className="budget-account-links">{accounts.map((id) => <a key={id} href={`/journal?account=${encodeURIComponent(id)}`}>{id}</a>)}</div>}</div>}
+function BudgetBar({line,window}:{line:Line;window:string}) {const max=Math.max(1,line.actual,line.limit);const accounts=line.accounts ?? [];return <div className="budget-chart-line"><div className="budget-chart-label"><strong>{line.name}</strong><span>{euro.format(line.actual)} / {euro.format(line.limit)} · {line.status==='over' ? 'Over' : 'Within'}</span></div><div className="budget-track" role="img" tabIndex={0} aria-label={`${line.name}: ${euro.format(line.actual)} actual, ${euro.format(line.limit)} limit, ${line.status}. Average ${window}: ${euro.format(line.avg6)}. Accounts: ${accounts.join(', ') || 'none'}`} title={`${line.name}: ${euro.format(line.actual)} actual, ${euro.format(line.limit)} limit, ${line.status}. Average ${window}: ${euro.format(line.avg6)}. Accounts: ${accounts.join(', ') || 'none'}`}><i className={line.status} style={{width:`${Math.max(0,line.actual)/max*100}%`}}/><b style={{left:`${line.limit/max*100}%`}}/></div>{accounts.length>0 && <div className="budget-account-links">{accounts.map((id) => <Link key={id} to="/journal" search={{account:id}}>{id}</Link>)}</div>}</div>}
 function Editable({label,value,disabled,save}:{label:string;value:string;disabled:boolean;save:(value:string) => void}) {
   const [editing,setEditing]=useState(false),[draft,setDraft]=useState(value)
   function finish() {setEditing(false);if(draft!==value) save(draft)}
