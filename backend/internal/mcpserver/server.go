@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"reflect"
 	"strconv"
+	"time"
 )
 
 type Services struct {
@@ -473,6 +474,12 @@ func New(s Services, opts Options) *mcp.Server {
 		return r.Validation, nil
 	})
 	add(r, "dashboard_preview", "dashboard", "ledger:read", "Use this to read back a dashboard as rendered: values (per component id), computed (every computed value) and validation, plus html and preview links unless values_only is true. version is a number, draft or published. Does not publish or execute browser code.", true, false, func(ctx context.Context, p principal.Principal, in PreviewInput) (dashboard.Rendered, error) {
+		start := time.Now()
+		defer func() {
+			if s.Logger != nil {
+				s.Logger.Info("temporary dashboard timing", "dashboard", in.DashboardID, "duration_us", time.Since(start).Microseconds())
+			}
+		}()
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return dashboard.Rendered{}, e
