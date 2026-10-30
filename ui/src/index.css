@@ -111,7 +111,8 @@ h2 { font-size:16px; font-weight:620; }
 .page-tabs button.active { color:var(--text); border-bottom-color:var(--ink); }
 .dashboard-grid { display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); border-top:1px solid var(--bd); border-left:1px solid var(--bd); }
 .panel { min-width:0; border-right:1px solid var(--bd); border-bottom:1px solid var(--bd); background:var(--paper); padding:14px 16px; }
-.panel h2 { margin:0 0 14px; color:var(--text2); font-size:12px; font-weight:600; }
+.panel h2 { margin:0 0 14px; color:var(--text2); font-size:12px; font-weight:600; overflow-wrap:anywhere; }
+.component-edit { max-width:100%; height:auto; min-height:24px; white-space:normal; overflow-wrap:anywhere; text-align:left; }
 .kpi-heading { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px; }
 .kpi-delta { display:inline-flex; align-items:center; gap:3px; padding:1px 5px; border:1px solid var(--bd); color:var(--text2); font-size:12px; font-variant-numeric:tabular-nums; }
 .kpi-delta svg { width:12px; height:12px; }
