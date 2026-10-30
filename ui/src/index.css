@@ -132,7 +132,7 @@ th { color:var(--text2); font-weight:600; }
 .chart-legend button[aria-pressed="false"] { opacity:.5; }
 .chart-legend i { display:block; width:9px; height:9px; }
 .budget-row { display:grid; grid-template-columns:minmax(100px,1fr) minmax(80px,2fr) auto; align-items:center; gap:12px; padding:7px 0; font-size:12px; }
-.budget-track { position:relative; height:8px; background:var(--sunk); }
+.budget-track { display:block; position:relative; height:8px; background:var(--sunk); }
 .budget-track i { display:block; height:100%; background:var(--ok); }.budget-track i.over { background:var(--neg); }
 .budget-track b { position:absolute; top:-3px; height:14px; width:2px; background:var(--ink); }
 .skeleton-bar { display:block; height:9px; background:var(--sunk); animation:skeleton-pulse 1.4s ease-in-out infinite; }
