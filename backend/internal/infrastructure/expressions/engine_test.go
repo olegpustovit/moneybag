@@ -95,12 +95,22 @@ func TestPreparedEvaluationMatchesEvaluation(t *testing.T) {
 	}
 }
 
-func TestVolatilityPrefilterMatchesOriginal(t *testing.T) {
-	for _, src := range []string{"", "today()", "row.amount > 0", "now()", "now ()", "unknown", "snow now!", "'now'", "_now", "now_", "é now 日本", "now\n", "NOW()"} {
+func TestVolatilityIdentifiesActualNowCalls(t *testing.T) {
+	for _, tc := range []struct {
+		src  string
+		want bool
+	}{
+		{"today()", false}, {"now()", true}, {"now () > timestamp('2020-01-01T00:00:00Z')", true},
+		{"[1,2].map(x, now())", true}, {"row.now()", true},
+		{"'Subscriptions & phone now'", false}, {"[{'v': 'now()'}]", false},
+		{`r"now()"`, false}, {`"escaped \" now()"`, false}, {`"""now()"""`, false},
+		{"data.now", false}, {"data['now']", false}, {"unknown", false},
+		{"'unterminated now", true}, {"now(", true},
+	} {
 		ctx := WithVolatility(context.Background())
-		markVolatile(ctx, src)
-		if got, want := Volatile(ctx), nowCall.MatchString(src); got != want {
-			t.Fatalf("%q: got %t, want %t", src, got, want)
+		markVolatile(ctx, tc.src)
+		if got := Volatile(ctx); got != tc.want {
+			t.Errorf("%q: got %t, want %t", tc.src, got, tc.want)
 		}
 	}
 }

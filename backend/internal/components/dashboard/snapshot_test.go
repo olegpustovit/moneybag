@@ -134,6 +134,31 @@ func TestSnapshotsKeepDashboardMetadataDuringSourceChurn(t *testing.T) {
 	}
 }
 
+func TestSnapshotVolatilityDistinguishesLabelsAndClock(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	engine, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		expr   string
+		builds int
+	}{{"'phone now'", 1}, {"now()", 2}} {
+		calls := 0
+		for i := 0; i < 2; i++ {
+			ctx := expressions.WithVolatility(context.Background())
+			_, err := cache.read(ctx, p, "render", tc.expr, nil, func() (any, error) { calls++; return engine.Eval(ctx, tc.expr, nil) }, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if calls != tc.builds {
+			t.Fatalf("%s built %d times; want %d", tc.expr, calls, tc.builds)
+		}
+	}
+}
+
 func TestSnapshotsDiscardOldRendersAfterWrites(t *testing.T) {
 	cache := testSnapshots()
 	owner := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
@@ -450,7 +475,7 @@ func TestNestedLeafMemoizationAndVolatility(t *testing.T) {
 	}{
 		{Query{From: "postings", Where: `row.account == 'assets:cash'`}, true},
 		{Query{From: "journal", Derive: map[string]string{"x": "now()"}}, false},
-		{Query{From: "effective_entries", Where: `row.name == 'now'`}, false},
+		{Query{From: "effective_entries", Where: `row.name == 'now'`}, true},
 		{Query{From: "view:other"}, false}, {Query{From: "scenarios"}, false},
 	} {
 		if got := memoizableLeaf(View{ID: "test", Query: tc.query}); got != tc.want {
