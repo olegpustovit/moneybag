@@ -153,7 +153,8 @@ assert.equal(compareWindow(r('2023-06-01','2023-06-30'),'previous_year',b)!.avai
 
 // Buckets.
 assert.equal(autoBucket(r('2026-10-01','2026-10-30')),'day')
-assert.equal(autoBucket(r('2026-04-01','2026-10-30')),'week')
+assert.equal(autoBucket(r('2026-08-01','2026-10-30')),'week')
+assert.equal(autoBucket(r('2026-04-01','2026-10-30')),'month')
 assert.equal(autoBucket(r('2023-01-01','2026-10-30')),'month')
 assert.equal(autoBucket(r('2015-01-01','2026-10-30')),'quarter')
 assert.equal(isoDay(bucketStart(d('2026-10-30'),'week')),'2026-10-26')

@@ -67,8 +67,8 @@ export function Sankey({nodes,links,height=280,formatValue,onSelect,ariaLabel='W
  const narrow=width<520,margin=narrow ? 78 : 200,fit=narrow ? 12 : 26,tall=Math.max(narrow ? height+90 : height,40+nodes.length*(narrow ? 40 : 28))
  const layout=width ? layoutSankey(nodes,links,width,tall,{marginLeft:margin,marginRight:margin,gap:narrow ? 26 : 14}) : null
  const cut=(s:string) => s.length>fit ? `${s.slice(0,fit-1)}…` : s
- return <div ref={box} className="tm-sankey" style={{height:tall}}>
-  {layout && <svg width={width} height={tall} role="img" aria-label={`${ariaLabel}: ${links.map(l => `${l.from} to ${l.to} ${formatValue(l.value)}`).join(', ')}`}>
+ return <div ref={box} className="tm-sankey" style={{height:tall+14}}>
+  {layout && <svg width={width} height={tall+14} role="img" aria-label={`${ariaLabel}: ${links.map(l => `${l.from} to ${l.to} ${formatValue(l.value)}`).join(', ')}`}>
    {layout.ribbons.map(r => <path key={`${r.from}-${r.to}`} d={r.d} fill="none" stroke={r.color ?? 'var(--series-other)'} strokeOpacity=".28" strokeWidth={r.h}><title>{`${r.from} to ${r.to}: ${formatValue(r.value)}`}</title></path>)}
    {layout.nodes.map(n => {const last=n.col===layout.columns-1,first=n.col===0,middle=!first && !last,tx=first ? n.x-6 : last ? n.x+16 : n.x+5,anchor=first ? 'end' : 'start',cy=n.y+n.h/2,value=n.text ?? '';return <g key={n.key} className={onSelect ? 'pick' : undefined} tabIndex={onSelect ? 0 : undefined} role={onSelect ? 'button' : undefined} aria-label={onSelect ? `${n.label} ${value}` : undefined} onClick={onSelect ? () => onSelect(n.key) : undefined} onKeyDown={onSelect ? e => {if(e.key==='Enter' || e.key===' '){e.preventDefault();onSelect(n.key)}} : undefined}>
     <rect x={n.x} y={n.y} width={10} height={n.h} fill={n.color ?? 'var(--series-other)'}/>

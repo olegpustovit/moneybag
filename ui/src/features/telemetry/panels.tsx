@@ -102,12 +102,13 @@ function RankedPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
 function SankeyPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  const m=metricOf(ctx,v.metric),cube=ctx.cube,split=(c.split ?? 'category') as Dimension,title=v.title ?? v.label,center=v.label ?? 'Total'
  let links:{from:string;to:string;value:number;text:string}[]
+ const keys=new Map<string,string>()
  if(cube && cubeCanCompute(m,split) && !balanceField(m)){
-  links=whatMoved(cube,{range:ctx.range,pills:ctx.pills},null,{by:split,measure:m,limit:12}).filter(x => x.now).map(x => {const inward=(m.sign===-1)===(x.now>0),value=Math.abs(x.now),text=metricText(ctx,m,value);return inward ? {from:x.label,to:center,value,text} : {from:center,to:x.label,value,text}})
+  links=whatMoved(cube,{range:ctx.range,pills:ctx.pills},null,{by:split,measure:m,limit:12}).filter(x => x.now).map(x => {const inward=(m.sign===-1)===(x.now>0),value=Math.abs(x.now),text=metricText(ctx,m,value);return keys.set(x.label,x.key);return inward ? {from:x.label,to:center,value,text} : {from:center,to:x.label,value,text}})
  } else links=(v.links ?? []).map(l => ({from:l.from,to:l.to,value:tryNumber(l.value),text:l.text}))
  const names=[...new Set(links.flatMap(l => [l.from,l.to]))],text=new Map(links.flatMap(l => [[l.from===center ? l.to : l.from,l.text]])),totalIn=links.filter(l => l.to===center).reduce((n,l) => n+l.value,0),totalOut=links.filter(l => l.from===center).reduce((n,l) => n+l.value,0)
  const unitIsCents=!!(cube && cubeCanCompute(m,split) && !balanceField(m)),fmt=(x:number) => unitIsCents ? money(x,cube!.base) : compactNumber(x)
- const nodes=names.map(name => ({key:name,label:name,color:name===center ? 'var(--ink)' : cube && cube.dims ? `var(${colorOf(cube,split,name)})` : undefined,text:name===center ? fmt(Math.max(totalIn,totalOut)) : text.get(name)}))
+ const nodes=names.map(name => ({key:name,label:name,color:name===center ? 'var(--ink)' : cube && cube.dims ? `var(${colorOf(cube,split,keys.get(name) ?? name)})` : undefined,text:name===center ? fmt(Math.max(totalIn,totalOut)) : text.get(name)}))
  return <><Head title={title} fixed={c.fixed?.reason} onDetails={() => metricDetails(c,v,ctx,v.text ?? '')}/>{links.length ? <Sankey nodes={nodes} links={links} formatValue={fmt} ariaLabel={title}/> : <p className="tm-empty" data-empty="1">Nothing flowed in this range.</p>}</>
 }
 function EntriesPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
