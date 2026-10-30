@@ -11,7 +11,10 @@ const failures: string[] = []
 const css = initial.filter((name) => name.endsWith('.css')).map((name) => readFileSync(new URL(name, dist), 'utf8')).join('\n')
 const fallback = css.match(/@font-face\s*\{[^}]*font-family:\s*["']?Geist Fallback["']?;[^}]*}/)?.[0] ?? ''
 if (!/local\(["']?Arial["']?\)/.test(fallback) || !/size-adjust:\s*[\d.]+%/.test(fallback) || !/ascent-override:\s*[\d.]+%/.test(fallback) || !/descent-override:\s*[\d.]+%/.test(fallback)) failures.push('Geist metric-adjusted Arial fallback missing from CSS')
-if (!/font-family:\s*Geist,\s*["']?Geist Fallback/.test(css)) failures.push('Geist fallback missing from font stack')
+const rootFont=/:root\s*\{[^}]*\bfont-family:\s*Geist,\s*["']?Geist Fallback/
+if (!rootFont.test(css)) failures.push('Geist fallback missing from root font stack')
+const authStyles=readdirSync(new URL('assets/',dist)).filter(name => /^auth-.+\.css$/.test(name))
+if (authStyles.length!==1 || !rootFont.test(readFileSync(new URL(`assets/${authStyles[0]}`,dist),'utf8'))) failures.push('Geist fallback missing from auth root font stack')
 if (size('.js') > 170_000) failures.push(`entry JS ${size('.js')} B > 170 KB`)
 if (size('.css') > 30_000) failures.push(`entry CSS ${size('.css')} B > 30 KB`)
 for (const name of readdirSync(new URL('assets/', dist))) {
