@@ -62,6 +62,9 @@ func dashboardWrite[T any](ctx context.Context, p principal.Principal, s Service
 		if err != nil {
 			return err
 		}
+		if access.Grant != nil {
+			tx = audit.WithGrant(tx, access.Grant.ID, sharing.PermissionHash(*access.Grant))
+		}
 		value, err = fn(tx, access)
 		return err
 	})

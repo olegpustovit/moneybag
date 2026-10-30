@@ -14,6 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
@@ -252,8 +253,8 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		version := editDraft["version"].(float64)
 		patch := map[string]any{"ops": []any{map[string]any{"op": "test", "path": "/version", "value": version}, map[string]any{"op": "replace", "path": "/title", "value": "Editor changed"}}}
 		code, patched := editorRequest("POST", "/patch", patch, true)
-		if code != 200 || patched["event_id"] != nil {
-			t.Fatal("editor patch must not expose owner audit event", code, patched)
+		if code != 200 || patched["event_id"] == nil {
+			t.Fatal("editor patch event", code, patched)
 		}
 		if code, _ = editorRequest("POST", "/patch", patch, true); code != 400 {
 			t.Fatal("stale editor patch", code)
@@ -263,8 +264,8 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatal("stale publish", code)
 		}
 		code, published := editorRequest("POST", "/publish", map[string]any{"version": newVersion, "note": "Editor publish"}, true)
-		if published["event_id"] != nil {
-			t.Fatal("editor publish must not expose owner audit event", published)
+		if published["event_id"] == nil {
+			t.Fatal("editor publish event missing", published)
 		}
 		if code != 200 {
 			t.Fatal("editor publish", code, published)
@@ -276,6 +277,63 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		owner, err := services.Dashboard.Get(ctx, p, "spa-shared", "published")
 		if err != nil || owner.Spec.Title != "Editor changed" {
 			t.Fatal("owner publish", owner, err)
+		}
+		if code, _ = editorRequest("POST", "/undo", map[string]any{"event_id": published["event_id"], "reason": "test"}, false); code != 403 {
+			t.Fatal("undo missing csrf", code)
+		}
+		if code, _ = editorRequest("POST", "/undo", map[string]any{"event_id": patched["event_id"], "reason": "stale"}, true); code != 400 {
+			t.Fatal("stale editor undo", code)
+		}
+		ownerEvents, err := services.Audit.List(ctx, p, audit.ListInput{Tool: "dashboard_patch", Target: "spa-shared", Limit: 100})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ownerEvent string
+		for _, event := range ownerEvents.Events {
+			if event.GrantID == "" {
+				ownerEvent = event.ID
+				break
+			}
+		}
+		if ownerEvent == "" {
+			t.Fatal("owner event missing")
+		}
+		if code, _ = editorRequest("POST", "/undo", map[string]any{"event_id": ownerEvent, "reason": "not mine"}, true); code != 404 {
+			t.Fatal("owner event undo allowed", code)
+		}
+		access, err := services.Sharing.EditorAccess(ctx, viewerPrincipal, grant.ShareID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		otherActor := viewerPrincipal
+		otherActor.Actor.ID = "different-actor"
+		if _, err = services.History.UndoShared(ctx, otherActor, access, history.UndoInput{EventID: published["event_id"].(string), Reason: "not my event"}); !errors.Is(err, principal.ErrForbidden) {
+			t.Fatal("other actor undo allowed", err)
+		}
+		if code, body = editorRequest("POST", "/undo", map[string]any{"event_id": published["event_id"], "reason": "Undo publication"}, true); code != 200 {
+			t.Fatal("editor undo publication", code, body)
+		}
+		if restored, err := services.Dashboard.Get(ctx, p, "spa-shared", "draft"); err != nil || restored.Version != int(newVersion) {
+			t.Fatal("editor undo did not restore draft", restored, err)
+		}
+		if code, _ = editorRequest("POST", "/undo", map[string]any{"event_id": published["event_id"], "reason": "repeat"}, true); code != 400 {
+			t.Fatal("repeated undo allowed", code)
+		}
+		if code, body = editorRequest("POST", "/publish", map[string]any{"version": newVersion, "note": "republish"}, true); code != 200 {
+			t.Fatal("editor republish", code, body)
+		}
+		code, editAgain := editorRequest("POST", "/patch", map[string]any{"ops": []any{map[string]any{"op": "replace", "path": "/title", "value": "Temporary"}}}, true)
+		if code != 200 {
+			t.Fatal("editor second patch", code, editAgain)
+		}
+		if code, body = editorRequest("POST", "/undo", map[string]any{"event_id": editAgain["event_id"], "reason": "Undo edit"}, true); code != 200 {
+			t.Fatal("editor undo edit", code, body)
+		}
+		if restored, err := services.Dashboard.Get(ctx, p, "spa-shared", "draft"); err != nil || restored.Spec.Title != "Editor changed" {
+			t.Fatal("editor undo did not restore title", restored, err)
+		}
+		if err := services.Audit.Verify(ctx, p); err != nil {
+			t.Fatal("audit chain after shared undo", err)
 		}
 
 		events, err := services.Audit.List(ctx, p, audit.ListInput{Tool: "dashboard_shared_read", Target: grant.ShareID, Limit: 100})
@@ -307,6 +365,9 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		if err != nil {
 			t.Fatal(err)
 		}
+		if _, err = services.History.UndoShared(ctx, viewerPrincipal, original, history.UndoInput{EventID: published["event_id"].(string), Reason: "wrong grant"}); !errors.Is(err, principal.ErrForbidden) {
+			t.Fatal("other grant undo allowed", err)
+		}
 		readOnlyEditor := viewerPrincipal
 		readOnlyEditor.Scopes = []string{"ledger:read"}
 		readClient := mcpSession(t, ctx, readOnlyEditor, services, true)
@@ -322,6 +383,16 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		encodedPatch, err := json.Marshal(sharedPatch.StructuredContent)
 		if err != nil || strings.Contains(string(encodedPatch), "event_id") {
 			t.Fatal("shared MCP patch exposed owner event", string(encodedPatch), err)
+		}
+		mcpEvents, err := services.Audit.List(ctx, p, audit.ListInput{Tool: "dashboard_patch", Target: "spa-shared-race", Limit: 1})
+		if err != nil || len(mcpEvents.Events) != 1 || mcpEvents.Events[0].GrantID != raceGrant.ShareID || mcpEvents.Events[0].GrantHash == "" {
+			t.Fatal("MCP grant provenance", mcpEvents, err)
+		}
+		if _, err = services.Sharing.Share(ctx, p, sharing.ShareInput{DashboardID: "spa-shared-race", Grantee: viewer.ID, Role: "editor"}); err != nil {
+			t.Fatal("reissue grant", err)
+		}
+		if _, err = services.History.UndoShared(ctx, viewerPrincipal, original, history.UndoInput{EventID: mcpEvents.Events[0].ID, Reason: "reissued"}); !errors.Is(err, principal.ErrConflict) {
+			t.Fatal("reissued grant undo allowed", err)
 		}
 		locked, release, started := make(chan struct{}), make(chan struct{}), make(chan struct{}, 2)
 		ownerDone := make(chan error, 1)
@@ -355,6 +426,9 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		close(release)
 		if err := <-ownerDone; err != nil {
 			t.Fatal("revoke", err)
+		}
+		if _, err = services.History.UndoShared(ctx, viewerPrincipal, original, history.UndoInput{EventID: published["event_id"].(string), Reason: "revoked"}); !errors.Is(err, principal.ErrNotFound) {
+			t.Fatal("revoked grant undo allowed", err)
 		}
 		if err := <-editorDone; !errors.Is(err, principal.ErrNotFound) {
 			t.Fatal("queued shared edit after revoke", err)

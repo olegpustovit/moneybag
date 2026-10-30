@@ -20,3 +20,22 @@ func TestOutcomeDigestBindsIntentOwnerAndData(t *testing.T) {
 		t.Fatal("intent not bound")
 	}
 }
+
+func TestDigestBindsSharedGrant(t *testing.T) {
+	event := Event{UserID: "owner", ID: "event"}
+	withoutGrant := Digest(event)
+	event.GrantID = "grant-one"
+	withGrant := Digest(event)
+	if withGrant == withoutGrant {
+		t.Fatal("grant missing from digest")
+	}
+	event.GrantID = "grant-two"
+	if Digest(event) == withGrant {
+		t.Fatal("grant change did not change digest")
+	}
+	withGrant = Digest(event)
+	event.GrantHash = "permissions"
+	if Digest(event) == withGrant {
+		t.Fatal("grant permissions missing from digest")
+	}
+}

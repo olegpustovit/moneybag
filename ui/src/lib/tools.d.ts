@@ -436,6 +436,8 @@ export interface AuditLogOutput {
           | {
               [k: string]: unknown;
             };
+        grant_hash?: string;
+        grant_id?: string;
         hash: string;
         id: string;
         outcome?: null | {
@@ -1934,6 +1936,8 @@ export interface EntryGetOutput {
           | {
               [k: string]: unknown;
             };
+        grant_hash?: string;
+        grant_id?: string;
         hash: string;
         id: string;
         outcome?: null | {
@@ -2393,6 +2397,8 @@ export interface HistoryOfOutput {
           | {
               [k: string]: unknown;
             };
+        grant_hash?: string;
+        grant_id?: string;
         hash: string;
         id: string;
         outcome?: null | {

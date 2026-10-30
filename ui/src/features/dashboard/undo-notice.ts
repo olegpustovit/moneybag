@@ -1,13 +1,14 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { tool, type Session } from '../../lib/api'
+import { sharedPost } from '../sharing/queries'
 
-export function dashboardNotice({session,client,eventID,message,description,warning,onUndo}:{session:Session;client:QueryClient;eventID?:string;message:string;description?:string;warning?:boolean;onUndo:() => void}) {
+export function dashboardNotice({session,client,eventID,sharedID,message,description,warning,onUndo}:{session:Session;client:QueryClient;eventID?:string;sharedID?:string;message:string;description?:string;warning?:boolean;onUndo:() => void}) {
  let running=false
  const options={description,duration:10000,...(eventID ? {action:{label:'Undo',onClick:() => {
   if(running)return
   running=true
-  void tool(session,'undo',{event_id:eventID,reason:'Undo from dashboard notification'}).then(async () => {
+  void (sharedID ? sharedPost(session,sharedID,'undo',{event_id:eventID,reason:'Undo from dashboard notification'}) : tool(session,'undo',{event_id:eventID,reason:'Undo from dashboard notification'})).then(async () => {
    await client.invalidateQueries({predicate:query => query.queryKey[1]===session.user.id})
    onUndo()
    toast.success('Dashboard change undone')

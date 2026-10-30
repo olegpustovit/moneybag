@@ -66,6 +66,35 @@ func (s *Service) Of(ctx context.Context, p principal.Principal, id string, incl
 	}
 	return out, nil
 }
+
+// UndoShared limits an inverse to the current editor's own write through this grant.
+func (s *Service) UndoShared(ctx context.Context, p principal.Principal, access sharing.Access, in UndoInput) (UndoResult, error) {
+	var result UndoResult
+	err := s.Sharing.EditorWrite(ctx, p, access, func(tx context.Context, current sharing.Access) error {
+		event, err := s.Audit.Get(tx, current.Principal, in.EventID)
+		if err != nil {
+			return principal.ErrNotFound
+		}
+		if event.GrantID != current.Grant.ID || event.GrantHash != sharing.PermissionHash(*current.Grant) || event.Actor != p.Actor || event.Target.Collection != "dashboards" || event.Target.ID != current.ID || (event.Tool != "dashboard_patch" && event.Tool != "dashboard_publish") {
+			return principal.ErrForbidden
+		}
+		changed, err := s.Audit.HasLaterGrantChange(tx, current.Principal, current.Grant.ID, event.Seq)
+		if err != nil {
+			return err
+		}
+		if changed {
+			return fmt.Errorf("dashboard grant changed after this event: %w", principal.ErrConflict)
+		}
+		scoped := *s
+		scoped.Dashboard = current.Dashboard
+		owner := current.Principal
+		owner.Scopes = append(append([]string(nil), owner.Scopes...), "ledger:write")
+		result, err = scoped.Undo(tx, owner, in)
+		return err
+	})
+	return result, err
+}
+
 func (s *Service) Undo(ctx context.Context, p principal.Principal, in UndoInput) (UndoResult, error) {
 	if e := p.Require("ledger:write"); e != nil {
 		return UndoResult{}, e

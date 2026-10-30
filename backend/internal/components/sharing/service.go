@@ -313,7 +313,7 @@ func (s *Service) EditorWrite(ctx context.Context, p principal.Principal, origin
 		if PermissionHash(*current.Grant) != PermissionHash(*original.Grant) {
 			return principal.ErrForbidden
 		}
-		return fn(tx, current)
+		return fn(audit.WithGrant(tx, current.Grant.ID, PermissionHash(*current.Grant)), current)
 	})
 }
 func (s *Service) View(ctx context.Context, p principal.Principal, id string) (SharedView, error) {

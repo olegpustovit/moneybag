@@ -8,8 +8,10 @@ import (
 	"math"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
@@ -228,7 +230,6 @@ func (h *Handler) apiSharedPatch(w http.ResponseWriter, r *http.Request) {
 		h.sharedWriteError(w, err)
 		return
 	}
-	result.EventID = ""
 	respond(w, http.StatusOK, result)
 }
 func (h *Handler) apiSharedPublish(w http.ResponseWriter, r *http.Request) {
@@ -259,9 +260,27 @@ func (h *Handler) apiSharedPublish(w http.ResponseWriter, r *http.Request) {
 		result.Warnings = append(result.Warnings, "Published successfully; some shared snapshots could not refresh. Maintenance will retry.")
 	}
 	result.URL = "/shared/" + access.Grant.ID
-	result.EventID = ""
 	respond(w, http.StatusOK, result)
 }
+func (h *Handler) apiSharedUndo(w http.ResponseWriter, r *http.Request) {
+	access, ok := h.sharedEditor(w, r)
+	if !ok {
+		return
+	}
+	var in history.UndoInput
+	if err := decode(r, &in); err != nil || in.EventID == "" || strings.TrimSpace(in.Reason) == "" {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid undo"})
+		return
+	}
+	p, _ := principal.From(r.Context())
+	result, err := h.services.History.UndoShared(r.Context(), p, access, in)
+	if err != nil {
+		h.sharedWriteError(w, err)
+		return
+	}
+	respond(w, http.StatusOK, result)
+}
+
 func (h *Handler) apiSharedEvaluate(w http.ResponseWriter, r *http.Request) {
 	access, ok := h.sharedEditor(w, r)
 	if !ok {

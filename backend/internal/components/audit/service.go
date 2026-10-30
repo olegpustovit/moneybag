@@ -21,19 +21,21 @@ type Target struct {
 	ID         string `json:"id" bson:"id"`
 }
 type Event struct {
-	UserID   string          `json:"-" bson:"user_id"`
-	ID       string          `json:"id" bson:"_id"`
-	Seq      int64           `json:"seq" bson:"seq"`
-	At       time.Time       `json:"at" bson:"at"`
-	Actor    principal.Actor `json:"actor" bson:"actor"`
-	Tool     string          `json:"tool" bson:"tool"`
-	Target   Target          `json:"target" bson:"target"`
-	Before   json.RawMessage `json:"before,omitempty" bson:"before,omitempty"`
-	After    json.RawMessage `json:"after,omitempty" bson:"after,omitempty"`
-	Reason   string          `json:"reason,omitempty" bson:"reason,omitempty"`
-	PrevHash string          `json:"prev_hash" bson:"prev_hash"`
-	Hash     string          `json:"hash" bson:"hash"`
-	Outcome  *Outcome        `json:"outcome,omitempty" bson:"-"`
+	UserID    string          `json:"-" bson:"user_id"`
+	ID        string          `json:"id" bson:"_id"`
+	Seq       int64           `json:"seq" bson:"seq"`
+	At        time.Time       `json:"at" bson:"at"`
+	Actor     principal.Actor `json:"actor" bson:"actor"`
+	Tool      string          `json:"tool" bson:"tool"`
+	Target    Target          `json:"target" bson:"target"`
+	Before    json.RawMessage `json:"before,omitempty" bson:"before,omitempty"`
+	After     json.RawMessage `json:"after,omitempty" bson:"after,omitempty"`
+	Reason    string          `json:"reason,omitempty" bson:"reason,omitempty"`
+	GrantID   string          `json:"grant_id,omitempty" bson:"grant_id,omitempty"`
+	GrantHash string          `json:"grant_hash,omitempty" bson:"grant_hash,omitempty"`
+	PrevHash  string          `json:"prev_hash" bson:"prev_hash"`
+	Hash      string          `json:"hash" bson:"hash"`
+	Outcome   *Outcome        `json:"outcome,omitempty" bson:"-"`
 }
 type Outcome struct {
 	Hash   string          `json:"hash" bson:"hash"`
@@ -53,6 +55,15 @@ type Service struct {
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
 func NewService(r *MongoRepository) *Service                 { return &Service{repo: r} }
+
+type grantContextKey struct{}
+type grantContext struct{ id, hash string }
+
+// WithGrant binds an audited shared mutation to the grant that authorized it.
+func WithGrant(ctx context.Context, id, hash string) context.Context {
+	return context.WithValue(ctx, grantContextKey{}, grantContext{id, hash})
+}
+
 func (s *Service) Workflow(ctx context.Context, fn func(context.Context) error) error {
 	return mongodb.Workflow(ctx, fn)
 }
@@ -62,6 +73,9 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		return "", err
 	}
 	event := Event{UserID: p.UserID, ID: ulid.Make().String(), At: time.Now().UTC().Truncate(time.Millisecond), Actor: p.Actor, Tool: tool, Target: target, Reason: reason}
+	if grant, ok := ctx.Value(grantContextKey{}).(grantContext); ok {
+		event.GrantID, event.GrantHash = grant.id, grant.hash
+	}
 	err = mongodb.Workflow(ctx, func(tx context.Context) error {
 		b, err := json.Marshal(before)
 		if err != nil {
@@ -225,6 +239,25 @@ func (s *Service) HasLaterTarget(ctx context.Context, p principal.Principal, tar
 	}
 	if err != nil {
 		return false, fmt.Errorf("check later target events: %w", err)
+	}
+	return true, nil
+}
+
+// HasLaterGrantChange detects reissued or changed grants, even when their IDs are reused.
+func (s *Service) HasLaterGrantChange(ctx context.Context, p principal.Principal, id string, seq int64) (bool, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return false, err
+	}
+	db, err := mongodb.Shared(s.repo.DB, p)
+	if err != nil {
+		return false, err
+	}
+	err = db.Collection("events").FindOne(ctx, bson.M{"user_id": p.UserID, "target.coll": "shares", "target.id": id, "seq": bson.M{"$gt": seq}, "tool": bson.M{"$in": []string{"dashboard_share", "dashboard_unshare"}}}).Err()
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("check later grant changes: %w", err)
 	}
 	return true, nil
 }
