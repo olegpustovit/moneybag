@@ -157,6 +157,7 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 		t.Fatal("typed dashboard output", result, e)
 	}
 	testHTTPAndStdio(t, ctx, db, pa, s)
+	testAgentEvalTasks(t, ctx, pa, s, db)
 	other := mcpSession(t, ctx, pb, s, false)
 	result, e = other.CallTool(ctx, &mcp.CallToolParams{Name: "dashboard_get", Arguments: map[string]any{"id": "fixed"}})
 	if e != nil || !result.IsError {
