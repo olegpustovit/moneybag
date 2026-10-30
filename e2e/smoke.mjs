@@ -22,7 +22,7 @@ try{
  }else{
   await page.goto(base+'/login');await page.locator('[name="email"]').fill('demo@example.test');await page.locator('[name="password"]').fill('synthetic-preview-password');await page.getByRole('button',{name:'Sign in',exact:true}).click();
  }
- await page.waitForURL(base+'/');await page.getByRole('heading',{name:'Dashboards',exact:true}).waitFor();
+ await page.waitForURL(url=>url.origin===base && !['/setup','/login'].includes(url.pathname));await page.goto(base+'/dashboards');await page.getByRole('heading',{name:'Dashboards',exact:true}).waitFor();
  const catalog=await call('accounts_list',{limit:500});
  if(!catalog.items.some(a=>a.id==='assets:bank')){
   for(const a of [{id:'assets:bank',name:'Everyday account',type:'asset',pot:'Cash',commodities:['EUR']},{id:'assets:savings',name:'Reserve',type:'asset',pot:'Savings',commodities:['USD']},{id:'equity:opening',name:'Opening balances',type:'equity',commodities:['EUR','USD']},{id:'income:salary',name:'Salary',type:'income',commodities:['EUR']}])await call('account_create',a);

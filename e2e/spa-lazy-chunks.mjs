@@ -18,6 +18,6 @@ const page=await context.newPage(),requests=[],errors=[];page.on('request',reque
 await page.goto('http://127.0.0.1:5173/journal');await page.getByText('No entries match these filters.').waitFor()
 const chartRequests=()=>requests.filter(path=>/^\/assets\/chart-[^/]+\.js$/.test(path))
 assert.deepEqual(chartRequests(),[],'journal loaded chart code')
-await page.getByRole('link',{name:'text dashboard',exact:true}).first().click();await page.getByText('Plain note').waitFor();assert.deepEqual(chartRequests(),[],'text-only dashboard loaded chart code')
+await page.goto('http://127.0.0.1:5173/');await page.waitForURL(url=>url.pathname==='/dashboards/text');await page.getByText('Plain note').waitFor();assert.deepEqual(chartRequests(),[],'text-only dashboard loaded chart code');await page.goBack();await page.waitForURL(url=>url.pathname==='/journal');await page.goForward();await page.waitForURL(url=>url.pathname==='/dashboards/text');await page.getByRole('link',{name:'DASHBOARDS',exact:true}).click();await page.waitForURL(url=>url.pathname==='/dashboards');await page.getByRole('heading',{name:'Dashboards',exact:true}).waitFor()
 await page.getByRole('link',{name:'chart dashboard',exact:true}).first().click();await page.locator('.dashboard-chart').waitFor();await page.waitForFunction(()=>document.querySelector('.recharts-surface'));assert(chartRequests().length>0,'chart code did not load for the chart');assert.deepEqual(errors,[])
 await browser.close();console.log('chart chunks load only for chart views')

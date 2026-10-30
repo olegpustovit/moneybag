@@ -18,7 +18,7 @@ for(const width of [1440,390]) {
   return route.fulfill({json:{jsonrpc:'2.0',id:req.id,result}})
  })
  const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.addInitScript(()=>{window.profileCommits=[];window.addEventListener('moneybag:react-commit',event=>window.profileCommits.push(event.detail))})
- await page.goto('http://127.0.0.1:5174/');await page.getByRole('heading',{name:'Dashboards'}).waitFor();await page.locator('main').getByRole('link',{name:/alpha/}).click();await page.getByText('alpha value',{exact:true}).waitFor()
+ await page.goto('http://127.0.0.1:5174/dashboards');await page.getByRole('heading',{name:'Dashboards'}).waitFor();await page.locator('main').getByRole('link',{name:/alpha/}).click();await page.getByText('alpha value',{exact:true}).waitFor()
  async function openNav(){if(width<700)await page.getByRole('button',{name:'Open navigation'}).click()}
  await openNav();await page.getByRole('link',{name:'beta',exact:true}).filter({visible:true}).click();await page.getByText('beta value',{exact:true}).waitFor()
  const cachedCalls=calls.filter(name=>name==='dashboard_get'||name==='dashboard_preview').length,results=[]

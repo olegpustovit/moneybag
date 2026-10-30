@@ -260,7 +260,7 @@ Paper fields with a frame border, square corners and compact insets. Labels rema
 
 ### Navigation
 
-The recessed sidebar uses 13px links and 10px monospace group labels. Hover uses the hover surface; the active link uses paper and an inset ink stripe. The tablet rail keeps labels accessible while visually hiding them. Mobile opens the same navigation in a sheet. Settings offers light, dark and system appearance.
+The recessed sidebar uses 13px links and 10px monospace group labels. Hover uses the hover surface; the active link uses paper and an inset ink stripe. The tablet rail keeps labels accessible while visually hiding them. Mobile opens the same navigation in a sheet. Settings offers light, dark and system appearance. Home opens the first saved dashboard, or the creation empty state when none exist. The dashboard breadcrumb and sidebar group link open the full dashboard list.
 
 ### Data Grid
 

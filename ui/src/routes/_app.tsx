@@ -54,7 +54,7 @@ function Navigation({ compact = false, onNavigate, onCreate }: { compact?: boole
   return <div className="navigation">
     <Link className="workspace" to="/" onClick={onNavigate}><span className="workspace-mark" aria-hidden="true">M</span><span className="nav-label workspace-name">{session.user.name}’s money</span></Link>
     <nav aria-label="Workspace">
-      <div className="nav-group">Dashboards</div>
+      <Link className="nav-group" to="/dashboards" onClick={onNavigate}>Dashboards</Link>
       {(dashboards.items ?? []).map((dashboard) => <Link key={dashboard.id} to="/dashboards/$id" params={{id:dashboard.id}} onClick={onNavigate} title={dashboard.title} className={path === `/dashboards/${dashboard.id}` ? 'nav-link active' : 'nav-link'} aria-current={path === `/dashboards/${dashboard.id}` ? 'page' : undefined}><LayoutDashboard aria-hidden="true" size={16}/><span className="nav-label nav-title">{dashboard.title}</span>{dashboard.draft_version > 0 && <span className="draft-dot" title="Has a draft" aria-label="Has a draft" />}</Link>)}
       {!(dashboards.items ?? []).length && <span className="nav-empty">No dashboards yet</span>}
       <button type="button" className="nav-link nav-action" title="New dashboard" onClick={() => onCreate('dashboard')}><span className="nav-create-icon" aria-hidden="true"><LayoutDashboard size={16}/><Plus size={10}/></span><span className="nav-label">New dashboard</span></button>

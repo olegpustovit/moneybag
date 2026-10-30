@@ -18,6 +18,7 @@ import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppReconcileRouteImport } from './routes/_app.reconcile'
 import { Route as AppScenariosRouteImport } from './routes/_app.scenarios'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as AppDashboardsIndexRouteImport } from './routes/_app.dashboards.index'
 import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
 import { Route as AppDatabasesIdRouteImport } from './routes/_app.databases.$id'
 import { Route as AppImportsIndexRouteImport } from './routes/_app.imports.index'
@@ -69,6 +70,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const AppDashboardsIndexRoute = AppDashboardsIndexRouteImport.update({
+  id: '/dashboards/',
+  path: '/dashboards/',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppDashboardsIdRoute = AppDashboardsIdRouteImport.update({
   id: '/dashboards/$id',
   path: '/dashboards/$id',
@@ -113,6 +119,7 @@ export interface FileRoutesByFullPath {
   '/databases/$id': typeof AppDatabasesIdRoute
   '/imports/$batch': typeof AppImportsBatchRoute
   '/shared/$id': typeof AppSharedIdRoute
+  '/dashboards/': typeof AppDashboardsIndexRoute
   '/imports/': typeof AppImportsIndexRoute
   '/shared/': typeof AppSharedIndexRoute
 }
@@ -129,6 +136,7 @@ export interface FileRoutesByTo {
   '/databases/$id': typeof AppDatabasesIdRoute
   '/imports/$batch': typeof AppImportsBatchRoute
   '/shared/$id': typeof AppSharedIdRoute
+  '/dashboards': typeof AppDashboardsIndexRoute
   '/imports': typeof AppImportsIndexRoute
   '/shared': typeof AppSharedIndexRoute
 }
@@ -147,6 +155,7 @@ export interface FileRoutesById {
   '/_app/databases/$id': typeof AppDatabasesIdRoute
   '/_app/imports/$batch': typeof AppImportsBatchRoute
   '/_app/shared/$id': typeof AppSharedIdRoute
+  '/_app/dashboards/': typeof AppDashboardsIndexRoute
   '/_app/imports/': typeof AppImportsIndexRoute
   '/_app/shared/': typeof AppSharedIndexRoute
 }
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
     | '/databases/$id'
     | '/imports/$batch'
     | '/shared/$id'
+    | '/dashboards/'
     | '/imports/'
     | '/shared/'
   fileRoutesByTo: FileRoutesByTo
@@ -181,6 +191,7 @@ export interface FileRouteTypes {
     | '/databases/$id'
     | '/imports/$batch'
     | '/shared/$id'
+    | '/dashboards'
     | '/imports'
     | '/shared'
   id:
@@ -198,6 +209,7 @@ export interface FileRouteTypes {
     | '/_app/databases/$id'
     | '/_app/imports/$batch'
     | '/_app/shared/$id'
+    | '/_app/dashboards/'
     | '/_app/imports/'
     | '/_app/shared/'
   fileRoutesById: FileRoutesById
@@ -271,6 +283,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/dashboards/': {
+      id: '/_app/dashboards/'
+      path: '/dashboards'
+      fullPath: '/dashboards/'
+      preLoaderRoute: typeof AppDashboardsIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboards/$id': {
       id: '/_app/dashboards/$id'
       path: '/dashboards/$id'
@@ -329,6 +348,7 @@ interface AppRouteChildren {
   AppDatabasesIdRoute: typeof AppDatabasesIdRoute
   AppImportsBatchRoute: typeof AppImportsBatchRoute
   AppSharedIdRoute: typeof AppSharedIdRoute
+  AppDashboardsIndexRoute: typeof AppDashboardsIndexRoute
   AppImportsIndexRoute: typeof AppImportsIndexRoute
   AppSharedIndexRoute: typeof AppSharedIndexRoute
 }
@@ -346,6 +366,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDatabasesIdRoute: AppDatabasesIdRoute,
   AppImportsBatchRoute: AppImportsBatchRoute,
   AppSharedIdRoute: AppSharedIdRoute,
+  AppDashboardsIndexRoute: AppDashboardsIndexRoute,
   AppImportsIndexRoute: AppImportsIndexRoute,
   AppSharedIndexRoute: AppSharedIndexRoute,
 }
