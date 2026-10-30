@@ -33,10 +33,13 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
 		t.Fatal("dedicated test database required")
 	}
-	var reads atomic.Int64
+	var reads, extraJournalReads atomic.Int64
 	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
 		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
 			reads.Add(1)
+		}
+		if e.CommandName == "find" && e.Command.Lookup("find").StringValue() == "journal" || e.CommandName == "getMore" && e.Command.Lookup("collection").StringValue() == "journal" {
+			extraJournalReads.Add(1)
 		}
 	}}
 	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
@@ -56,14 +59,14 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 		t.Fatal(err)
 	}
 	docs := []any{}
-	for _, v := range []struct{ date, amount, currency, price string }{{"2026-01-01", "10000000000000000", "EUR", ""}, {"2026-01-01", "1", "EUR", ""}, {"2026-01-01", "-10000000000000000", "EUR", ""}, {"2026-01-02", "3", "USD", "2"}, {"2026-02-03", "0.1", "EUR", ""}, {"2026-02-03", "0.2", "EUR", ""}, {"2026-03-01", "9", "EUR", ""}} {
+	for i, v := range []struct{ date, amount, currency, price string }{{"2026-01-01", "10000000000000000", "EUR", ""}, {"2026-01-01", "1", "EUR", ""}, {"2026-01-01", "-10000000000000000", "EUR", ""}, {"2026-01-02", "3", "USD", "2"}, {"2026-02-03", "0.1", "EUR", ""}, {"2026-02-03", "0.2", "EUR", ""}, {"2026-03-01", "9", "EUR", ""}} {
 		post := ledger.Posting{Account: "expenses:food", Amount: ledger.Amount{Value: ledger.MustDecimal(v.amount), Commodity: v.currency}}
 		if v.price != "" {
 			post.Price = &ledger.Amount{Value: ledger.MustDecimal(v.price), Commodity: "EUR"}
 		}
-		docs = append(docs, bson.M{"user_id": p.UserID, "status": "posted", "date": v.date, "postings": []ledger.Posting{post}})
+		docs = append(docs, bson.M{"_id": fmt.Sprintf("entry-%d", i), "seq": int64(i + 1), "kind": "entry", "user_id": p.UserID, "status": "posted", "date": v.date, "postings": []ledger.Posting{post}})
 	}
-	docs = append(docs, bson.M{"user_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "status": "posted", "date": "2026-01-01", "postings": []ledger.Posting{{Account: "expenses:other", Amount: ledger.Amount{Value: ledger.MustDecimal("999"), Commodity: "EUR"}}}})
+	docs = append(docs, bson.M{"_id": "other-entry", "seq": int64(1), "kind": "entry", "user_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "status": "posted", "date": "2026-01-01", "postings": []ledger.Posting{{Account: "expenses:other", Amount: ledger.Amount{Value: ledger.MustDecimal("999"), Commodity: "EUR"}}}})
 	if _, err = db.Collection("journal").InsertMany(ctx, docs); err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +117,70 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if err != nil || result.Value == nil || reads.Load() != 1 {
 		t.Fatalf("dashboard sources used %d aggregates: %v", reads.Load(), err)
 	}
+	book := ledger.NewService(ledger.NewMongoRepository(db), nil)
+	combinedEngine := dashboard.Engine{Expr: expr, Reader: &dashboard.Sources{Budget: svc, Ledger: book, Valuer: testValuer{}}}
+	combinedData := map[string]dashboard.Query{"lines": {From: "budget_lines"}, "months": {From: "months"}, "postings": {From: "postings", Agg: map[string]string{"n": "count()"}}}
+	reads.Store(0)
+	extraJournalReads.Store(0)
+	combinedResult, err := combinedEngine.Evaluate(ctx, p, "size(data.lines) + size(data.months) + size(data.postings)", combinedData, map[string]any{"month": "2026-03"})
+	if err != nil || combinedResult.Value == nil || reads.Load() != 1 || extraJournalReads.Load() != 0 {
+		t.Fatalf("combined dashboard journal reads: %d aggregate, %d other, %v", reads.Load(), extraJournalReads.Load(), err)
+	}
+	combinedCtx := ledger.WithCombinedBudget(budget.WithMonthReadWindow(reqcache.With(ctx), "2026-01-01", "2026-03-31"), "2026-01-01", "2026-03-31")
+	reads.Store(0)
+	combinedMonths, err := svc.Months(combinedCtx, p, "2026-01-01", "2026-02-28")
+	if err != nil || !reflect.DeepEqual(combinedMonths, expected[0]) {
+		t.Fatal("combined monthly values differ")
+	}
+	grouped, ok, err := ledger.NewMongoRepository(db).CombinedMonthRows(combinedCtx, p, "2026-01-01", "2026-03-31")
+	if err != nil || !ok {
+		t.Fatal("combined month rows unavailable")
+	}
+	priceIndex := -1
+	for i, row := range grouped {
+		if row.ID.Price != nil {
+			priceIndex = i
+			break
+		}
+	}
+	if priceIndex < 0 {
+		t.Fatal("priced synthetic group missing")
+	}
+	grouped[priceIndex].ID.Price.Commodity = "modified"
+	again, ok, err := ledger.NewMongoRepository(db).CombinedMonthRows(combinedCtx, p, "2026-01-01", "2026-03-31")
+	if err != nil || !ok || again[priceIndex].ID.Price.Commodity != "EUR" {
+		t.Fatal("combined monthly rows were mutated")
+	}
+	count := 0
+	err = book.PostedStream(combinedCtx, p, "", "", false, func(ledger.Entry) error { count++; return nil })
+	if err != nil || count != 7 || reads.Load() != 1 {
+		t.Fatalf("combined stream was not shared: %d entries, %d aggregates, %v", count, reads.Load(), err)
+	}
+	dates := []string{"2026-03-31"}
+	mixedCtx := budget.WithMonthReadWindow(reqcache.With(context.Background()), "2026-01-01", "2026-03-31")
+	mixedCtx = ledger.WithBalanceSeries(ledger.WithCombinedJournal(ledger.WithCombinedBudget(mixedCtx, "2026-01-01", "2026-03-31"), dates), dates)
+	expectedBalance, err := book.Balances(ctx, p, ledger.BalancesInput{At: dates[0]}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reads.Store(0)
+	mixedMonths, err := svc.Months(mixedCtx, p, "2026-01-01", "2026-02-28")
+	if err != nil || !reflect.DeepEqual(mixedMonths, expected[0]) {
+		t.Fatal("mixed monthly results differ")
+	}
+	mixedBalance, err := book.Balances(mixedCtx, p, ledger.BalancesInput{At: dates[0]}, nil)
+	if err != nil || !reflect.DeepEqual(mixedBalance, expectedBalance) {
+		t.Fatal("mixed balance differs")
+	}
+	mixedCount := 0
+	err = book.PostedStream(mixedCtx, p, "", "", false, func(ledger.Entry) error { mixedCount++; return nil })
+	if err != nil || mixedCount != 7 || reads.Load() != 1 {
+		t.Fatalf("mixed sources used %d aggregates: %v", reads.Load(), err)
+	}
+	otherCombined, err := svc.Months(combinedCtx, other, "2026-01-01", "2026-02-28")
+	if err != nil || len(otherCombined) != 2 || otherCombined[0].Total != 999 || reads.Load() != 2 {
+		t.Fatal("combined monthly results crossed user boundaries")
+	}
 	many := make([]any, 5001)
 	for i := range many {
 		many[i] = bson.M{"user_id": p.UserID, "status": "posted", "date": "2025-12-01", "postings": []ledger.Posting{{Account: fmt.Sprintf("expenses:bulk%d", i), Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}}
@@ -129,5 +196,14 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	}
 	if _, err = svc.Months(ctx, p, "2025-12-01", "2026-03-31"); err == nil {
 		t.Fatal("result cap bypassed")
+	}
+	combinedWide := ledger.WithCombinedBudget(budget.WithMonthReadWindow(reqcache.With(context.Background()), "2025-12-01", "2026-03-31"), "2025-12-01", "2026-03-31")
+	reads.Store(0)
+	combinedNarrow, err := svc.Months(combinedWide, p, "2026-01-01", "2026-02-28")
+	if err != nil || !reflect.DeepEqual(combinedNarrow, expected[0]) || reads.Load() != 2 {
+		t.Fatalf("combined group cap fallback failed: %v, %d aggregates", err, reads.Load())
+	}
+	if _, err = svc.Months(combinedWide, p, "2025-12-01", "2026-03-31"); err == nil {
+		t.Fatal("combined result cap bypassed")
 	}
 }

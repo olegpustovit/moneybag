@@ -205,7 +205,7 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 // reversed returns original entries cancelled by an odd reversal chain.
 func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (map[string]bool, error) {
 	return reqcache.Do(ctx, "reversed|"+p.UserID, func() (map[string]bool, error) {
-		if dates, ok := ctx.Value(combinedJournalKey{}).([]string); ok {
+		if dates, ok := combinedDates(ctx); ok {
 			combined, err := r.combinedJournal(ctx, p, dates)
 			if err == nil {
 				var revs []Entry
@@ -290,7 +290,7 @@ func WithSharedPostedStream(ctx context.Context) context.Context {
 
 // PostedStream reads posted journal entries without paging or joining tags.
 func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principal, from, to string, fn func(Entry) error) error {
-	if dates, ok := ctx.Value(combinedJournalKey{}).([]string); ok {
+	if dates, ok := combinedDates(ctx); ok {
 		combined, err := r.combinedJournal(ctx, p, dates)
 		if err == nil {
 			return streamPostedRaw(ctx, combined.entries, from, to, fn)

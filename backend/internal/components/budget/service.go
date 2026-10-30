@@ -292,17 +292,18 @@ func WithMonthReadWindow(ctx context.Context, from, to string) context.Context {
 	return context.WithValue(ctx, monthReadWindowKey{}, monthReadWindow{from, to})
 }
 
-type monthRow struct {
-	ID struct {
-		Date      string         `bson:"date"`
-		Account   string         `bson:"account"`
-		Commodity string         `bson:"commodity"`
-		Price     *ledger.Amount `bson:"price"`
-	} `bson:"_id"`
-	Amount ledger.Decimal `bson:"amount"`
+// MonthReadWindow returns the shared budget aggregation window, if present.
+func MonthReadWindow(ctx context.Context) (string, string, bool) {
+	w, ok := ctx.Value(monthReadWindowKey{}).(monthReadWindow)
+	return w.from, w.to, ok
 }
 
+type monthRow = ledger.JournalMonthRow
+
 func (s *Service) monthRows(ctx context.Context, p principal.Principal, from, to string) ([]monthRow, error) {
+	if rows, ok, err := ledger.NewMongoRepository(s.repo.db).CombinedMonthRows(ctx, p, from, to); ok || err != nil {
+		return rows, err
+	}
 	match := bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$gte": from, "$lte": to}}
 	cur, err := s.repo.db.Collection("journal").Aggregate(ctx, bson.A{bson.M{"$match": match}, bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:"}}}, bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}}, bson.M{"$limit": 5001}})
 	if err != nil {

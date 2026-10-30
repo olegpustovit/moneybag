@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -15,9 +16,24 @@ import (
 )
 
 type combinedJournalKey struct{}
+type combinedBudgetKey struct{}
+type combinedBudgetRange struct{ from, to string }
+
+// JournalMonthRow is a grouped expense amount for a date, account, currency and price.
+type JournalMonthRow struct {
+	ID struct {
+		Date      string  `bson:"date"`
+		Account   string  `bson:"account"`
+		Commodity string  `bson:"commodity"`
+		Price     *Amount `bson:"price"`
+	} `bson:"_id"`
+	Amount Decimal `bson:"amount"`
+}
+
 type combinedJournal struct {
 	entries  []bson.Raw
 	balances [][]rawBalance
+	months   []JournalMonthRow
 }
 
 // WithCombinedJournal lets journal and balance sources share a bounded database read.
@@ -33,12 +49,57 @@ func WithCombinedJournal(ctx context.Context, dates []string) context.Context {
 	return context.WithValue(ctx, combinedJournalKey{}, append([]string(nil), dates...))
 }
 
+// WithCombinedBudget lets the same journal read return grouped expense rows for a bounded window.
+func WithCombinedBudget(ctx context.Context, from, to string) context.Context {
+	if _, err := time.Parse("2006-01-02", from); err != nil {
+		return ctx
+	}
+	if _, err := time.Parse("2006-01-02", to); err != nil || from > to {
+		return ctx
+	}
+	return context.WithValue(ctx, combinedBudgetKey{}, combinedBudgetRange{from, to})
+}
+
+func combinedDates(ctx context.Context) ([]string, bool) {
+	dates, balance := ctx.Value(combinedJournalKey{}).([]string)
+	_, budget := ctx.Value(combinedBudgetKey{}).(combinedBudgetRange)
+	return dates, balance || budget
+}
+
+// CombinedMonthRows returns reusable grouped rows when this request has a matching shared journal window.
+func (r *MongoRepository) CombinedMonthRows(ctx context.Context, p principal.Principal, from, to string) ([]JournalMonthRow, bool, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return nil, false, err
+	}
+	window, ok := ctx.Value(combinedBudgetKey{}).(combinedBudgetRange)
+	if !ok || from != window.from || to != window.to {
+		return nil, false, nil
+	}
+	dates, _ := combinedDates(ctx)
+	combined, err := r.combinedJournal(ctx, p, dates)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil, false, err
+		}
+		return nil, false, nil
+	}
+	rows := slices.Clone(combined.months)
+	for i := range rows {
+		if rows[i].ID.Price != nil {
+			price := *rows[i].ID.Price
+			rows[i].ID.Price = &price
+		}
+	}
+	return rows, true, nil
+}
+
 func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Principal, dates []string) (combinedJournal, error) {
 	db, err := r.db(p)
 	if err != nil {
 		return combinedJournal{}, err
 	}
-	key := fmt.Sprintf("combined-journal|%p|%d:%s|%s", db, len(p.UserID), p.UserID, strings.Join(dates, ","))
+	window, _ := ctx.Value(combinedBudgetKey{}).(combinedBudgetRange)
+	key := fmt.Sprintf("combined-journal|%p|%d:%s|%s|%s|%s", db, len(p.UserID), p.UserID, strings.Join(dates, ","), window.from, window.to)
 	return reqcache.Do(ctx, key, func() (combinedJournal, error) {
 		projection := bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}
 		facets := bson.D{{Key: "entries", Value: bson.A{bson.M{"$project": projection}, bson.M{"$limit": 250001}, bson.M{"$replaceWith": bson.M{"kind": "entry", "data": "$$ROOT"}}}}}
@@ -51,6 +112,15 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 				bson.M{"$group": bson.M{"_id": bson.M{"account": "$postings.account", "commodity": "$postings.amount.c"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
 				bson.M{"$sort": bson.M{"_id.account": 1, "_id.commodity": 1}}, bson.M{"$limit": 5001},
 				bson.M{"$replaceWith": bson.M{"kind": "balance", "index": i, "data": "$$ROOT"}},
+			}})
+		}
+		if window.from != "" {
+			arrays = append(arrays, "$months")
+			facets = append(facets, bson.E{Key: "months", Value: bson.A{
+				bson.M{"$match": bson.M{"date": bson.M{"$gte": window.from, "$lte": window.to}}},
+				bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:"}}},
+				bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
+				bson.M{"$limit": 5001}, bson.M{"$replaceWith": bson.M{"kind": "month", "data": "$$ROOT"}},
 			}})
 		}
 		pipeline := bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "status": "posted"}}, bson.M{"$facet": facets}, bson.M{"$project": bson.M{"_id": 0, "events": bson.M{"$concatArrays": arrays}}}, bson.M{"$unwind": "$events"}, bson.M{"$replaceWith": "$events"}}
@@ -78,6 +148,12 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 					return combinedJournal{}, errors.New("combined journal exceeds cache limit")
 				}
 				out.entries = append(out.entries, append(bson.Raw(nil), frame.Data...))
+			case "month":
+				var row JournalMonthRow
+				if err := bson.Unmarshal(frame.Data, &row); err != nil {
+					return combinedJournal{}, err
+				}
+				out.months = append(out.months, row)
 			case "balance":
 				if frame.Index < 0 || frame.Index >= len(dates) {
 					return combinedJournal{}, errors.New("invalid balance series index")
