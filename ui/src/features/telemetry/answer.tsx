@@ -6,7 +6,7 @@ import './telemetry.css'
 export function WhatMoved({facts,onContributor,label='What moved'}:{facts:Fact[];onContributor?:(key:string,name:string) => void;label?:string}) {
  const moved=facts.find(f => f.contributors?.length)
  const goodUp=moved?.direction==='flat' || moved?.good===null || moved?.good===undefined ? null : (moved.direction==='up')===moved.good
- const rows=moved?.contributors ?? [],peak=Math.max(1,...rows.map(r => Math.abs(r.delta))),diverging=rows.some(r => r.delta<0) || goodUp!==null
+ const rows=moved?.contributors ?? [],peak=Math.max(1,...rows.map(r => Math.abs(r.delta))),diverging=rows.some(r => r.delta<0)
  if(!rows.length)return null
  return <div className="tm-moved"><h3>{label}{onContributor && <small>Click a row to filter</small>}</h3><ol>
    {rows.map(row => {

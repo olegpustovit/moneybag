@@ -25,6 +25,6 @@ function Future() {
  return <>{head}
   <div className="dashboard-grid"><section className="panel" style={{gridColumn:'span 12'}}><TimeChart title="Net worth under each plan" note={`Next ${Math.round(HORIZON/12)} years, by month.`} mark="line" format={unitFormat('eur')} bucket="month" xs={xs} series={lines} direct height={300} legend="isolate"/></section></div>
   <h2 className="tm-section">The plans side by side</h2>
-  <DataGrid label="Plans" rowKey={r => String(r.id)} rows={rows} columns={[{key:'name',label:'Plan',type:'text'},{key:'runway',label:'Lasts',type:'number'},{key:'exGold',label:'Without gold',type:'number'},{key:'end',label:`After ${Math.round(HORIZON/12)} years`,type:'money'},{key:'spend',label:'Spending',type:'number'}]}/>
+  <DataGrid label="Plans" rowKey={r => String(r.id)} rows={rows} columns={[{key:'name',label:'Plan',type:'text'},{key:'runway',label:'Lasts',type:'number',phoneLabel:true},{key:'exGold',label:'Without gold',type:'number',phoneLabel:true},{key:'end',label:`After ${Math.round(HORIZON/12)} years`,type:'money'},...(series.some(s => s.spend) ? [{key:'spend',label:'Spending',type:'number' as const,phoneLabel:true}] : [])]}/>
  </>
 }

@@ -13,7 +13,8 @@ import { describePage } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton, SubNav } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/data/rates')({validateSearch:telemetrySearch,errorComponent:p => <RouteError {...p}/>,component:Rates})
-const pairName=(pair:string) => {const [a,b]=pair.split('/');return `${commodityLabel(a)} in ${commodityLabel(b)}`}
+const unit=(code:string) => code.length===3 ? code : commodityLabel(code)
+const pairName=(pair:string) => {const [a,b]=pair.split('/');return `${unit(a)} in ${unit(b)}`}
 const COLORS=['--c0','--c1','--c2','--c3','--c4']
 function Rates() {
  const {session,bootstrap}=Route.useRouteContext(),params=Route.useSearch(),navigate=Route.useNavigate(),cube=useCube(session.user.id),bounds=cube?.bounds ?? defaultBounds()

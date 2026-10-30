@@ -48,7 +48,8 @@ export function decodeCube(wire:CubeWire):Cube {
   accounts,payees:wire.payees,tagSets:wire.tag_sets,cls,est,
   balances:{d:Int32Array.from(b?.d ?? []),net:Float64Array.from(b?.net ?? []),assets:Float64Array.from(b?.assets ?? []),liabilities:Float64Array.from(b?.liabilities ?? []),estimatedUntil:b?.estimated_until ? dayFromIso(b.estimated_until) : null},
   rates:Object.fromEntries(Object.entries(wire.rates ?? {}).map(([k,r]) => [k,{d:Int32Array.from(r.d),v:Float64Array.from(r.v)}])),
-  annotations:wire.annotations ?? [],labels:wire.labels ?? {},metrics:wire.metrics ?? [],unvalued:wire.unvalued ?? 0,
+  // A stored annotation and the trip tag it describes both arrive; one band per trip is enough.
+  annotations:(wire.annotations ?? []).filter((x,i,all) => all.findIndex(y => y.label===x.label && y.from===x.from)===i),labels:wire.labels ?? {},metrics:wire.metrics ?? [],unvalued:wire.unvalued ?? 0,
   aliases:(wire.aliases ?? []).flatMap(a => {try {return [{re:new RegExp(a.pattern,'i'),name:a.name}]} catch {return []}}),dims:new Map(),colors:new Map(),mask:null}
 }
 export const label=(cube:Cube,value:string) => cube.labels[value] ?? value

@@ -6,7 +6,7 @@ import { tool, type Session } from '../lib/api'
 import type { AccountsListOutput } from '../lib/tools'
 import { amountLabel } from '../lib/format'
 import { Stat } from '../features/telemetry/stat'
-import { money } from '../features/telemetry/format'
+import { money, moneyExact } from '../features/telemetry/format'
 import { useCube } from '../features/telemetry/cube-store'
 import { balanceAt } from '../features/telemetry/cube'
 import { describePage, openDetails } from '../features/telemetry/shell-store'
@@ -33,11 +33,13 @@ function Group({title,rows,currency}:{title:string;rows:Row[];currency:string}) 
 function Accounts() {
  const {session,bootstrap}=Route.useRouteContext(),cube=useCube(session.user.id),currency=cube?.base ?? 'EUR'
  const accounts=useQuery({queryKey:['accounts',session.user.id],staleTime:60_000,queryFn:() => allAccounts(session)})
- const balances=useQuery({queryKey:['balances',session.user.id,currency],staleTime:60_000,queryFn:() => tool(session,'balances_get',{value_in:currency,group_by:'account'})})
+ const balances=useQuery({queryKey:['balances',session.user.id,currency],staleTime:60_000,
+  // One commodity with no quote must not hide every account: fall back to native amounts and say so per row.
+  queryFn:() => tool(session,'balances_get',{value_in:currency,group_by:'account'}).catch(() => tool(session,'balances_get',{group_by:'account'}))})
  describePage({title:'Accounts',lines:[]})
  if(accounts.error || balances.error)return <><PageHead title="Ledger"/><SubNav of="ledger"/><RouteError error={accounts.error ?? balances.error} reset={() => {void accounts.refetch();void balances.refetch()}} title="Accounts didn’t load"/></>
  if(!accounts.data || !balances.data)return <><PageHead title="Ledger" description="Show me the entries and the accounts."/><SubNav of="ledger"/><RowsSkeleton rows={12}/></>
- const byKey=new Map((balances.data.rows ?? []).map(r => [r.key,r])),rows:Row[]=accounts.data.map(account => {const b=byKey.get(account.id),value=Number(b?.value?.v ?? 0),amounts=(b?.amounts ?? []).filter(x => Number(x.v)!==0);return {account,value,text:b?.value ? amountLabel(b.value,2) : money(0,currency),native:amounts.map(x => amountLabel(x,2)).join(' · ')}})
+ const byKey=new Map((balances.data.rows ?? []).map(r => [r.key,r])),rows:Row[]=accounts.data.map(account => {const b=byKey.get(account.id),value=Number(b?.value?.v ?? 0),amounts=(b?.amounts ?? []).filter(x => Number(x.v)!==0);return {account,value,text:b?.value ? moneyExact(Number(b.value.v)*100,currency) : amounts.length ? 'Not valued' : money(0,currency),native:amounts.filter(x => x.c!==currency).map(x => amountLabel(x,2)).join(' · ')}})
  const holds=rows.filter(r => r.account.type==='asset' || r.account.type==='liability'),groups=new Map<string,Row[]>()
  for(const r of holds){const key=r.account.type==='liability' ? 'Debts' : r.account.pot ? humanKey(r.account.pot,bootstrap.labels,'pot') : 'Other accounts';groups.set(key,[...(groups.get(key) ?? []),r])}
  const net=cube ? balanceAt(cube,cube.bounds.today) : null,sorted=[...groups.entries()].sort((a,b) => Math.abs(b[1].reduce((n,r) => n+r.value,0))-Math.abs(a[1].reduce((n,r) => n+r.value,0)))

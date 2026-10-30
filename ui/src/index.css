@@ -95,7 +95,9 @@ th, td { padding:7px 9px; border-bottom:1px solid var(--bd2); white-space:nowrap
 th { color:var(--text2); font-weight:600; }
 .numeric { text-align:right; font-variant-numeric:tabular-nums; }
 .chart-fold-note { margin:0 0 6px; color:var(--text2); font-size:11px; }
-.chart-controls { display:flex; justify-content:flex-end; margin-bottom:6px; }
+.chart-controls { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; margin-bottom:6px; }
+.chart-controls > .tm-btn { margin-left:auto; }
+.chart-controls .tm-panel-head { flex:1; min-width:0; margin:0; }
 .budget-row { display:grid; grid-template-columns:minmax(100px,1fr) minmax(80px,2fr) auto; align-items:center; gap:12px; padding:7px 0; font-size:12px; font-variant-numeric:tabular-nums; }
 .budget-row .n { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .budget-track { display:block; position:relative; height:8px; background:var(--sunk); }

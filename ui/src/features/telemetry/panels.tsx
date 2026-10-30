@@ -145,7 +145,7 @@ function LegacyPanel({c,value,ctx}:{c:SpecComponent;value:ComponentValue;ctx:Pan
    return <><Head title={title} onDetails={details}/><div className="tm-budget-bars">{value.rows.map(r => <div key={r.label} className="budget-row"><span className="n" title={r.label}>{r.label}</span><span className="budget-track" title={`${r.actual_text} of ${r.limit_text}`}><i className={r.status} style={{width:`${r.actual/peak*100}%`}}/><b style={{left:`${r.limit/peak*100}%`}}/></span><span className="t">{r.actual_text} / {r.limit_text}</span></div>)}</div></>
   }
   case 'text':return <><Head title={title}/><div className="note" dangerouslySetInnerHTML={{__html:value.html}}/></>
-  case 'chart':return <><Head title={title} onDetails={details}/><LegacyChart value={value} drilldown tableId={c.id} syncKey={ctx.syncKey}/></>
+  case 'chart':return <LegacyChart value={value} drilldown tableId={c.id} syncKey={ctx.syncKey} head={<Head title={title} onDetails={details}/>}/>
  }
 }
 function PanelError({c,dashboard}:{c:SpecComponent;dashboard:string}) {

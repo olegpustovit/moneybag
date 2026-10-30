@@ -13,12 +13,13 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_BIN || 
 for(const width of widths)for(const theme of themes){
  const context=await browser.newContext({viewport:{width,height:900},deviceScaleFactor:1,colorScheme:theme,hasTouch:width<500})
  const page=await context.newPage(),errors=[]
+ page.setDefaultTimeout(3000)
  page.on('pageerror',e => errors.push(e.message));page.on('console',m => {if(m.type()==='error' && !/404|Failed to load resource/.test(m.text()))errors.push(m.text())})
  await page.goto(`${base}/login`);await page.locator('[name=email]').fill('demo@example.test');await page.locator('[name=password]').fill('synthetic-preview-password');await page.locator('button[type=submit]').click();await page.waitForURL(u => !u.pathname.startsWith('/login'))
  for(const [name,path] of PAGES){
   if(only && !only.includes(name))continue
   errors.length=0
-  await page.goto(base+path);await page.locator('main h1').first().waitFor({timeout:15000}).catch(() => {});await page.waitForLoadState('networkidle').catch(() => {});await page.waitForTimeout(350)
+  await page.goto(base+path);await page.locator('main h1').first().waitFor().catch(() => {});await page.waitForLoadState('networkidle',{timeout:2000}).catch(() => {});await page.waitForTimeout(250)
   const facts=await page.evaluate(() => {
    const w=document.documentElement.clientWidth,bad=[];for(const el of document.querySelectorAll('main *')){const r=el.getBoundingClientRect();if(r.width && r.right>w+1 && !el.closest('.sr-only,.tm-grid-head,.page-tabs') && getComputedStyle(el).position!=='fixed')bad.push(`${el.tagName}.${String(el.className.baseVal ?? el.className).slice(0,40)}`)}
    return {scroll:document.documentElement.scrollWidth,client:w,bad:bad.slice(0,5),text:document.querySelector('main')?.innerText ?? '',spinners:document.querySelectorAll('.tm-plot-skeleton').length}

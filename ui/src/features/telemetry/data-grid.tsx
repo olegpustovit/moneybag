@@ -5,7 +5,8 @@ import { Sparkline } from './marks'
 import './telemetry.css'
 
 export type ColumnType='text'|'money'|'number'|'date'|'pct'|'days'|'count'
-export type GridColumn={key:string;label:string;type?:ColumnType;total?:boolean;cell?:'spark'|'bar';machine?:boolean;width?:string;sortable?:boolean;currency?:string;format?:string}
+export type GridColumn={key:string;label:string;type?:ColumnType;total?:boolean;cell?:'spark'|'bar';machine?:boolean;width?:string;sortable?:boolean;currency?:string;format?:string;
+ /** On a phone, where headers are gone, says what the value is. For numbers that mean nothing on their own. */ phoneLabel?:boolean}
 /** A cell is a raw value, or the server's `{v,t,tone}` where `t` is already formatted. */
 export type GridValue=string|number|null|undefined|number[]|{v:unknown;t:string;tone?:string}
 export type GridRow=Record<string,GridValue>
@@ -15,7 +16,7 @@ const ADDITIVE=new Set<ColumnType>(['money','number','days','count'])
 const isCell=(v:GridValue):v is {v:unknown;t:string;tone?:string} => typeof v==='object' && v!==null && !Array.isArray(v)
 const raw=(v:GridValue):unknown => isCell(v) ? v.v : v
 export function gridText(column:GridColumn,value:GridValue):string {
- if(isCell(value))return value.t
+ if(isCell(value))return column.type==='date' ? humanDate(value.t) : value.t
  if(value===null || value===undefined || value==='')return '—'
  if(Array.isArray(value))return value.join(', ')
  const type=column.type ?? 'text'
@@ -37,7 +38,8 @@ export function columnTotal(column:GridColumn,rows:GridRow[]):number|null {
  let sum=0;for(const row of rows){const v=raw(row[column.key]);if(typeof v==='number' && Number.isFinite(v))sum+=v}
  return sum
 }
-const template=(columns:GridColumn[],details:boolean) => [...columns.map(c => c.width ?? (c.cell==='spark' ? 'minmax(70px,120px)' : c.cell==='bar' ? 'minmax(90px,1fr)' : (c.type==='date' ? '108px' : NUMERIC.has(c.type ?? 'text') ? 'minmax(84px,120px)' : 'minmax(0,1fr)'))),...(details ? ['72px'] : [])].join(' ')
+// With no text column to take up the slack, numbers share the width instead of leaving a gap on the right.
+const template=(columns:GridColumn[],details:boolean) => {const stretch=!columns.some(c => (c.type ?? 'text')==='text' || c.cell==='bar');return [...columns.map(c => c.width ?? (c.cell==='spark' ? 'minmax(70px,120px)' : c.cell==='bar' ? 'minmax(90px,1fr)' : (c.type==='date' ? (stretch ? 'minmax(108px,1fr)' : '108px') : NUMERIC.has(c.type ?? 'text') ? (stretch ? 'minmax(84px,1fr)' : 'minmax(84px,120px)') : 'minmax(0,1fr)'))),...(details ? ['72px'] : [])].join(' ')}
 const roleFor=(columns:GridColumn[]) => {const title=columns.find(c => (c.type ?? 'text')==='text')?.key ?? columns[0]?.key,value=[...columns].reverse().find(c => c.type==='money' || c.type==='number')?.key;return (key:string) => key===title ? 'title' : key===value ? 'value' : 'meta'}
 
 export type DataGridProps={columns:GridColumn[];rows:GridRow[];rowKey:(row:GridRow,index:number) => string;label:string;
@@ -78,7 +80,7 @@ export function DataGrid({columns,rows,rowKey,label,sort:controlled,onSortChange
   return gridText(c,value)
  }
  const line=(row:GridRow,index:number) => <div key={rowKey(row,index)} role="row" aria-rowindex={index+2} data-row={index} data-index={index} className="tm-grid-row" tabIndex={index===Math.min(active,sorted.length-1) ? 0 : -1} style={{gridTemplateColumns:cols}} onFocus={e => {if(e.target===e.currentTarget)setActive(index)}} onKeyDown={e => onRowKey(e,index,row)} onClick={onRowActivate ? e => {if(!(e.target as Element).closest('button,a'))onRowActivate(row)} : undefined}>
-  {visible.map(c => {const v=row[c.key],tone=isCell(v) ? v.tone : undefined;return <div key={c.key} role="cell" data-m={m(c.key)} data-label={c.label} className={`tm-cell${NUMERIC.has(c.type ?? 'text') ? ' num' : ''}${tone ? ` ${tone}` : ''}`} title={isCell(v) || typeof v==='string' ? gridText(c,v) : undefined}>{cell(row,c)}</div>})}
+  {visible.map(c => {const v=row[c.key],tone=isCell(v) ? v.tone : undefined;return <div key={c.key} role="cell" data-m={m(c.key)} data-label={c.phoneLabel ? c.label : undefined} className={`tm-cell${NUMERIC.has(c.type ?? 'text') ? ' num' : ''}${tone ? ` ${tone}` : ''}`} title={isCell(v) || typeof v==='string' ? gridText(c,v) : undefined}>{cell(row,c)}</div>})}
   {details && <div role="cell" className="tm-cell details" data-m="meta"><button type="button" className="tm-details-link" aria-label={`Details for row ${index+1}`} onClick={() => onDetails!(row)}>Details</button></div>}
  </div>
  if(!sorted.length)return <p className="tm-empty">{emptyText}</p>

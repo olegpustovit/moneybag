@@ -30,7 +30,7 @@ export function unitFormat(unit:Unit,{minor=false,code}:{minor?:boolean;code?:st
   case 'mo': return {zero:true,full:v => `${v.toFixed(1)} mo`,axis:(v,step) => `${v.toFixed(stepDigits(step))} mo`}
   case 'days': return {zero:true,full:v => `${group(v)} ${Math.abs(v)===1 ? 'day' : 'days'}`,axis:v => `${group(v)} d`}
   case 'int': return {zero:true,full:v => `${sign(v)}${group(Math.round(Math.abs(v)))}`,axis:v => `${sign(v)}${compactNumber(Math.abs(v))}`}
-  case 'rate': return {zero:false,full:v => v.toLocaleString('en-US',{maximumFractionDigits:Math.abs(v)>=100 ? 2 : 4,minimumFractionDigits:Math.abs(v)>=100 ? 2 : 4}),axis:(v,step) => v.toLocaleString('en-US',{minimumFractionDigits:stepDigits(step),maximumFractionDigits:stepDigits(step)})}
+  case 'rate': return {zero:false,full:v => v.toLocaleString('en-US',{maximumFractionDigits:Math.abs(v)>=10 ? 2 : 4,minimumFractionDigits:Math.abs(v)>=10 ? 2 : 4}),axis:(v,step) => v.toLocaleString('en-US',{minimumFractionDigits:stepDigits(step),maximumFractionDigits:stepDigits(step)})}
   default: return {zero:false,full:v => `${sign(v)}${compactNumber(Math.abs(v))}`,axis:(v,step) => step<1 ? v.toFixed(stepDigits(step)) : compactNumber(v)}
  }
 }

@@ -57,16 +57,16 @@ function ledger(start,end){
   if(dom===20)post(t,'ENERGY CO','expenses:utilities:energy','assets:bank:online',70+R()*90)
   if(dom===24)post(t,'INTERNET PROVIDER','expenses:utilities:internet','assets:bank:online',40)
   if(!trip){
-   if(R()<.38)post(t,pick(PAYEES.groceries),'expenses:food:groceries',pay(),(14+R()*72)*drift)
-   if(R()<.3)post(t,pick(PAYEES.restaurants),'expenses:food:restaurants',pay(),(8+R()*58)*drift)
-   if(R()<.2)post(t,pick(PAYEES.transport),'expenses:transport',pay(),3+R()*32)
-   if(R()<.05)post(t,pick(PAYEES.health),'expenses:health',pay(),15+R()*120)
-   if(R()<.07)post(t,pick(PAYEES.shopping),'expenses:shopping',pay(),18+R()*240)
+   if(R()<.2)post(t,pick(PAYEES.groceries),'expenses:food:groceries',pay(),(28+R()*120)*drift)
+   if(R()<.14)post(t,pick(PAYEES.restaurants),'expenses:food:restaurants',pay(),(14+R()*90)*drift)
+   if(R()<.08)post(t,pick(PAYEES.transport),'expenses:transport',pay(),3+R()*32)
+   if(R()<.02)post(t,pick(PAYEES.health),'expenses:health',pay(),15+R()*120)
+   if(R()<.04)post(t,pick(PAYEES.shopping),'expenses:shopping',pay(),18+R()*240)
   } else {
    const tags=[`trip:${trip.name}`]
    if(t===trip.from)post(t,'Airline tickets','expenses:travel','liabilities:card:travel',340+R()*900,tags)
-   if(R()<.9)post(t,pick(['Hotel','Airbnb','Local tours','Train']),'expenses:travel','liabilities:card:travel',60+R()*320,tags)
-   if(R()<.7)post(t,pick(['Harbor Grill','Old Town Cafe','Street food']),'expenses:food:restaurants','liabilities:card:travel',18+R()*90,tags)
+   if(R()<.5)post(t,pick(['Hotel','Airbnb','Local tours','Train']),'expenses:travel','liabilities:card:travel',60+R()*320,tags)
+   if(R()<.3)post(t,pick(['Harbor Grill','Old Town Cafe','Street food']),'expenses:food:restaurants','liabilities:card:travel',18+R()*90,tags)
   }
   if(R()<.003)post(t,'Laptop repair','expenses:shopping',card,500+R()*700)
   if(dom===28 && t<utc(2025,9,1))post(t,'Cash spending, worked out','expenses:estimated:cash','assets:cash:home',200+R()*500)
@@ -112,12 +112,12 @@ const DASHBOARDS=[
    {id:'flow',type:'sankey',metric:'income',title:'Where it came from',split:'category'}],
   pages:[page('main','Income',[['total',6],['out',6]],[['trend',8],['by_source',4]],[['flow',12]])]}},
  {id:'cash',title:'Cash flow',spec:{question:'Is more coming in than going out?',scope:scope('6mo'),answer:ANSWER('burn'),explore:{dimensions:['category']},
-  data:{by_month:{from:'entries',where:'row.account.startsWith("expenses:") && row.date >= params.from && row.date <= params.to',derive:{month:'row.date.substring(0,7)'},group:['month'],agg:{amount:'sum(row.amount)'},sort:['month'],hide_zero:true},
-        moves:{from:'entries',where:'row.account.startsWith("assets:") && row.date >= params.from && row.date <= params.to',limit:400,sort:['-date']}},
+  data:{by_month:{from:'postings',where:'row.account.startsWith("expenses:")',derive:{month:'row.date.substring(0,7)'},group:['month'],agg:{amount:'sum(row.value_eur)'},sort:['month']},
+        moves:{from:'postings',where:'row.account.startsWith("assets:")',limit:400,sort:['-date']}},
   components:[stat('burn','burn','Monthly burn'),
-   {id:'monthly',type:'chart',title:'Spending each month',mark:'bar',format:'eur0',rows:'by_month',encoding:{x:{field:'month'},y:{field:'amount'}},rule:{y:'3000',label:'Target'}},
+   {id:'monthly',type:'chart',title:'Spending each month',mark:'bar',format:'eur0',rows:'by_month',encoding:{x:{field:'month'},y:{field:'amount'}},rule:{y:'3000',label:'"Target"'}},
    {id:'table',type:'table',title:'Each month',rows:'by_month',columns:[{label:'Month',value:'row.month',type:'date'},{label:'Spent',value:'row.amount',format:'eur',type:'money',total:true}]},
-   {id:'long',type:'table',title:'Every movement',rows:'moves',columns:[{label:'Date',value:'row.date',type:'date'},{label:'Payee',value:'row.payee',type:'text'},{label:'Amount',value:'row.amount',format:'eur',type:'money'}]},
+   {id:'long',type:'table',title:'Every movement',rows:'moves',columns:[{label:'Date',value:'row.date',type:'date'},{label:'Payee',value:'row.payee',type:'text'},{label:'Amount',value:'row.value_eur',format:'eur',type:'money'}]},
    {id:'donut',type:'chart',title:'Share by month',mark:'donut',format:'eur0',rows:'by_month',encoding:{x:{field:'month'},y:{field:'amount'}}}],
   pages:[page('main','Cash flow',[['burn',12]],[['monthly',8],['donut',4]],[['table',6],['long',6]])]}},
  {id:'trips',title:'Trips',spec:{question:'What did each trip really cost?',scope:scope('all','none'),explore:{dimensions:['trip','category']},answer:{metric:'spending',facts:['top_contributors','largest_entry']},
@@ -126,6 +126,8 @@ const DASHBOARDS=[
 ]
 async function main(){
  const started=Date.now();await signIn();console.log('signed in')
+ // ONLY_DASHBOARD reapplies one spec without repeating every other write.
+ if(process.env.ONLY_DASHBOARD){const d=DASHBOARDS.find(x => x.id===process.env.ONLY_DASHBOARD),t0=Date.now(),applied=await call('dashboard_apply',{dashboard_id:d.id,ops:Object.entries(d.spec).map(([k,v]) => ({op:'add',path:`/${k}`,value:v}))});console.log(d.id,`${Date.now()-t0} ms`,JSON.stringify(applied.validation ?? {}).slice(0,700));return}
  const existing=await call('accounts_list',{limit:500});const have=new Set((existing.items ?? []).map(a => a.id))
  for(const [aid,name,type,cls,pot,kind,commodity,extra] of ACCOUNTS)if(!have.has(aid))await call('account_create',{id:aid,name,type,class:cls,pot,commodities:extra.commodities ?? [commodity],...extra,groups:{...(extra.groups ?? {}),...(cls==='bank' || cls==='cash' || cls==='metal_holding' || cls==='liability' ? {source:kind} : {})}})
  console.log(`accounts ${ACCOUNTS.length}`)
@@ -134,11 +136,9 @@ async function main(){
   const open=iso(start-DAY)
   await call('entry_post',{date:open,payee:'Opening balance',commit:true,postings:[{account:'assets:bank:everyday',amount:{c:'EUR',v:'4200.00'}},{account:'assets:bank:online',amount:{c:'EUR',v:'9800.00'}},{account:'assets:bank:savings',amount:{c:'EUR',v:'26000.00'}},{account:'assets:cash:home',amount:{c:'EUR',v:'12000.00'}},{account:'equity:opening',amount:{c:'EUR',v:'-52000.00'}}]})
   await call('entry_post',{date:open,payee:'Opening balance',commit:true,postings:[{account:'assets:metal:gold',amount:{c:'XAU_g',v:'220'}},{account:'equity:opening',amount:{c:'XAU_g',v:'-220'}}]})
-  const rows=ledger(start,end);console.log(`posting ${rows.length} entries`);let done=0
-  await pool(rows,8,async row => {await call('entry_post',row);if(++done%500===0)console.log(`  ${done}/${rows.length}, ${Math.round((Date.now()-started)/1000)}s`)})
-  // Weekly rates: a plain time series that a text axis would have ruined.
+  // Monthly quotes: a plain time series that a text axis would have ruined.
   let fx=1.08,gold=58;const quotes=[]
-  for(let t=start;t<=end;t+=7*DAY){fx=Math.max(.98,Math.min(1.22,fx*(1+(R()-.5)*.012)));gold=Math.max(40,gold*(1+(R()-.47)*.02));quotes.push({at:`${iso(t)}T12:00:00Z`,pair:'EUR/USD',value:fx.toFixed(4),source:'Synthetic example quote'},{at:`${iso(t)}T12:00:00Z`,pair:'XAU_g/EUR',value:gold.toFixed(2),source:'Synthetic example quote'})}
+  for(let t=start;t<=end;t+=30*DAY){fx=Math.max(.98,Math.min(1.22,fx*(1+(R()-.5)*.03)));gold=Math.max(40,gold*(1+(R()-.46)*.05));quotes.push({at:`${iso(t)}T12:00:00Z`,pair:'EUR/USD',value:fx.toFixed(4),source:'Synthetic example quote'},{at:`${iso(t)}T12:00:00Z`,pair:'XAU_g/USD',value:(gold*fx).toFixed(2),source:'Synthetic example quote'})}
   await pool(quotes,8,q => call('rate_set',q))
   console.log(`rates ${quotes.length}`)
  }
@@ -150,23 +150,30 @@ async function main(){
  for(const s of [{id:'keep_going',name:'Keep going as now',overrides:[]},{id:'cut_travel',name:'Travel half as much',overrides:[]},{id:'buy_flat',name:'Put a deposit on a flat',overrides:[],events:[{month:6,amount:-30000}]}])await call('scenario_upsert',s).catch(e => console.log('scenario',e.message.slice(0,160)))
  const tables=await call('db_list',{})
  if(!(tables.items ?? []).some(t => t.name==='Long-range plan assumptions with a deliberately long dataset name to test the sidebar')){
-  const made=await call('db_create',{name:'Long-range plan assumptions with a deliberately long dataset name to test the sidebar',columns:[{id:'o',type:'number'},{id:'assumption',type:'text'},{id:'value',type:'number'},{id:'tag',type:'text'}]}).catch(e => {console.log('db',e.message.slice(0,200));return null})
-  void made
+  const made=await call('db_create',{name:'Long-range plan assumptions with a deliberately long dataset name to test the sidebar',columns:[{id:'o',type:'number'},{id:'assumption',type:'string'},{id:'value',type:'number'},{id:'tag',type:'string'}]})
+  const rowsOf=[['Yearly raise',3],['Rent growth',2.5],['Gold yield',4]].flatMap(([assumption,value],i) => [{row_id:`r${i}`,column:'o',value:i},{row_id:`r${i}`,column:'assumption',value:assumption},{row_id:`r${i}`,column:'value',value},{row_id:`r${i}`,column:'tag',value:'plan'}])
+  await call('db_update_cells',{db:made.id,updates:rowsOf})
  }
- let currentNav=[]
  for(const d of DASHBOARDS){
   const list=await call('dashboard_list',{});const found=(list.items ?? []).find(x => x.id===d.id)
   if(!found)await call('dashboard_create',{id:d.id,title:d.title})
   const ops=[{op:'replace',path:'/title',value:d.title},...Object.entries(d.spec).map(([k,v]) => ({op:'add',path:`/${k}`,value:v})),...(d.home ? [{op:'add',path:'/home',value:true}] : [])]
   const applied=await call('dashboard_apply',{dashboard_id:d.id,ops})
   if(applied.validation && !applied.validation.ok)console.log(d.id,'validation',JSON.stringify(applied.validation.errors).slice(0,500))
-  if(!process.env.SKIP_PUBLISH){
-   try {const pub=await call('dashboard_publish',{dashboard_id:d.id,note:'Seeded by the synthetic demo.'});console.log(`published ${d.id} v${pub.version ?? ''}`)}
-   catch(e){console.log(`publish ${d.id} refused: ${e.message.slice(0,600)}`)}
-  }
-  currentNav.push(d.id)
+  console.log(`draft ${d.id}`)
  }
  await call('nav_set',{items:[{id:'now',label:'Now',icon:'gauge',route:'/'},{id:'spending',label:'Spending',icon:'receipt',dashboard:'spending'},{id:'income',label:'Income',icon:'banknote',dashboard:'income'},{id:'budget',label:'Budget',icon:'wallet',route:'/budget'},{id:'future',label:'Future',icon:'trending-up',route:'/future'},{id:'ledger',label:'Ledger',icon:'book-open',route:'/ledger'},{id:'data',label:'Data',icon:'database',route:'/data'},{id:'changes',label:'Changes',icon:'history',route:'/changes'}]})
+ if(process.env.ONLY_SPECS)return
+ // Pages work from here on, on whatever has landed. Entries go newest first so recent ranges fill up first.
+ const posted=await call('entries_list',{limit:1})
+ if(!(posted.items ?? []).some(e => e.payee!=='Opening balance')){
+  const rows=ledger(start,end).reverse();console.log(`posting ${rows.length} entries`);let done=0
+  await pool(rows,8,async row => {await call('entry_post',row);if(++done%100===0)console.log(`  ${done}/${rows.length}, ${Math.round((Date.now()-started)/1000)}s`)})
+ }
+ if(!process.env.SKIP_PUBLISH)for(const d of DASHBOARDS){
+  try {const pub=await call('dashboard_publish',{dashboard_id:d.id,note:'Seeded by the synthetic demo.'});console.log(`published ${d.id} v${pub.version ?? ''}`)}
+  catch(e){console.log(`publish ${d.id} refused: ${e.message.slice(0,600)}`)}
+ }
  console.log(`seeded in ${Math.round((Date.now()-started)/1000)}s`)
 }
 await main()
