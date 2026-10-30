@@ -12,6 +12,11 @@ func TestUIRoutes(t *testing.T) {
 		t.Skip("run make ui to stage the SPA")
 	}
 	h := (&Handler{}).Handler()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest("GET", assetPaths["auth.css"], nil))
+	if rec.Code != 200 || !strings.Contains(rec.Header().Get("Cache-Control"), "immutable") || !strings.Contains(rec.Body.String(), "Geist") {
+		t.Fatalf("auth stylesheet: %d %v", rec.Code, rec.Header())
+	}
 	for _, path := range []string{"/", "/dashboards/overview?version=draft"} {
 		req := httptest.NewRequest("GET", path, nil)
 		rec := httptest.NewRecorder()

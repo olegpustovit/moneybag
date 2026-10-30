@@ -1,0 +1,26 @@
+@import "./foundation.css";
+* { box-sizing:border-box; border-radius:0; }
+body { margin:0; min-width:320px; line-height:1.55; }
+::selection { background:var(--sel); }
+:focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+a { color:var(--c0); }
+.auth { width:min(440px,calc(100% - 40px)); margin:12vh auto 48px; }
+.auth h1 { font-size:25px; font-weight:650; line-height:1.2; letter-spacing:-.015em; margin:0 0 24px; }
+.brand { display:flex; align-items:center; gap:12px; color:var(--text); text-decoration:none; }
+.auth-brand { margin-bottom:40px; }
+.logo { width:28px; height:28px; display:grid; place-items:center; background:var(--ink); color:var(--bg); font:600 14px "Geist Mono",ui-monospace,monospace; }
+p { margin:0 0 10px; color:var(--text2); }
+.cap { font-size:13px; color:var(--text3); }
+.auth-note { margin-top:32px; }
+.stack { display:flex; flex-direction:column; align-items:stretch; gap:16px; }
+.stack label { display:flex; flex-direction:column; gap:6px; font-size:13px; }
+.in { max-width:100%; border:1px solid var(--bd); background:var(--paper); color:var(--text); padding:7px 10px; font:13px Geist,"Geist Fallback",system-ui,sans-serif; caret-color:var(--c0); }
+.in:focus { border-color:var(--focus); }
+.endpoint { width:480px; font-family:"Geist Mono",ui-monospace,monospace; }
+.btn { display:inline-flex; align-items:center; gap:6px; border:1px solid var(--ink); background:var(--ink); color:var(--bg); padding:7px 14px; font:500 13px Geist,"Geist Fallback",system-ui,sans-serif; cursor:pointer; }
+.btn.ghost { background:transparent; color:var(--text); }
+.btn:hover { opacity:.88; }
+.stack > .btn { align-self:flex-start; }
+.toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.error { border:1px solid var(--neg); padding:12px; color:var(--neg); background:var(--paper); font-size:13px; margin:12px 0; overflow-wrap:anywhere; }
+code { font:13px "Geist Mono",ui-monospace,monospace; background:var(--sunk); padding:1px 5px; border:1px solid var(--bd2); overflow-wrap:anywhere; }

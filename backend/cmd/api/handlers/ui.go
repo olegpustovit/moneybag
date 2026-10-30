@@ -19,11 +19,20 @@ var uiFS embed.FS
 
 var hashedUIAsset = regexp.MustCompile(`-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$`)
 
+func authStylesheet() (string, error) {
+	files, err := fs.Glob(uiFS, "dist/assets/auth-*.css")
+	if err != nil || len(files) != 1 || !hashedUIAsset.MatchString(files[0]) {
+		return "", fmt.Errorf("SPA auth stylesheet is missing or ambiguous")
+	}
+	return "/" + strings.TrimPrefix(files[0], "dist/"), nil
+}
+
 func ValidateSPA() error {
 	if _, err := uiFS.ReadFile("dist/index.html"); err != nil {
 		return fmt.Errorf("SPA build is missing: %w", err)
 	}
-	return nil
+	_, err := authStylesheet()
+	return err
 }
 
 func encodingQuality(header, name string) float64 {

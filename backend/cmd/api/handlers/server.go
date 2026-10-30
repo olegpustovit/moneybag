@@ -32,7 +32,12 @@ var assetPaths = func() map[string]string {
 		panic(err)
 	}
 	sum := sha256.Sum256(data)
-	return map[string]string{"style.css": fmt.Sprintf("/assets/style.%x.css", sum[:12])}
+	legacy := fmt.Sprintf("/assets/style.%x.css", sum[:12])
+	auth, err := authStylesheet()
+	if err != nil {
+		auth = legacy
+	}
+	return map[string]string{"style.css": legacy, "auth.css": auth}
 }()
 
 func parseTemplates() (*template.Template, error) {
