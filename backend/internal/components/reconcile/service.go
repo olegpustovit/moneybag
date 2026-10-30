@@ -435,19 +435,58 @@ func (s *Service) verify(ctx context.Context, p principal.Principal, account str
 	if account != "" {
 		f["account"] = account
 	}
-	cur, e := s.repo.db.Collection("balance_assertions").Find(ctx, f, options.Find().SetBatchSize(100))
+	cur, e := s.repo.db.Collection("balance_assertions").Aggregate(ctx, bson.A{
+		bson.M{"$match": f},
+		bson.M{"$lookup": bson.M{
+			"from": "journal", "localField": "account", "foreignField": "postings.account", "let": bson.M{"account": "$account", "date": bson.M{"$cond": bson.A{bson.M{"$eq": bson.A{"$date", ""}}, time.Now().Format("2006-01-02"), "$date"}}},
+			"pipeline": bson.A{
+				bson.M{"$match": bson.M{"user_id": p.UserID, "status": "posted", "$expr": bson.M{"$lte": bson.A{"$date", "$$date"}}}},
+				bson.M{"$unwind": "$postings"},
+				bson.M{"$match": bson.M{"$expr": bson.M{"$eq": bson.A{"$postings.account", "$$account"}}}},
+				bson.M{"$group": bson.M{"_id": "$postings.amount.c", "amount": bson.M{"$sum": "$postings.amount.v"}}},
+				bson.M{"$limit": 5001},
+			}, "as": "balances",
+		}},
+	}, options.Aggregate().SetBatchSize(5001))
 	if e != nil {
 		return e
 	}
 	defer cur.Close(ctx)
 	for cur.Next(ctx) {
-		var a Assertion
-		if e = cur.Decode(&a); e != nil {
+		var row struct {
+			Assertion `bson:",inline"`
+			Balances  []struct {
+				Commodity string         `bson:"_id"`
+				Amount    ledger.Decimal `bson:"amount"`
+			} `bson:"balances"`
+		}
+		if e = cur.Decode(&row); e != nil {
 			return e
 		}
-		actual, e := s.balance(ctx, p, a.Account, a.Date, a.Amount.Commodity)
-		if e != nil {
+		a := row.Assertion
+		if e = p.Require("ledger:read"); e != nil {
 			return e
+		}
+		if a.Date != "" {
+			if _, e = time.Parse("2006-01-02", a.Date); e != nil {
+				return fmt.Errorf("at must be YYYY-MM-DD")
+			}
+		}
+		if e = p.Valid(); e != nil {
+			return e
+		}
+		if len(row.Balances) > 5000 {
+			return fmt.Errorf("balance result exceeds 5000 rows")
+		}
+		actual := ledger.MustDecimal("0")
+		for _, balance := range row.Balances {
+			value, err := ledger.DecimalFromRat(balance.Amount.Rat())
+			if err != nil {
+				return err
+			}
+			if balance.Commodity == a.Amount.Commodity {
+				actual = value
+			}
 		}
 		diff, e := ledger.DecimalFromRat(new(big.Rat).Sub(a.Amount.Value.Rat(), actual.Rat()))
 		if e != nil {
