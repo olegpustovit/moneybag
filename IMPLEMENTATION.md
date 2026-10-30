@@ -290,3 +290,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `baae2db7b7fd-20261030025647` passed its public health check and the service is active.
 
 - Feed sync navigation: a successful feed sync now invalidates the import list and sidebar count and opens the returned batch through the SPA router. Desktop/mobile synthetic browser tests covered sync failure, retry, a previously cached import list, refreshed count and navigation without a reload; `make check` passed. The first fixture used the wrong import-list response property and passed after correction. A separate 9,000-row scroll experiment memoizing visible rows did not consistently improve frame intervals and was discarded; its before/after samples remain above the 60 fps target. Full SPA/P0 acceptance remains open.
+  Deployment: release `2a19a977bd58-20261030025952` passed its public health check and the service is active.
