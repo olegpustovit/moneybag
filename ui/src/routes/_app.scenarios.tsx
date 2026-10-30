@@ -3,6 +3,8 @@ import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Button } from '../components/ui/button'
+import { Skeleton } from '../components/ui/skeleton'
+import { LoadingTable } from '../components/loading-table'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { ScenarioEditor } from '../features/scenarios/editor'
 import { comparisonQuery, forecastQuery, modelQuery } from '../features/scenarios/queries'
@@ -11,7 +13,8 @@ import type { ChartValue } from '../features/dashboard/values'
 type Scenario=NonNullable<ModelGetOutput['scenarios']>[number]
 const Chart=lazy(() => import('../features/dashboard/chart'))
 const schema=z.object({horizon:z.coerce.number().int().min(1).max(600).optional().catch(undefined),currency:z.enum(['USD','EUR']).optional().catch(undefined)})
-export const Route=createFileRoute('/_app/scenarios')({validateSearch:schema,loader:({context}) => context.queryClient.query({...modelQuery(context.session),staleTime:'static'}),pendingComponent:() => <section aria-busy="true"><h1>Scenarios</h1><p>Loading model…</p></section>,errorComponent:ScenarioError,component:Scenarios})
+export const Route=createFileRoute('/_app/scenarios')({validateSearch:schema,loader:({context}) => context.queryClient.query({...modelQuery(context.session),staleTime:'static'}),pendingMs:150,pendingMinMs:300,pendingComponent:ScenarioPending,errorComponent:ScenarioError,component:Scenarios})
+function ScenarioPending() {const {currency='USD',horizon=60}=Route.useSearch();return <section role="status" aria-busy="true"><span className="sr-only">Loading scenarios…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SCENARIOS</p><h1>Scenarios</h1><p className="description">Compare possible futures using your model assumptions.</p></div><Skeleton className="skeleton-bar journal-loading-action"/></header><div aria-hidden="true"><div className="scenario-controls scenario-loading-controls">{['Forecast horizon (months)','Forecast currency'].map(label => <div key={label}><span>{label}</span><Skeleton className="skeleton-bar"/></div>)}</div><section className="scenario-panel"><h2>Forecast net worth · {currency}</h2><p>Projected by month for {horizon} months.</p><svg className="skeleton-chart" viewBox="0 0 240 120" preserveAspectRatio="none"><path d="M18 4V105H238"/><path className="skeleton-chart-line" d="M18 91L60 82L100 87L140 52L180 61L238 25"/></svg></section><section className="scenario-panel"><h2>12-month comparison · USD</h2><LoadingTable columns={['Scenario','Monthly spend','End net worth','Runway','Edit']}/></section></div></section>}
 function ScenarioError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load scenarios</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
 function Scenarios() {
  const {session}=Route.useRouteContext(),search=Route.useSearch(),navigate=Route.useNavigate(),{data:model}=useSuspenseQuery(modelQuery(session)),scenarios=model.scenarios ?? [],ids=scenarios.map((item) => item.id),horizon=search.horizon ?? 60,currency=search.currency ?? 'USD'
