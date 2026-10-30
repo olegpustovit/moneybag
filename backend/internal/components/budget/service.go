@@ -102,6 +102,25 @@ func (s *Service) Lines(ctx context.Context, p principal.Principal) ([]Line, err
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
+	lines, err := reqcache.Do(ctx, fmt.Sprintf("budget-lines|%p|%d:%s", s.repo.db, len(p.UserID), p.UserID), func() ([]Line, error) {
+		return s.lines(ctx, p)
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := slices.Clone(lines)
+	for i := range out {
+		out[i].Accounts = slices.Clone(out[i].Accounts)
+		out[i].LiteralAccounts = slices.Clone(out[i].LiteralAccounts)
+		if out[i].GroupRef != nil {
+			ref := *out[i].GroupRef
+			out[i].GroupRef = &ref
+		}
+	}
+	return out, nil
+}
+
+func (s *Service) lines(ctx context.Context, p principal.Principal) ([]Line, error) {
 	cur, e := s.repo.db.Collection("budgets").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "order", Value: 1}, {Key: "id", Value: 1}}).SetLimit(501))
 	if e != nil {
 		return nil, e
