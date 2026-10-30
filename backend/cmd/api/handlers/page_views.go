@@ -138,9 +138,24 @@ var defaultNav = []navItem{
 	{ID: "changes", Label: "Changes", Icon: "history", Route: "/activity"},
 }
 
-// bootstrapExtras is the seam for nav_set, label_set and feedback_list: replace these defaults when they exist.
-func (h *Handler) bootstrapExtras(context.Context, principal.Principal) (nav []navItem, labels map[string]string, feedback int64, err error) {
-	return defaultNav, map[string]string{}, 0, nil
+// bootstrapExtras reads what agents set through nav_set and label_set, and the open flags.
+func (h *Handler) bootstrapExtras(ctx context.Context, p principal.Principal) (nav []navItem, labels map[string]string, feedback int64, err error) {
+	stored, err := h.services.Semantic.Nav(ctx, p)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	nav = defaultNav
+	if len(stored) > 0 {
+		nav = make([]navItem, len(stored))
+		for i, item := range stored {
+			nav[i] = navItem(item)
+		}
+	}
+	if labels, err = h.services.Semantic.Labels(ctx, p); err != nil {
+		return nil, nil, 0, err
+	}
+	feedback, err = h.services.Feedback.OpenCount(ctx, p)
+	return nav, labels, feedback, err
 }
 
 // apiBootstrap replaces session, discover and list round trips. Bytes are cached until the user's next write.
@@ -261,10 +276,24 @@ func (h *Handler) apiRenderCube(w http.ResponseWriter, r *http.Request) {
 	h.renderCube(w, r, session, access)
 }
 
-// renderCube is the merge seam: call the /api/cube builder for session.Principal here.
-// A grant's token must stay denied unless the cube learns the grant's source and row limits.
-func (h *Handler) renderCube(w http.ResponseWriter, _ *http.Request, _ preview.Session, _ sharing.Access) {
-	respond(w, http.StatusNotFound, map[string]string{"error": "cube unavailable"})
+// renderCube serves the owner's cube. A grant's token stays denied: the cube has no notion of a grant's source and row limits.
+func (h *Handler) renderCube(w http.ResponseWriter, r *http.Request, session preview.Session, access sharing.Access) {
+	if access.Grant != nil {
+		respond(w, http.StatusNotFound, map[string]string{"error": "cube unavailable"})
+		return
+	}
+	revision, e := h.services.Audit.Revision(r.Context(), session.Principal)
+	if e != nil {
+		respond(w, http.StatusServiceUnavailable, map[string]string{"error": "could not read the data revision"})
+		return
+	}
+	cube, e := h.services.Semantic.Cube(r.Context(), session.Principal, revision)
+	if e != nil {
+		h.services.Logger.ErrorContext(r.Context(), "build render cube", "error", e)
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not build the cube"})
+		return
+	}
+	respond(w, http.StatusOK, cube)
 }
 
 func (h *Handler) apiRenderReport(w http.ResponseWriter, r *http.Request) {

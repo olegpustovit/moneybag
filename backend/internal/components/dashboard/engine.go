@@ -9,6 +9,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
@@ -29,8 +30,9 @@ type Reader interface {
 	Rows(context.Context, principal.Principal, string) ([]map[string]any, error)
 }
 type Engine struct {
-	Expr   *expressions.Engine
-	Reader Reader
+	Expr    *expressions.Engine
+	Reader  Reader
+	Metrics *semantic.Service
 }
 type execution struct {
 	ctx        context.Context
@@ -637,8 +639,10 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
+	specIssues := checkSpec(spec)
+	spec = withScope(ctx, spec, &specIssues)
 	ctx = context.WithValue(shareJournalSources(sharePostedSources(shareBalanceHistory(shareBudgetMonths(ctx, spec.Data, spec.Params), spec.Data), spec.Data, spec.Params), spec.Data, spec.Params), paramsKey{}, spec.Params)
-	result := Rendered{Values: map[string]any{}, Validation: Validation{OK: true, Errors: []Issue{}, Warnings: []Issue{}}}
+	result := Rendered{Values: map[string]any{}, Validation: Validation{OK: len(specIssues) == 0, Errors: append([]Issue{}, specIssues...), Warnings: []Issue{}}, Resolved: map[string]Component{}}
 	issue := func(path string, err error) {
 		i := Issue{Path: path, Msg: err.Error()}
 		var ee *EvalError
@@ -721,6 +725,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			continue
 		}
 		components[c.ID] = c
+		result.Resolved[c.ID] = c
 		value, err := x.render(c)
 		if err != nil {
 			issue(path, err)
@@ -734,6 +739,9 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 			issue(path, e)
 			return result, nil
 		}
+	}
+	if err := x.answer(spec, result.Values); err != nil {
+		issue("/answer", err)
 	}
 	used := map[string]bool{}
 	pageIDs := map[string]bool{}
@@ -828,8 +836,16 @@ func walkExpressions(s Spec, fn func(string, string)) {
 				emit(fmt.Sprintf("%s/columns/%d/label", base, j), expr)
 			}
 		}
-		for k, v := range map[string]string{"value": c.Value, "delta": c.Delta, "sparkline": c.Sparkline, "sub": c.Sub, "tone": c.Tone, "label": c.Label, "actual": c.Actual, "limit": c.Limit, "metric": c.Metric} {
+		// On metric-driven types, metric names a metric rather than holding CEL.
+		metric := c.Metric
+		if metricTypes[c.Type] {
+			metric = ""
+		}
+		for k, v := range map[string]string{"value": c.Value, "delta": c.Delta, "sparkline": c.Sparkline, "sub": c.Sub, "tone": c.Tone, "label": c.Label, "actual": c.Actual, "limit": c.Limit, "metric": metric} {
 			emit(base+"/"+k, v)
+		}
+		if c.Drill != nil && c.Drill.Filter != "same_as_page" {
+			emit(base+"/drill/filter", c.Drill.Filter)
 		}
 		for j, col := range c.Columns {
 			emit(fmt.Sprintf("%s/columns/%d/value", base, j), col.Value)

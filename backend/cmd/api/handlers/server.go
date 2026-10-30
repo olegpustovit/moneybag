@@ -88,6 +88,10 @@ func (h *Handler) RemoteMCP(readOnly bool) http.Handler {
 			return
 		}
 		p, e := h.oauth.Bearer(r.Context(), strings.TrimPrefix(raw, "Bearer "), h.cfg.PublicURL+path)
+		if errors.Is(e, oauth.ErrAgentsSuspended) {
+			respond(w, http.StatusForbidden, map[string]string{"error": "agents_suspended", "error_description": e.Error()})
+			return
+		}
 		if e != nil {
 			h.unauthorized(w, path)
 			return
@@ -185,6 +189,19 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("POST /settings/revoke", h.settingsRevoke)
 	mux.HandleFunc("POST /settings/password", h.settingsPassword)
 	mux.HandleFunc("POST /settings/feed", h.settingsFeed)
+	mux.HandleFunc("POST /settings/agents/stop", h.settingsAgentsStop)
+	mux.HandleFunc("POST /settings/agents/resume", h.settingsAgentsResume)
+	mux.HandleFunc("GET /confirm/{token}", h.confirmPage)
+	mux.HandleFunc("POST /confirm/{token}", h.confirmDecide)
+	mux.HandleFunc("GET /secure/feed/{id}", h.feedSecretPage)
+	mux.HandleFunc("POST /secure/feed/{id}", h.feedSecretSave)
+	mux.HandleFunc("GET /api/cube", h.apiCube)
+	mux.HandleFunc("GET /api/changes", h.apiChanges)
+	mux.Handle("POST /api/feedback", h.browser(http.HandlerFunc(h.apiFeedback)))
+	mux.Handle("POST /api/usage", h.browser(http.HandlerFunc(h.apiUsage)))
+	mux.HandleFunc("GET /api/saved-views", h.apiSavedViews)
+	mux.Handle("PUT /api/saved-views", h.browserMethods(http.HandlerFunc(h.apiSavedViewPut)))
+	mux.Handle("DELETE /api/saved-views", h.browserMethods(http.HandlerFunc(h.apiSavedViewDelete)))
 	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	mux.Handle("POST /api/mcp", h.browser(browserTransport))
 	mux.Handle("POST /api/expr/check", h.browser(http.HandlerFunc(h.apiExpressionCheck)))
@@ -260,6 +277,22 @@ func (h *Handler) browser(next http.Handler) http.Handler {
 			return
 		}
 		if r.Method != "POST" || !h.csrf(r, session) {
+			respond(w, 403, map[string]string{"error": "reload this page and retry"})
+			return
+		}
+		next.ServeHTTP(w, r.WithContext(principal.With(r.Context(), p)))
+	})
+}
+
+// browserMethods is browser for the JSON verbs a form cannot send; the CSRF token is still required.
+func (h *Handler) browserMethods(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, session, e := h.session(r)
+		if e != nil {
+			respond(w, 401, map[string]string{"error": "sign in to continue"})
+			return
+		}
+		if !h.csrf(r, session) {
 			respond(w, 403, map[string]string{"error": "reload this page and retry"})
 			return
 		}

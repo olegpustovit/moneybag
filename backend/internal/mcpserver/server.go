@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
 	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
 	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
@@ -20,6 +22,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
@@ -50,8 +53,10 @@ type Services struct {
 	Expr        *expressions.Engine
 	Sources     dashboard.Reader
 	Logger      *slog.Logger
-	// DashboardTests is the seam for dashboard_test: dashboard_render includes what it returns.
-	DashboardTests func(ctx context.Context, access sharing.Access, version string) (any, error)
+	Semantic    *semantic.Service
+	Feedback    *feedback.Service
+	Admin       *admin.Service
+	PublicURL   string
 }
 
 // dashboardWrite keeps grant resolution and the write inside the same serialized workflow.
@@ -82,6 +87,7 @@ type registration struct {
 	server  *mcp.Server
 	options Options
 	logger  *slog.Logger
+	tools   map[string]toolInfo
 }
 type Empty struct{}
 type IDInput struct {
@@ -132,11 +138,13 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 	if len(r.options.Toolsets) > 0 && !r.options.Toolsets[set] {
 		return
 	}
+	r.tools[name] = toolInfo{set, scope}
 	open := name == "rates_refresh" || name == "import_start" || name == "feeds_sync"
 	inputSchema, err := schema[In]()
 	if err != nil {
 		panic(err)
 	}
+	specEnums(inputSchema)
 	outputSchema, err := schema[Out]()
 	if err != nil {
 		panic(err)
@@ -205,8 +213,9 @@ func openObjects(s *jsonschema.Schema) {
 	openObjects(s.AdditionalProperties)
 }
 func New(s Services, opts Options) *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: "moneybag", Version: opts.Version}, &mcp.ServerOptions{Logger: s.Logger, Instructions: "Moneybag is your personal double-entry ledger. Use ledger tools to read and post money movements, import_* for statements, model tools for forecasts, and dashboard_* to build views. Ledger writes create drafts unless commit=true. dashboard_publish goes live immediately when validation passes. Posted entries are immutable; use reversals to correct them. One shared database scopes every record to the authenticated user. Amounts are decimal strings. Discover account IDs before posting. Review tool errors and audit history before retrying ambiguous writes."})
-	r := registration{server, opts, s.Logger}
+	server := mcp.NewServer(&mcp.Implementation{Name: "moneybag", Version: opts.Version}, &mcp.ServerOptions{Logger: s.Logger, Instructions: "Moneybag is your personal double-entry ledger. Use ledger tools to read and post money movements, import_* for statements, model tools for forecasts, and dashboard_* to build views. Ledger writes create drafts unless commit=true. dashboard_publish goes live with no human approval once validation, dashboard_lint and dashboard_test pass. Posted entries are immutable; use reversals to correct them. One shared database scopes every record to the authenticated user. Amounts are decimal strings. Discover account IDs before posting. Review tool errors and audit history before retrying ambiguous writes."})
+	r := registration{server, opts, s.Logger, map[string]toolInfo{}}
+	server.AddReceivingMiddleware(filterToolList(r.tools))
 	add(r, "whoami", "account", "ledger:read", "Use this when you need to know whose ledger you are acting on and your scopes and actor identity.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (struct {
 		User   identity.User   `json:"user"`
 		Scopes []string        `json:"scopes"`
@@ -221,7 +230,7 @@ func New(s Services, opts Options) *mcp.Server {
 	})
 	add(r, "accounts_list", "ledger", "ledger:read", "Use this when you need the chart of accounts or pots. Page with next_cursor; limit is 1..500.", true, false, s.Ledger.Accounts)
 	add(r, "account_create", "ledger", "ledger:write", "Use this when a new bank account, cash pot or expense category is needed. Optional class (bank, cash, metal_holding, receivable, liability, equity, income, expense) and groups (dimension to value, e.g. type, category, source). IDs use assets:, liabilities:, expenses:, income: or equity: prefixes. Money amounts use declared commodities.", false, false, s.Ledger.CreateAccount)
-	add(r, "account_update", "ledger", "ledger:write", "Use this when renaming, regrouping (class, groups) or closing an account. Omitted fields remain unchanged; empty pot or location clears them. History is retained.", false, false, s.Ledger.UpdateAccount)
+	add(r, "account_update", "ledger", "ledger:write", "Use this when renaming, regrouping (class, groups) or closing an account, or setting its human display_name, working note or estimated flag. Keep notes out of the name. Omitted fields remain unchanged; empty pot or location clears them. History is retained.", false, false, s.Ledger.UpdateAccount)
 	add(r, "entries_list", "ledger", "ledger:read", "Use this when you need transactions matching filters; effective=true hides reversed originals and their reversals. Results are scoped to your user, newest sequence first by default; sort=date or -date uses next_cursor and next_cursor_date together; amount or -amount uses next_cursor and next_cursor_amount together. Use account or accounts to match postings in one or any of several accounts. Amount is the first matching account posting, or first posting when no account filter is specified, ordered numerically across commodities. Limit 1..500.", true, false, s.Ledger.Entries)
 	add(r, "entry_get", "ledger", "ledger:read", "Use this when you need one entry with provenance links and audit history. Obtain its id from entries_list.", true, false, func(ctx context.Context, p principal.Principal, in IDInput) (struct {
 		Entry ledger.Entry  `json:"entry"`
@@ -392,7 +401,22 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, nil
 	})
-	add(r, "dashboard_lint", "dashboard", "ledger:read", "Use this before publishing to check a dashboard for rule violations. Each issue names the component, the rule and the fix.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (lintOutput, error) {
+	add(r, "dashboard_test", "dashboard", "ledger:read", "Use this before publishing to check spec.tests against the ledger. Each test says the metric must equal the plain ledger accounts over a period; a mismatch shows both numbers.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (dashboard.TestReport, error) {
+		v, e := versionRef(in.Version)
+		if e != nil {
+			return dashboard.TestReport{}, e
+		}
+		access, e := s.Sharing.Access(ctx, p, in.ID, false)
+		if e != nil {
+			return dashboard.TestReport{}, e
+		}
+		result, e := access.Dashboard.Get(ctx, access.Principal, access.ID, v)
+		if e != nil {
+			return dashboard.TestReport{}, e
+		}
+		return access.Dashboard.RunTests(ctx, access.Principal, result.Spec)
+	})
+	add(r, "dashboard_lint", "dashboard", "ledger:read", "Use this before publishing to judge a dashboard once its templates have run. Each issue has rule, severity, path, component_id, msg and fix; errors block dashboard_publish and warnings do not. Paths are JSON Pointers for dashboard_apply.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (lintOutput, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return lintOutput{}, e
@@ -405,7 +429,19 @@ func New(s Services, opts Options) *mcp.Server {
 		if e != nil {
 			return lintOutput{}, e
 		}
-		return lintOutput{Issues: dashboard.Lint(result.Spec)}, nil
+		issues, e := access.Dashboard.LintSpec(ctx, access.Principal, result.Spec)
+		if e != nil {
+			return lintOutput{}, e
+		}
+		out := lintOutput{Issues: issues}
+		for _, issue := range issues {
+			if issue.Severity == "error" {
+				out.Errors++
+			} else {
+				out.Warnings++
+			}
+		}
+		return out, nil
 	})
 	add(r, "dashboard_summary", "dashboard", "ledger:read", "Use this to see a dashboard's pages, components and data sources without the full spec. Use dashboard_get when you need the CEL.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (dashboardSummary, error) {
 		v, e := versionRef(in.Version)
@@ -547,11 +583,12 @@ func New(s Services, opts Options) *mcp.Server {
 		if e != nil {
 			return renderOutput{}, e
 		}
-		out := renderOutput{Validation: rendered.Validation, Lint: dashboard.Lint(current.Spec)}
-		if s.DashboardTests != nil {
-			if out.Tests, e = s.DashboardTests(ctx, access, v); e != nil {
-				return renderOutput{}, e
-			}
+		out := renderOutput{Validation: rendered.Validation}
+		if out.Lint, e = access.Dashboard.LintSpec(ctx, access.Principal, current.Spec); e != nil {
+			return renderOutput{}, e
+		}
+		if out.Tests, e = access.Dashboard.RunTests(ctx, access.Principal, current.Spec); e != nil {
+			return renderOutput{}, e
 		}
 		if !rendered.Validation.OK {
 			out.Message = "fix validation errors before rendering"
@@ -647,25 +684,12 @@ func New(s Services, opts Options) *mcp.Server {
 			Changes []dashboard.Change `json:"changes"`
 		}{v}, nil
 	})
-	add(r, "dashboard_publish", "dashboard", "dash:write", "Use this to publish a draft immediately. No human approval required. Validation gates the publish; failures keep the live head unchanged.", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	add(r, "dashboard_publish", "dashboard", "dash:write", "Use this to publish a draft immediately. No human approval required. Validation, dashboard_lint errors, dashboard_test and the render check gate the publish; a failure names each fix and keeps the live head unchanged. Returns the link and the changed paths; dashboard_rollback undoes it.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
-		Version     int    `json:"version"`
+		Version     int    `json:"version,omitempty" jsonschema:"defaults to the current draft"`
 		Note        string `json:"note,omitempty"`
 	}) (dashboard.PublishResult, error) {
-		v, access, e := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.PublishResult, error) {
-			return access.Dashboard.Publish(tx, access.Principal, access.ID, in.Version, in.Note)
-		})
-		if access.Grant != nil {
-			v.URL = "/shared/" + access.Grant.ID
-			v.EventID = ""
-		}
-		if e == nil {
-			if refreshErr := s.Sharing.RefreshDashboard(ctx, access.Principal, access.ID); refreshErr != nil {
-				s.Logger.ErrorContext(ctx, "refresh dashboard snapshots after publication", "dashboard_id", access.ID, "error", refreshErr)
-				v.Warnings = append(v.Warnings, "Published successfully; some shared snapshots could not refresh. Maintenance will retry.")
-			}
-		}
-		return v, e
+		return gatedPublish(ctx, p, s, in.DashboardID, in.Version, in.Note)
 	})
 	add(r, "dashboard_rollback", "dashboard", "dash:write", "Use this when a publish went wrong. Revalidates the selected prior version and makes it live, retaining every version.", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
@@ -714,7 +738,21 @@ func New(s Services, opts Options) *mcp.Server {
 		engine := dashboard.Engine{Expr: s.Expr, Reader: s.Sources}
 		return engine.Evaluate(ctx, p, in.Expr, data, params)
 	})
-	add(r, "audit_log", "audit", "ledger:read", "Use this when asked who changed what. Events are hash-chained per user and include durable workflow outcomes; missing outcome indicates interruption. Page with next_cursor.", true, false, s.Audit.List)
+	add(r, "audit_log", "audit", "ledger:read", "Use this when asked who changed what. Events are hash-chained per user and include durable workflow outcomes; missing outcome indicates interruption. Before/after payloads (full specs) are omitted unless include_payload is true. Page with next_cursor.", true, false, func(ctx context.Context, p principal.Principal, in struct {
+		audit.ListInput
+		IncludePayload bool `json:"include_payload,omitempty" jsonschema:"return full before/after payloads (default false: event metadata only)"`
+	}) (audit.Page, error) {
+		page, e := s.Audit.List(ctx, p, in.ListInput)
+		if e == nil && !in.IncludePayload {
+			for i := range page.Events {
+				page.Events[i].Before, page.Events[i].After = nil, nil
+				if o := page.Events[i].Outcome; o != nil {
+					o.Before, o.After = nil, nil
+				}
+			}
+		}
+		return page, e
+	})
 	add(r, "history_of", "audit", "ledger:read", "Use this when tracing a specific entry, rule, table or dashboard. Returns that target's audit events and outcomes; before/after payloads (full specs) are omitted unless include_payload is true.", true, false, func(ctx context.Context, p principal.Principal, in struct {
 		TargetID       string `json:"target_id"`
 		IncludePayload bool   `json:"include_payload,omitempty" jsonschema:"return full before/after payloads (default false: event metadata only)"`
@@ -735,6 +773,7 @@ func New(s Services, opts Options) *mcp.Server {
 	})
 	registerWorkflows(r, s)
 	registerViewsAndTables(r, s)
+	registerSemantic(r, s)
 	registerReference(server, s)
 	return server
 }

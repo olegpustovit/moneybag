@@ -36,6 +36,8 @@ type Service struct {
 	// Lint, when set, returns report-only consistency findings that Publish attaches as warnings.
 	// It is a hook because the consistency component imports dashboard.
 	Lint func(context.Context, principal.Principal, Spec) ([]string, error)
+	// RenderCheck, when set, renders a version through the real page and fails the publish gate on bad checks.
+	RenderCheck func(ctx context.Context, p principal.Principal, id string, version int) error
 }
 
 func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
@@ -579,8 +581,10 @@ type PublishResult struct {
 	Gate             Validation `json:"gate"`
 	URL              string     `json:"url"`
 	Warnings         []string   `json:"warnings,omitempty"`
+	Diff             []Change   `json:"diff,omitempty"`
 }
 
+// Publish applies only the validation gate; rollback, undo and shared editors use it. Agents publish through PublishGate first.
 func (s *Service) Publish(ctx context.Context, p principal.Principal, id string, version int, note string) (PublishResult, error) {
 	return s.publish(ctx, p, id, version, note, false)
 }
@@ -628,7 +632,12 @@ func (s *Service) publish(ctx context.Context, p principal.Principal, id string,
 			return fmt.Errorf("publish gate failed: %s", strings.Join(reasons, "; "))
 		}
 		eventID, e := s.audit.Write(tx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, note, h, out, func(tx context.Context) error {
-			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note, "published_at": time.Now().UTC()}
+			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note, "published_at": time.Now().UTC(), "home": v.Spec.Home}
+			if v.Spec.Home {
+				if _, e := s.repo.db.Collection("dashboards").UpdateMany(tx, bson.M{"user_id": p.UserID, "id": bson.M{"$ne": id}, "home": true}, bson.M{"$set": bson.M{"home": false}}); e != nil {
+					return e
+				}
+			}
 			if h.DraftVersion == version {
 				update["draft_version"] = 0
 			}

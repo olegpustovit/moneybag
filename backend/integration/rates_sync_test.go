@@ -19,6 +19,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
 func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
@@ -49,7 +50,8 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 		t.Fatal(e)
 	}
 	p := identity.Principal(u)
-	prices := rates.NewService(rates.NewMongoRepository(db), audit.NewService(audit.NewMongoRepository(db)))
+	a := audit.NewService(audit.NewMongoRepository(db))
+	prices := rates.NewService(rates.NewMongoRepository(db), a)
 
 	var goldDown atomic.Bool
 	goldDown.Store(true)
@@ -94,6 +96,22 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	}
 	if g := state("gold-api"); g.Status != "error" || g.ConsecutiveFailures != 1 || g.Error == "" {
 		t.Fatal("failure not recorded", g)
+	}
+	synced, e := a.List(ctx, p, audit.ListInput{Tool: "rate_set"})
+	if e != nil || len(synced.Events) != 4 {
+		t.Fatal("sync events", synced, e)
+	}
+	for _, event := range synced.Events {
+		if !event.Routine || event.BatchID == "" || event.BatchID != synced.Events[0].BatchID || !strings.HasPrefix(event.Summary, "Updated the ") {
+			t.Fatalf("a rate sync must be routine and batched: %+v", event)
+		}
+	}
+	feed, e := a.Changes(ctx, p, audit.ChangesInput{}, func(principal.Actor) string { return "System" })
+	if e != nil || len(feed.Groups) != 0 {
+		t.Fatalf("routine writes must stay out of the default feed: %+v %v", feed, e)
+	}
+	if feed, e = a.Changes(ctx, p, audit.ChangesInput{Routine: true}, func(principal.Actor) string { return "System" }); e != nil || len(feed.Groups) != 1 || feed.Groups[0].Summary != "Updated 4 rate quotes" {
+		t.Fatalf("routine writes must collapse into one line: %+v %v", feed, e)
 	}
 	if s := state("swissquote"); s.Status != "ok" || s.NewestValue != "100.000000" {
 		t.Fatal("fallback state", s)

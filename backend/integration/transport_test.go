@@ -67,6 +67,7 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 	}
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	testSPAAPI(t, ctx, endpoint, p, s, db)
+	testTelemetryHTTP(t, ctx, endpoint, oa, p, s)
 	for path, want := range map[string]int{"oauth-authorization-server": 200, "oauth-authorization-server/mcp": 200, "oauth-protected-resource": 200, "openid-configuration": 404, "unknown/doc": 404} {
 		r, e := noRedirect.Get(endpoint + "/.well-known/" + path)
 		if e != nil {
@@ -114,7 +115,7 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 		}
 		return tokens.AccessToken
 	}
-	full := issue(issuer+"/mcp", strings.Join(p.Scopes, " "))
+	full := issue(issuer+"/mcp", strings.Join(principal.Scopes, " "))
 	tokenPath := filepath.Join(t.TempDir(), "token")
 	if e = os.WriteFile(tokenPath, []byte(full), 0600); e != nil {
 		t.Fatal(e)

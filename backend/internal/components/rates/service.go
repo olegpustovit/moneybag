@@ -309,6 +309,35 @@ func Apply(a ledger.Amount, r *big.Rat, quote string) (ledger.Amount, error) {
 	return ledger.Amount{Value: d, Commodity: quote}, e
 }
 
+// ValueAt mirrors the budget conversion: a posting price in EUR wins, otherwise the rate at end of the entry date.
+func (s *Service) ValueAt(ctx context.Context, p principal.Principal, post ledger.Posting, target, date string, cache map[string]*big.Rat) (ledger.Decimal, error) {
+	amount := post.Amount
+	if amount.Commodity == target {
+		return amount.Value, nil
+	}
+	if post.Price != nil && post.Price.Commodity == "EUR" {
+		v, e := ledger.DecimalFromRat(new(big.Rat).Mul(amount.Value.Rat(), post.Price.Value.Rat()))
+		if e != nil {
+			return ledger.Decimal{}, e
+		}
+		amount = ledger.Amount{Value: v, Commodity: "EUR"}
+		if target == "EUR" {
+			return v, nil
+		}
+	}
+	key := amount.Commodity + ">" + target + "@" + date
+	r, ok := cache[key]
+	if !ok {
+		var e error
+		if r, e = s.Rate(ctx, p, amount.Commodity, target, date+"T23:59:59Z"); e != nil {
+			return ledger.Decimal{}, e
+		}
+		cache[key] = r
+	}
+	v, e := Apply(amount, r, target)
+	return v.Value, e
+}
+
 type ecbQuote struct{ Pair, At, Value string }
 
 // parseECB reads every day of an ECB eurofxref XML document, oldest data included.

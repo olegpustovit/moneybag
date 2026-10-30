@@ -28,6 +28,9 @@ var ErrInvalidClient = errors.New("invalid_client")
 var ErrInvalidGrant = errors.New("invalid_grant")
 var ErrInvalidScope = errors.New("invalid_scope")
 var ErrInvalidTarget = errors.New("invalid_target")
+
+// ErrAgentsSuspended is the owner's emergency stop, reported as such so an agent knows to stop retrying and ask a person.
+var ErrAgentsSuspended = errors.New("the owner has suspended all agents; ask them to re-enable agents in Settings")
 var verifierPattern = regexp.MustCompile(`^[A-Za-z0-9._~-]{43,128}$`)
 var challengePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
@@ -312,6 +315,11 @@ func (s *Service) Exchange(ctx context.Context, c Client, raw, redirect, verifie
 	if !verifierPattern.MatchString(verifier) {
 		return TokenResponse{}, ErrInvalidGrant
 	}
+	if suspended, e := s.Suspended(ctx); e != nil {
+		return TokenResponse{}, e
+	} else if suspended {
+		return TokenResponse{}, ErrAgentsSuspended
+	}
 	var result TokenResponse
 	e := mongodb.Workflow(ctx, func(tx context.Context) error {
 		var auth code
@@ -343,6 +351,11 @@ func (s *Service) issue(ctx context.Context, g Grant) (TokenResponse, error) {
 func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope string) (TokenResponse, error) {
 	if resource != "" && !s.resource(resource) {
 		return TokenResponse{}, ErrInvalidTarget
+	}
+	if suspended, e := s.Suspended(ctx); e != nil {
+		return TokenResponse{}, e
+	} else if suspended {
+		return TokenResponse{}, ErrAgentsSuspended
 	}
 	var result TokenResponse
 	reused := false
@@ -404,7 +417,7 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 		{{Key: "$unwind", Value: "$grant"}},
 		{{Key: "$match", Value: bson.M{"grant.revoked": false, "grant.expires_at": bson.M{"$gt": now}}}},
 		// Authentication needs the current user existence check as well as the current grant.
-		{{Key: "$lookup", Value: bson.M{"from": "users", "localField": "grant.user_id", "foreignField": "_id", "pipeline": mongo.Pipeline{{{Key: "$project", Value: bson.M{"_id": 1}}}}, "as": "users"}}},
+		{{Key: "$lookup", Value: bson.M{"from": "users", "localField": "grant.user_id", "foreignField": "_id", "pipeline": mongo.Pipeline{{{Key: "$project", Value: bson.M{"_id": 1, "is_admin": 1, "disabled": 1}}}}, "as": "users"}}},
 		{{Key: "$project", Value: bson.M{"token": 1, "grant": 1, "users": 1}}},
 	}
 	// The unique token lookup returns at most one row; a two-row batch exhausts the cursor.
@@ -417,7 +430,9 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 		Token token `bson:"token"`
 		Grant Grant `bson:"grant"`
 		Users []struct {
-			ID string `bson:"_id"`
+			ID       string `bson:"_id"`
+			Admin    bool   `bson:"is_admin"`
+			Disabled bool   `bson:"disabled"`
 		} `bson:"users"`
 	}
 	if !cursor.Next(ctx) || cursor.Decode(&result) != nil || result.Grant.Resource != resource {
@@ -426,7 +441,59 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 	if len(result.Users) != 1 || result.Users[0].ID != result.Grant.UserID {
 		return principal.Principal{}, principal.ErrNotFound
 	}
-	return principal.Principal{UserID: result.Grant.UserID, Scopes: result.Grant.Scopes, Actor: principal.Actor{Kind: "agent", ID: result.Grant.ClientID}}, nil
+	if result.Users[0].Disabled {
+		return principal.Principal{}, principal.ErrForbidden
+	}
+	suspended, err := s.Suspended(ctx)
+	if err != nil {
+		return principal.Principal{}, principal.ErrForbidden
+	}
+	if suspended {
+		return principal.Principal{}, ErrAgentsSuspended
+	}
+	scopes := result.Grant.Scopes
+	admin := slices.Contains(scopes, principal.ScopeAdminUsers)
+	if admin && !result.Users[0].Admin {
+		// A grant cannot outlive its user's admin rights.
+		scopes = slices.DeleteFunc(slices.Clone(scopes), func(scope string) bool { return scope == principal.ScopeAdminUsers })
+		admin = false
+	}
+	return principal.Principal{UserID: result.Grant.UserID, Scopes: scopes, Actor: principal.Actor{Kind: "agent", ID: result.Grant.ClientID}, Admin: admin, GrantID: result.Grant.ID}, nil
+}
+
+// Suspended reports the owner's emergency stop.
+func (s *Service) Suspended(ctx context.Context) (bool, error) {
+	n, e := s.repo.db.Collection("settings").CountDocuments(ctx, bson.M{"_id": "agents_suspended"})
+	return n > 0, e
+}
+
+// SetSuspended flips the emergency stop; grants themselves stay untouched, so resuming restores every connection.
+func (s *Service) SetSuspended(ctx context.Context, by string, suspended bool) error {
+	if !suspended {
+		_, e := s.repo.db.Collection("settings").DeleteOne(ctx, bson.M{"_id": "agents_suspended"})
+		return e
+	}
+	_, e := s.repo.db.Collection("settings").UpdateOne(ctx, bson.M{"_id": "agents_suspended"}, bson.M{"$set": bson.M{"by": by, "at": time.Now().UTC()}}, options.UpdateOne().SetUpsert(true))
+	return e
+}
+
+// OwnedGrant reads one active connection of this user.
+func (s *Service) OwnedGrant(ctx context.Context, p principal.Principal, id string) (Grant, error) {
+	var g Grant
+	e := s.repo.db.Collection("oauth_grants").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID, "revoked": false, "expires_at": bson.M{"$gt": time.Now()}}).Decode(&g)
+	if errors.Is(e, mongo.ErrNoDocuments) {
+		e = principal.ErrNotFound
+	}
+	return g, e
+}
+
+// AddScope widens one connection. Only the admin service's owner confirmation reaches it.
+func (s *Service) AddScope(ctx context.Context, p principal.Principal, id, scope string) error {
+	r, e := s.repo.db.Collection("oauth_grants").UpdateOne(ctx, bson.M{"_id": id, "user_id": p.UserID, "revoked": false}, bson.M{"$addToSet": bson.M{"scopes": scope}})
+	if e == nil && r.MatchedCount != 1 {
+		return principal.ErrNotFound
+	}
+	return e
 }
 func (s *Service) Revoke(ctx context.Context, c Client, raw string) error {
 	var tok token

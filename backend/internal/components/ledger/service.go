@@ -40,6 +40,13 @@ func (s *Service) CreateAccount(ctx context.Context, p principal.Principal, a Ac
 	if e := validateClassGroups(a.Class, a.Groups); e != nil {
 		return AccountResult{}, e
 	}
+	if len(a.DisplayName) > 200 || len(a.Note) > 2000 {
+		return AccountResult{}, fmt.Errorf("display_name at most 200 and note at most 2000 characters")
+	}
+	if a.Estimated == nil && a.IsEstimated() {
+		estimated := true
+		a.Estimated = &estimated
+	}
 	types := map[string]string{"assets": "asset", "liabilities": "liability", "income": "income", "expenses": "expense", "equity": "equity"}
 	if types[strings.Split(a.ID, ":")[0]] != a.Type {
 		return AccountResult{}, fmt.Errorf("account type must match its id prefix")
@@ -104,6 +111,9 @@ type AccountUpdate struct {
 	// Groups replaces all groups (dimension to value, e.g. type, category, source); an empty map clears them.
 	Groups      *map[string]string `json:"groups,omitempty"`
 	Commodities *[]string          `json:"commodities,omitempty"`
+	DisplayName *string            `json:"display_name,omitempty" jsonschema:"human name shown everywhere; empty falls back to name"`
+	Note        *string            `json:"note,omitempty" jsonschema:"working notes, shown in Details; keep them out of the name"`
+	Estimated   *bool              `json:"estimated,omitempty" jsonschema:"true marks reconstructed or modeled amounts"`
 }
 
 func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in AccountUpdate) (AccountResult, error) {
@@ -139,6 +149,21 @@ func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in A
 	}
 	if in.Pot != nil {
 		a.Pot = *in.Pot
+	}
+	if in.DisplayName != nil {
+		if len(*in.DisplayName) > 200 {
+			return AccountResult{}, fmt.Errorf("display_name must be at most 200 characters")
+		}
+		a.DisplayName = *in.DisplayName
+	}
+	if in.Note != nil {
+		if len(*in.Note) > 2000 {
+			return AccountResult{}, fmt.Errorf("note must be at most 2000 characters")
+		}
+		a.Note = *in.Note
+	}
+	if in.Estimated != nil {
+		a.Estimated = in.Estimated
 	}
 	if in.Location != nil {
 		a.Location = *in.Location

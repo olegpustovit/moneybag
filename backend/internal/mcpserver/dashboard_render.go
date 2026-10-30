@@ -33,8 +33,8 @@ func (in renderInput) validate() error {
 
 type renderOutput struct {
 	Validation dashboard.Validation `json:"validation"`
-	Lint       []dashboard.Issue    `json:"lint"`
-	Tests      any                  `json:"tests,omitempty"`
+	Lint       any                  `json:"lint" jsonschema:"same shape as dashboard_lint"`
+	Tests      dashboard.TestReport `json:"tests"`
 	Layout     []preview.Box        `json:"layout,omitempty"`
 	Checks     *preview.Checks      `json:"checks,omitempty"`
 	TimingMS   float64              `json:"timing_ms,omitempty" jsonschema:"page load to settled, as the page reported it"`

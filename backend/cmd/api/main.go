@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"github.com/gofiber/fiber/v3"
 	"github.com/olegpustovit/moneybag/backend/cmd/api/handlers"
+	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
 	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
 	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
@@ -20,6 +22,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
@@ -31,6 +34,8 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 	_ "time/tzdata" // Europe/Zagreb must resolve in minimal containers
@@ -105,7 +110,8 @@ func run() error {
 	models.Views = func(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error) {
 		return sources.Rows(ctx, p, "view:"+id)
 	}
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
+	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
+	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	sources.Views, sources.Expr = dash, expr
 	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
@@ -114,6 +120,12 @@ func run() error {
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
 	services := mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Logger: log}
 	services.Classify = classes
+	services.Semantic, services.PublicURL = meaning, cfg.PublicURL
+	services.Feedback = feedback.NewService(feedback.NewMongoRepository(db), a)
+	services.Admin = admin.NewService(admin.NewMongoRepository(db), ids, auth, a, cfg.PublicURL)
+	if e = services.Admin.Init(ctx); e != nil {
+		return fmt.Errorf("initialize admin: %w", e)
+	}
 	services.Consistency = &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
 	dash.Lint = func(ctx context.Context, p principal.Principal, spec dashboard.Spec) ([]string, error) {
 		return services.Consistency.SpecLint(ctx, p, spec)
@@ -126,7 +138,17 @@ func run() error {
 		capture = screenshot.New(cfg.Chromium).Capture
 	}
 	services.Previews = preview.New(loopbackURL(cfg.Listen), capture)
-	services.History = &history.Service{Reconcile: rec, Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab}
+	dash.RenderCheck = func(ctx context.Context, p principal.Principal, id string, version int) error {
+		failures, e := services.Previews.Gate(ctx, p, "", preview.Target{Dashboard: id, Version: strconv.Itoa(version)})
+		if e != nil {
+			return e
+		}
+		if len(failures) > 0 {
+			return errors.New(strings.Join(failures, "; "))
+		}
+		return nil
+	}
+	services.History = &history.Service{Reconcile: rec, Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Semantic: meaning, Feedback: services.Feedback, Admin: services.Admin}
 	if len(os.Args) > 1 && os.Args[1] == "bootstrap" {
 		u, e := ids.Setup(ctx, os.Getenv("MONEYBAG_OWNER_EMAIL"), os.Getenv("MONEYBAG_OWNER_NAME"), os.Getenv("MONEYBAG_OWNER_PASSWORD"))
 		if e != nil {
