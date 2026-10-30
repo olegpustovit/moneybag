@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
@@ -91,6 +92,7 @@ func (s *Service) track(ctx context.Context, p principal.Principal, provider str
 	if e := s.repo.db.Collection("rate_sync").FindOne(ctx, bson.M{"_id": id}).Decode(&st); e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
 		return nil, e
 	}
+	old := st
 	q, fe := fn()
 	st.LastAttempt = now
 	if fe != nil {
@@ -107,13 +109,16 @@ func (s *Service) track(ctx context.Context, p principal.Principal, provider str
 			}
 		}
 	}
-	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		return s.audit.Mutation(tx, p, func(tx context.Context) error {
-			_, err := s.repo.db.Collection("rate_sync").ReplaceOne(tx, bson.M{"_id": id}, st, options.Replace().SetUpsert(true))
-			return err
-		})
-	})
-	return q, e
+	write := func(tx context.Context) error {
+		_, err := s.repo.db.Collection("rate_sync").ReplaceOne(tx, bson.M{"_id": id}, st, options.Replace().SetUpsert(true))
+		return err
+	}
+	// shortcut: a rate_sync dashboard source shows attempt times up to a day old, upgrade if one needs them live.
+	old.LastAttempt, old.LastSuccess = st.LastAttempt, st.LastSuccess
+	if old == st {
+		return q, s.audit.Workflow(ctx, write)
+	}
+	return q, s.audit.Workflow(ctx, func(tx context.Context) error { return s.audit.Mutation(audit.RateOnly(tx), p, write) })
 }
 
 // Sync refreshes ECB (when ecb) and gold (when gold: gold-api.com, else Swissquote) for one user.
@@ -157,8 +162,13 @@ func (s *Service) provState(ctx context.Context, p principal.Principal, provider
 }
 func (s *Service) skip(ctx context.Context, p principal.Principal, provider string) error {
 	id := p.UserID + "|" + provider
+	if st, e := s.provState(ctx, p, provider); e == nil && st.Status == "skipped" {
+		return nil
+	} else if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+		return e
+	}
 	return s.audit.Workflow(ctx, func(tx context.Context) error {
-		return s.audit.Mutation(tx, p, func(tx context.Context) error {
+		return s.audit.Mutation(audit.RateOnly(tx), p, func(tx context.Context) error {
 			_, err := s.repo.db.Collection("rate_sync").UpdateOne(tx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": "skipped", "user_id": p.UserID, "provider": provider}}, options.UpdateOne().SetUpsert(true))
 			return err
 		})

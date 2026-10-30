@@ -21,7 +21,7 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 		}
 		next := old
 		next.Archived = archived
-		_, e := s.audit.Write(tx, p, "rate_archive", audit.Target{Collection: "prices", ID: id}, reason, old, next, func(tx context.Context) error {
+		_, e := s.audit.Write(audit.RateOnly(tx), p, "rate_archive", audit.Target{Collection: "prices", ID: id}, reason, old, next, func(tx context.Context) error {
 			_, e := s.repo.db.Collection("prices").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}})
 			return e
 		})

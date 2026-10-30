@@ -147,8 +147,8 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 		t.Fatal("unchanged provider sync", res.Written, e)
 	}
 	after, e := revisions.Revision(ctx, p)
-	if e != nil || after <= before {
-		t.Fatal("provider state did not invalidate revision", before, after, e)
+	if e != nil || after != before {
+		t.Fatal("no-op rate sync moved the revision", before, after, e)
 	}
 	// The request quote cache answers "at or before" exactly like the indexed query, and skips archived quotes.
 	cached := rates.WithQuoteCache(ctx)

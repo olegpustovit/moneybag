@@ -101,7 +101,7 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 	if e == nil {
 		q.ID = old.ID
 	}
-	id, e := s.audit.Write(ctx, p, "rate_set", audit.Target{Collection: "prices", ID: q.ID}, in.Reason, old, q, func(tx context.Context) error {
+	id, e := s.audit.Write(audit.RateOnly(ctx), p, "rate_set", audit.Target{Collection: "prices", ID: q.ID}, in.Reason, old, q, func(tx context.Context) error {
 		_, e := s.repo.db.Collection("prices").ReplaceOne(tx, f, q, options.Replace().SetUpsert(true))
 		return e
 	})
