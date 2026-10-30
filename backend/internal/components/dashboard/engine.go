@@ -143,14 +143,7 @@ func (x *execution) query(q Query) (any, error) {
 			}
 			x.source[q.From] = cached
 		}
-		// Queries derive in place, so each gets its own copy of the shared rows.
-		rows = make([]map[string]any, len(cached))
-		for i, r := range cached {
-			if i%1000 == 0 && x.ctx.Err() != nil {
-				return nil, x.ctx.Err()
-			}
-			rows[i] = maps.Clone(r)
-		}
+		rows = cached
 	}
 	if len(rows) > 250000 {
 		return nil, fmt.Errorf("source exceeds 250000 rows")
@@ -173,6 +166,8 @@ func (x *execution) query(q Query) (any, error) {
 				continue
 			}
 		}
+		// Derivations modify rows, so copy only after the read-only filter accepts them.
+		r = maps.Clone(r)
 		pending := map[string]string{}
 		originals := map[string]any{}
 		for k, v := range q.Derive {

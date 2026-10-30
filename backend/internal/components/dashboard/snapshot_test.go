@@ -475,7 +475,7 @@ func TestQuerySharedRowsKeepPublicResultsIsolated(t *testing.T) {
 	source := &Sources{Snapshots: cache}
 	ctx := expressions.WithVolatility(reqcache.With(context.Background()))
 	_, err := cache.read(ctx, p, "source", "journal", json.RawMessage("null"), func() (any, error) {
-		return []map[string]any{{"value": float64(1), "nested": map[string]any{"value": float64(7)}}}, nil
+		return []map[string]any{{"value": float64(1), "nested": map[string]any{"value": float64(7)}}, {"value": float64(2), "nested": map[string]any{"value": float64(8)}}}, nil
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -485,7 +485,7 @@ func TestQuerySharedRowsKeepPublicResultsIsolated(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &Engine{Expr: expr, Reader: source}
-	data := map[string]Query{"a": {From: "journal", Derive: map[string]string{"value": "row.value + 1.0"}}, "b": {From: "journal"}}
+	data := map[string]Query{"a": {From: "journal", Where: "row.value == 1.0", Derive: map[string]string{"value": "row.value + 1.0"}}, "b": {From: "journal", Where: "row.value == 1.0"}}
 	result, err := engine.Evaluate(ctx, p, "[data.a[0].value, data.b[0].value, data.a[0].nested]", data, nil)
 	if err != nil {
 		t.Fatal(err)
