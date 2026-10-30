@@ -18,6 +18,22 @@ export interface MoneybagTools {
     input: AccountsListInput;
     output: AccountsListOutput;
   };
+  admin_request: {
+    input: AdminRequestInput;
+    output: AdminRequestOutput;
+  };
+  agent_list: {
+    input: AgentListInput;
+    output: AgentListOutput;
+  };
+  agent_revoke: {
+    input: AgentRevokeInput;
+    output: AgentRevokeOutput;
+  };
+  annotation_upsert: {
+    input: AnnotationUpsertInput;
+    output: AnnotationUpsertOutput;
+  };
   audit_log: {
     input: AuditLogInput;
     output: AuditLogOutput;
@@ -122,6 +138,10 @@ export interface MoneybagTools {
     input: DashboardSummaryInput;
     output: DashboardSummaryOutput;
   };
+  dashboard_test: {
+    input: DashboardTestInput;
+    output: DashboardTestOutput;
+  };
   dashboard_unpublish: {
     input: DashboardUnpublishInput;
     output: DashboardUnpublishOutput;
@@ -190,9 +210,25 @@ export interface MoneybagTools {
     input: ExprEvalInput;
     output: ExprEvalOutput;
   };
+  feed_upsert: {
+    input: FeedUpsertInput;
+    output: FeedUpsertOutput;
+  };
+  feedback_list: {
+    input: FeedbackListInput;
+    output: FeedbackListOutput;
+  };
+  feedback_resolve: {
+    input: FeedbackResolveInput;
+    output: FeedbackResolveOutput;
+  };
   feeds_sync: {
     input: FeedsSyncInput;
     output: FeedsSyncOutput;
+  };
+  field_values: {
+    input: FieldValuesInput;
+    output: FieldValuesOutput;
   };
   forecast_run: {
     input: ForecastRunInput;
@@ -222,6 +258,10 @@ export interface MoneybagTools {
     input: ImportUndoInput;
     output: ImportUndoOutput;
   };
+  imports_list: {
+    input: ImportsListInput;
+    output: ImportsListOutput;
+  };
   income_model_set: {
     input: IncomeModelSetInput;
     output: IncomeModelSetOutput;
@@ -230,9 +270,33 @@ export interface MoneybagTools {
     input: IncomeReconcileInput;
     output: IncomeReconcileOutput;
   };
+  label_set: {
+    input: LabelSetInput;
+    output: LabelSetOutput;
+  };
+  metric_list: {
+    input: MetricListInput;
+    output: MetricListOutput;
+  };
+  metric_query: {
+    input: MetricQueryInput;
+    output: MetricQueryOutput;
+  };
+  metric_upsert: {
+    input: MetricUpsertInput;
+    output: MetricUpsertOutput;
+  };
   model_get: {
     input: ModelGetInput;
     output: ModelGetOutput;
+  };
+  nav_set: {
+    input: NavSetInput;
+    output: NavSetOutput;
+  };
+  payee_alias_upsert: {
+    input: PayeeAliasUpsertInput;
+    output: PayeeAliasUpsertOutput;
   };
   rate_archive: {
     input: RateArchiveInput;
@@ -314,6 +378,22 @@ export interface MoneybagTools {
     input: UndoInput;
     output: UndoOutput;
   };
+  usage_get: {
+    input: UsageGetInput;
+    output: UsageGetOutput;
+  };
+  user_disable: {
+    input: UserDisableInput;
+    output: UserDisableOutput;
+  };
+  user_invite: {
+    input: UserInviteInput;
+    output: UserInviteOutput;
+  };
+  user_list: {
+    input: UserListInput;
+    output: UserListOutput;
+  };
   view_get: {
     input: ViewGetInput;
     output: ViewGetOutput;
@@ -339,12 +419,24 @@ export interface AccountCreateInput {
   class?: string;
   closed_at?: null | string;
   commodities: null | string[];
+  /**
+   * human name shown everywhere; name keeps working when this is empty
+   */
+  display_name?: string;
+  /**
+   * true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix
+   */
+  estimated?: null | boolean;
   groups?: {
     [k: string]: string;
   };
   id: string;
   location?: string;
   name: string;
+  /**
+   * working notes, shown in Details rather than beside the name
+   */
+  note?: string;
   pot?: string;
   type: string;
 }
@@ -353,12 +445,24 @@ export interface AccountCreateOutput {
     class?: string;
     closed_at?: null | string;
     commodities: null | string[];
+    /**
+     * human name shown everywhere; name keeps working when this is empty
+     */
+    display_name?: string;
+    /**
+     * true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix
+     */
+    estimated?: null | boolean;
     groups?: {
       [k: string]: string;
     };
     id: string;
     location?: string;
     name: string;
+    /**
+     * working notes, shown in Details rather than beside the name
+     */
+    note?: string;
     pot?: string;
     type: string;
     [k: string]: unknown;
@@ -370,12 +474,24 @@ export interface AccountUpdateInput {
   class?: null | string;
   close?: null | boolean;
   commodities?: null | string[];
+  /**
+   * human name shown everywhere; empty falls back to name
+   */
+  display_name?: null | string;
+  /**
+   * true marks reconstructed or modeled amounts
+   */
+  estimated?: null | boolean;
   groups?: null | {
     [k: string]: string;
   };
   id: string;
   location?: null | string;
   name?: null | string;
+  /**
+   * working notes, shown in Details; keep them out of the name
+   */
+  note?: null | string;
   pot?: null | string;
 }
 export interface AccountUpdateOutput {
@@ -383,12 +499,24 @@ export interface AccountUpdateOutput {
     class?: string;
     closed_at?: null | string;
     commodities: null | string[];
+    /**
+     * human name shown everywhere; name keeps working when this is empty
+     */
+    display_name?: string;
+    /**
+     * true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix
+     */
+    estimated?: null | boolean;
     groups?: {
       [k: string]: string;
     };
     id: string;
     location?: string;
     name: string;
+    /**
+     * working notes, shown in Details rather than beside the name
+     */
+    note?: string;
     pot?: string;
     type: string;
     [k: string]: unknown;
@@ -410,12 +538,24 @@ export interface AccountsListOutput {
         class?: string;
         closed_at?: null | string;
         commodities: null | string[];
+        /**
+         * human name shown everywhere; name keeps working when this is empty
+         */
+        display_name?: string;
+        /**
+         * true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix
+         */
+        estimated?: null | boolean;
         groups?: {
           [k: string]: string;
         };
         id: string;
         location?: string;
         name: string;
+        /**
+         * working notes, shown in Details rather than beside the name
+         */
+        note?: string;
         pot?: string;
         type: string;
         [k: string]: unknown;
@@ -423,10 +563,92 @@ export interface AccountsListOutput {
   next_cursor?: string;
   [k: string]: unknown;
 }
+export interface AdminRequestInput {
+  /**
+   * shown to the owner on the confirmation page
+   */
+  reason: string;
+}
+export interface AdminRequestOutput {
+  confirm_url?: string;
+  message: string;
+  status: string;
+  [k: string]: unknown;
+}
+export interface AgentListInput {}
+export interface AgentListOutput {
+  items:
+    | null
+    | {
+        client_id: string;
+        client_name: string;
+        created_at: string;
+        expires_at: string;
+        id: string;
+        resource: string;
+        revoked: boolean;
+        scopes: null | string[];
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
+export interface AgentRevokeInput {
+  /**
+   * connection id from agent_list
+   */
+  id: string;
+  /**
+   * recorded in the audit trail
+   */
+  reason: string;
+}
+export interface AgentRevokeOutput {
+  revoked: boolean;
+  [k: string]: unknown;
+}
+export interface AnnotationUpsertInput {
+  /**
+   * YYYY-MM-DD; may be omitted when tag_rule supplies the dates
+   */
+  from?: string;
+  id: string;
+  /**
+   * note, trip or event
+   */
+  kind?: string;
+  label: string;
+  /**
+   * tag, or tag prefix ending in *, such as trip:*; its entries give the dates
+   */
+  tag_rule?: string;
+  to?: string;
+}
+export interface AnnotationUpsertOutput {
+  /**
+   * YYYY-MM-DD; may be omitted when tag_rule supplies the dates
+   */
+  from?: string;
+  id: string;
+  /**
+   * note, trip or event
+   */
+  kind?: string;
+  label: string;
+  /**
+   * tag, or tag prefix ending in *, such as trip:*; its entries give the dates
+   */
+  tag_rule?: string;
+  to?: string;
+  [k: string]: unknown;
+}
 export interface AuditLogInput {
   actor?: string;
   cursor?: number;
   from?: string;
+  /**
+   * return full before/after payloads (default false: event metadata only)
+   */
+  include_payload?: boolean;
   limit?: number;
   target?: string;
   to?: string;
@@ -451,6 +673,7 @@ export interface AuditLogOutput {
               [k: string]: unknown;
             };
         at: string;
+        batch_id?: string;
         before?:
           | null
           | boolean
@@ -491,7 +714,9 @@ export interface AuditLogOutput {
         };
         prev_hash: string;
         reason?: string;
+        routine?: boolean;
         seq: number;
+        summary?: string;
         target: {
           coll: string;
           id: string;
@@ -696,6 +921,31 @@ export interface CatalogGetOutput {
         signature: string;
         [k: string]: unknown;
       }[];
+  components:
+    | null
+    | {
+        description: string;
+        example: {
+          [k: string]:
+            | null
+            | boolean
+            | number
+            | string
+            | unknown[]
+            | {
+                [k: string]: unknown;
+              };
+        };
+        fields: null | string[];
+        lint: null | string[];
+        type: string;
+        [k: string]: unknown;
+      }[];
+  dimensions: null | string[];
+  enums: {
+    [k: string]: null | string[];
+  };
+  facts: null | string[];
   functions:
     | null
     | {
@@ -705,6 +955,67 @@ export interface CatalogGetOutput {
         signature: string;
         [k: string]: unknown;
       }[];
+  lint_rules:
+    | null
+    | {
+        question: string;
+        rule: string;
+        severity: string;
+        [k: string]: unknown;
+      }[];
+  metrics:
+    | null
+    | {
+        /**
+         * account id prefixes, such as expenses:
+         */
+        accounts?: null | string[];
+        /**
+         * sum, last, avg or none; how the total folds over time and whether a table may total it
+         */
+        additivity: string;
+        description?: string;
+        /**
+         * dimensions this metric may split by; the first is the default for contributors
+         */
+        dimensions?: null | string[];
+        /**
+         * include, exclude or split; how estimated accounts count
+         */
+        estimates: string;
+        /**
+         * account id prefixes to leave out
+         */
+        exclude?: null | string[];
+        /**
+         * stable id, lowercase letters, digits, _ or -
+         */
+        id: string;
+        /**
+         * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+         */
+        kind: string;
+        /**
+         * human name, used in sentences and titles
+         */
+        label: string;
+        /**
+         * 1 or -1; -1 shows income, stored as negative postings, as positive
+         */
+        sign?: number;
+        /**
+         * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+         */
+        unit: string;
+        /**
+         * escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)
+         */
+        where?: string;
+        [k: string]: unknown;
+      }[];
+  params: {
+    [k: string]: string;
+  };
   revision: number;
   sources:
     | null
@@ -716,6 +1027,7 @@ export interface CatalogGetOutput {
         name: string;
         [k: string]: unknown;
       }[];
+  time_ranges: null | string[];
   variables: null | string[];
   [k: string]: unknown;
 }
@@ -727,12 +1039,24 @@ export interface CategoriesListOutput {
         class?: string;
         closed_at?: null | string;
         commodities: null | string[];
+        /**
+         * human name shown everywhere; name keeps working when this is empty
+         */
+        display_name?: string;
+        /**
+         * true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix
+         */
+        estimated?: null | boolean;
         groups?: {
           [k: string]: string;
         };
         id: string;
         location?: string;
         name: string;
+        /**
+         * working notes, shown in Details rather than beside the name
+         */
+        note?: string;
         pot?: string;
         type: string;
         [k: string]: unknown;
@@ -763,15 +1087,56 @@ export interface ConsistencyCheckOutput {
 export interface DashboardAddComponentInput {
   component: {
     actual?: string;
+    /**
+     * trips, or a tag rule such as trip:* or home-move
+     */
+    annotate?: string;
+    color?: null | {
+      /**
+       * entity
+       */
+      by: string;
+    };
     columns?:
       | null
       | {
-          format?: string;
+          /**
+           * how the value prints
+           */
+          format?: "usd" | "usd0" | "eur" | "eur0" | "int" | "number" | "pct" | "pct0" | "mo" | "days" | "date";
           label: string;
+          /**
+           * CEL over row giving ok or neg
+           */
           tone?: string;
+          /**
+           * show a total row; only for additive money, number or count columns
+           */
+          total?: boolean;
+          /**
+           * data type; alignment follows it
+           */
+          type?: "text" | "money" | "number" | "date" | "pct" | "days" | "count";
+          /**
+           * CEL over row giving the cell
+           */
           value: string;
         }[];
+    /**
+     * overrides scope.compare; none states that no comparison makes sense
+     */
+    compare?: "previous_period" | "previous_year" | "none";
     delta?: string;
+    drill?: null | {
+      /**
+       * same_as_page, or boolean CEL over row narrowing the entries
+       */
+      filter?: string;
+      /**
+       * entries
+       */
+      to: string;
+    };
     encoding?: null | {
       color?: null | {
         expr?: string;
@@ -786,12 +1151,29 @@ export interface DashboardAddComponentInput {
         field?: string;
       };
     };
-    format?: string;
+    /**
+     * overrides the metric's estimate policy
+     */
+    estimates?: "include" | "exclude" | "split";
+    fixed?: null | {
+      /**
+       * time grammar for the panel's own range; default all
+       */
+      range?: string;
+      /**
+       * why this panel ignores the page's time range; shown to people
+       */
+      reason: string;
+    };
+    format?: "usd" | "usd0" | "eur" | "eur0" | "int" | "number" | "pct" | "pct0" | "mo" | "days" | "date";
     id: string;
     label?: string;
     limit?: string;
-    mark?: string;
+    mark?: "line" | "area" | "stack" | "bar" | "donut";
     md?: string;
+    /**
+     * metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy
+     */
     metric?: string;
     rows?: string;
     rule?: null | {
@@ -800,11 +1182,35 @@ export interface DashboardAddComponentInput {
     };
     scenarios?: null | string[];
     sparkline?: string;
+    /**
+     * dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key
+     */
+    split?: string;
     sub?: string;
     title?: string;
     tone?: string;
-    type: string;
+    type:
+      | "stat"
+      | "time_chart"
+      | "ranked_bars"
+      | "sankey"
+      | "entries"
+      | "kpi"
+      | "table"
+      | "chart"
+      | "budget_bars"
+      | "scenario_compare"
+      | "text";
     value?: string;
+    /**
+     * x axis type on chart and time_chart
+     */
+    x?: null | {
+      /**
+       * time or category
+       */
+      type: string;
+    };
   };
   dashboard_id: string;
   page?: string;
@@ -958,20 +1364,74 @@ export interface DashboardCreateOutput {
   note: string;
   published_at?: null | string;
   spec: {
+    answer?: null | {
+      /**
+       * period_change, top_contributors, top_detractors, estimate_share, largest_entry
+       */
+      facts?: null | string[];
+      /**
+       * metric id the page's lead sentence is about
+       */
+      metric: string;
+      [k: string]: unknown;
+    };
     components:
       | null
       | {
           actual?: string;
+          /**
+           * trips, or a tag rule such as trip:* or home-move
+           */
+          annotate?: string;
+          color?: null | {
+            /**
+             * entity
+             */
+            by: string;
+            [k: string]: unknown;
+          };
           columns?:
             | null
             | {
+                /**
+                 * how the value prints
+                 */
                 format?: string;
                 label: string;
+                /**
+                 * CEL over row giving ok or neg
+                 */
                 tone?: string;
+                /**
+                 * show a total row; only for additive money, number or count columns
+                 */
+                total?: boolean;
+                /**
+                 * data type; alignment follows it
+                 */
+                type?: string;
+                /**
+                 * CEL over row giving the cell
+                 */
                 value: string;
                 [k: string]: unknown;
               }[];
+          /**
+           * overrides scope.compare; none states that no comparison makes sense
+           */
+          compare?: string;
           delta?: string;
+          drill?: null | {
+            /**
+             * same_as_page, or boolean CEL over row narrowing the entries
+             */
+            filter?: string;
+            /**
+             * entries
+             */
+            to: string;
+            [k: string]: unknown;
+          };
           encoding?: null | {
             color?: null | {
               expr?: string;
@@ -990,12 +1450,30 @@ export interface DashboardCreateOutput {
             };
             [k: string]: unknown;
           };
+          /**
+           * overrides the metric's estimate policy
+           */
+          estimates?: string;
+          fixed?: null | {
+            /**
+             * time grammar for the panel's own range; default all
+             */
+            range?: string;
+            /**
+             * why this panel ignores the page's time range; shown to people
+             */
+            reason: string;
+            [k: string]: unknown;
+          };
           format?: string;
           id: string;
           label?: string;
           limit?: string;
           mark?: string;
           md?: string;
+          /**
+           * metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy
+           */
           metric?: string;
           rows?: string;
           rule?: null | {
@@ -1005,11 +1483,25 @@ export interface DashboardCreateOutput {
           };
           scenarios?: null | string[];
           sparkline?: string;
+          /**
+           * dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key
+           */
+          split?: string;
           sub?: string;
           title?: string;
           tone?: string;
           type: string;
           value?: string;
+          /**
+           * x axis type on chart and time_chart
+           */
+          x?: null | {
+            /**
+             * time or category
+             */
+            type: string;
+            [k: string]: unknown;
+          };
           [k: string]: unknown;
         }[];
     computed?: {
@@ -1036,6 +1528,17 @@ export interface DashboardCreateOutput {
         [k: string]: unknown;
       };
     };
+    explore?: null | {
+      /**
+       * dimensions the page's filter bar offers
+       */
+      dimensions?: null | string[];
+      [k: string]: unknown;
+    };
+    /**
+     * true makes this the page the app opens on once published
+     */
+    home?: boolean;
     id: string;
     pages:
       | null
@@ -1056,6 +1559,9 @@ export interface DashboardCreateOutput {
           title: string;
           [k: string]: unknown;
         }[];
+    /**
+     * defaults CEL reads as params.*; with scope, params.from, to, compare_from and compare_to hold the page clock as YYYY-MM-DD
+     */
     params?: {
       [k: string]:
         | null
@@ -1067,6 +1573,57 @@ export interface DashboardCreateOutput {
             [k: string]: unknown;
           };
     };
+    /**
+     * the question this dashboard answers
+     */
+    question?: string;
+    scope?: null | {
+      /**
+       * previous_period, previous_year or none
+       */
+      compare?: string;
+      time?: null | {
+        /**
+         * time grammar, such as 12mo, ytd, 2026-Q2, since march or all
+         */
+        default: string;
+        /**
+         * time grammar choices offered beside the date field
+         */
+        presets?: null | string[];
+        [k: string]: unknown;
+      };
+      [k: string]: unknown;
+    };
+    /**
+     * saved questions dashboard_test checks against the ledger; all must pass to publish
+     */
+    tests?:
+      | null
+      | {
+          ask: string;
+          equals_ledger: {
+            /**
+             * account id prefixes
+             */
+            accounts: null | string[];
+            /**
+             * account id prefixes left out
+             */
+            exclude?: null | string[];
+            [k: string]: unknown;
+          };
+          /**
+           * YYYY-MM-DD
+           */
+          from: string;
+          metric: string;
+          /**
+           * YYYY-MM-DD
+           */
+          to: string;
+          [k: string]: unknown;
+        }[];
     title: string;
     version: number;
     [k: string]: unknown;
@@ -1152,20 +1709,74 @@ export interface DashboardGetOutput {
   note: string;
   published_at?: null | string;
   spec: {
+    answer?: null | {
+      /**
+       * period_change, top_contributors, top_detractors, estimate_share, largest_entry
+       */
+      facts?: null | string[];
+      /**
+       * metric id the page's lead sentence is about
+       */
+      metric: string;
+      [k: string]: unknown;
+    };
     components:
       | null
       | {
           actual?: string;
+          /**
+           * trips, or a tag rule such as trip:* or home-move
+           */
+          annotate?: string;
+          color?: null | {
+            /**
+             * entity
+             */
+            by: string;
+            [k: string]: unknown;
+          };
           columns?:
             | null
             | {
+                /**
+                 * how the value prints
+                 */
                 format?: string;
                 label: string;
+                /**
+                 * CEL over row giving ok or neg
+                 */
                 tone?: string;
+                /**
+                 * show a total row; only for additive money, number or count columns
+                 */
+                total?: boolean;
+                /**
+                 * data type; alignment follows it
+                 */
+                type?: string;
+                /**
+                 * CEL over row giving the cell
+                 */
                 value: string;
                 [k: string]: unknown;
               }[];
+          /**
+           * overrides scope.compare; none states that no comparison makes sense
+           */
+          compare?: string;
           delta?: string;
+          drill?: null | {
+            /**
+             * same_as_page, or boolean CEL over row narrowing the entries
+             */
+            filter?: string;
+            /**
+             * entries
+             */
+            to: string;
+            [k: string]: unknown;
+          };
           encoding?: null | {
             color?: null | {
               expr?: string;
@@ -1184,12 +1795,30 @@ export interface DashboardGetOutput {
             };
             [k: string]: unknown;
           };
+          /**
+           * overrides the metric's estimate policy
+           */
+          estimates?: string;
+          fixed?: null | {
+            /**
+             * time grammar for the panel's own range; default all
+             */
+            range?: string;
+            /**
+             * why this panel ignores the page's time range; shown to people
+             */
+            reason: string;
+            [k: string]: unknown;
+          };
           format?: string;
           id: string;
           label?: string;
           limit?: string;
           mark?: string;
           md?: string;
+          /**
+           * metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy
+           */
           metric?: string;
           rows?: string;
           rule?: null | {
@@ -1199,11 +1828,25 @@ export interface DashboardGetOutput {
           };
           scenarios?: null | string[];
           sparkline?: string;
+          /**
+           * dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key
+           */
+          split?: string;
           sub?: string;
           title?: string;
           tone?: string;
           type: string;
           value?: string;
+          /**
+           * x axis type on chart and time_chart
+           */
+          x?: null | {
+            /**
+             * time or category
+             */
+            type: string;
+            [k: string]: unknown;
+          };
           [k: string]: unknown;
         }[];
     computed?: {
@@ -1230,6 +1873,17 @@ export interface DashboardGetOutput {
         [k: string]: unknown;
       };
     };
+    explore?: null | {
+      /**
+       * dimensions the page's filter bar offers
+       */
+      dimensions?: null | string[];
+      [k: string]: unknown;
+    };
+    /**
+     * true makes this the page the app opens on once published
+     */
+    home?: boolean;
     id: string;
     pages:
       | null
@@ -1250,6 +1904,9 @@ export interface DashboardGetOutput {
           title: string;
           [k: string]: unknown;
         }[];
+    /**
+     * defaults CEL reads as params.*; with scope, params.from, to, compare_from and compare_to hold the page clock as YYYY-MM-DD
+     */
     params?: {
       [k: string]:
         | null
@@ -1261,6 +1918,57 @@ export interface DashboardGetOutput {
             [k: string]: unknown;
           };
     };
+    /**
+     * the question this dashboard answers
+     */
+    question?: string;
+    scope?: null | {
+      /**
+       * previous_period, previous_year or none
+       */
+      compare?: string;
+      time?: null | {
+        /**
+         * time grammar, such as 12mo, ytd, 2026-Q2, since march or all
+         */
+        default: string;
+        /**
+         * time grammar choices offered beside the date field
+         */
+        presets?: null | string[];
+        [k: string]: unknown;
+      };
+      [k: string]: unknown;
+    };
+    /**
+     * saved questions dashboard_test checks against the ledger; all must pass to publish
+     */
+    tests?:
+      | null
+      | {
+          ask: string;
+          equals_ledger: {
+            /**
+             * account id prefixes
+             */
+            accounts: null | string[];
+            /**
+             * account id prefixes left out
+             */
+            exclude?: null | string[];
+            [k: string]: unknown;
+          };
+          /**
+           * YYYY-MM-DD
+           */
+          from: string;
+          metric: string;
+          /**
+           * YYYY-MM-DD
+           */
+          to: string;
+          [k: string]: unknown;
+        }[];
     title: string;
     version: number;
     [k: string]: unknown;
@@ -1282,17 +1990,19 @@ export interface DashboardLintInput {
       };
 }
 export interface DashboardLintOutput {
+  errors: number;
   issues:
     | null
     | {
         component_id?: string;
-        expr?: string;
-        field?: string;
-        hint?: string;
+        fix: string;
         msg: string;
         path: string;
+        rule: string;
+        severity: string;
         [k: string]: unknown;
       }[];
+  warnings: number;
   [k: string]: unknown;
 }
 export interface DashboardListInput {}
@@ -1302,6 +2012,7 @@ export interface DashboardListOutput {
     | {
         archived?: boolean;
         draft_version: number;
+        home?: boolean;
         id: string;
         publish_note?: string;
         published_at?: null | string;
@@ -1466,9 +2177,36 @@ export interface DashboardPreviewOutput {
 export interface DashboardPublishInput {
   dashboard_id: string;
   note?: string;
-  version: number;
+  /**
+   * defaults to the current draft
+   */
+  version?: number;
 }
 export interface DashboardPublishOutput {
+  diff?:
+    | null
+    | {
+        after?:
+          | null
+          | boolean
+          | number
+          | string
+          | unknown[]
+          | {
+              [k: string]: unknown;
+            };
+        before?:
+          | null
+          | boolean
+          | number
+          | string
+          | unknown[]
+          | {
+              [k: string]: unknown;
+            };
+        path: string;
+        [k: string]: unknown;
+      }[];
   event_id?: string;
   gate: {
     cost: number;
@@ -1587,23 +2325,10 @@ export interface DashboardRenderOutput {
         y: number;
         [k: string]: unknown;
       }[];
-  lint:
-    | null
-    | {
-        component_id?: string;
-        expr?: string;
-        field?: string;
-        hint?: string;
-        msg: string;
-        path: string;
-        [k: string]: unknown;
-      }[];
-  message?: string;
   /**
-   * the whole render including Chromium
+   * same shape as dashboard_lint
    */
-  render_ms?: number;
-  tests?:
+  lint:
     | null
     | boolean
     | number
@@ -1612,6 +2337,27 @@ export interface DashboardRenderOutput {
     | {
         [k: string]: unknown;
       };
+  message?: string;
+  /**
+   * the whole render including Chromium
+   */
+  render_ms?: number;
+  tests: {
+    failed: number;
+    passed: number;
+    results:
+      | null
+      | {
+          ask: string;
+          got?: string;
+          metric: string;
+          msg?: string;
+          ok: boolean;
+          want?: string;
+          [k: string]: unknown;
+        }[];
+    [k: string]: unknown;
+  };
   /**
    * page load to settled, as the page reported it
    */
@@ -1650,6 +2396,30 @@ export interface DashboardRollbackInput {
   to_version: number;
 }
 export interface DashboardRollbackOutput {
+  diff?:
+    | null
+    | {
+        after?:
+          | null
+          | boolean
+          | number
+          | string
+          | unknown[]
+          | {
+              [k: string]: unknown;
+            };
+        before?:
+          | null
+          | boolean
+          | number
+          | string
+          | unknown[]
+          | {
+              [k: string]: unknown;
+            };
+        path: string;
+        [k: string]: unknown;
+      }[];
   event_id?: string;
   gate: {
     cost: number;
@@ -1757,6 +2527,34 @@ export interface DashboardSummaryOutput {
   status: string;
   title: string;
   version: number;
+  [k: string]: unknown;
+}
+export interface DashboardTestInput {
+  id: string;
+  version?:
+    | null
+    | boolean
+    | number
+    | string
+    | unknown[]
+    | {
+        [k: string]: unknown;
+      };
+}
+export interface DashboardTestOutput {
+  failed: number;
+  passed: number;
+  results:
+    | null
+    | {
+        ask: string;
+        got?: string;
+        metric: string;
+        msg?: string;
+        ok: boolean;
+        want?: string;
+        [k: string]: unknown;
+      }[];
   [k: string]: unknown;
 }
 export interface DashboardUnpublishInput {
@@ -2207,6 +3005,7 @@ export interface EntryGetOutput {
               [k: string]: unknown;
             };
         at: string;
+        batch_id?: string;
         before?:
           | null
           | boolean
@@ -2247,7 +3046,9 @@ export interface EntryGetOutput {
         };
         prev_hash: string;
         reason?: string;
+        routine?: boolean;
         seq: number;
+        summary?: string;
         target: {
           coll: string;
           id: string;
@@ -2558,6 +3359,139 @@ export interface ExprEvalOutput {
       };
   [k: string]: unknown;
 }
+export interface FeedUpsertInput {
+  account: string;
+  /**
+   * iso, dmy or mdy
+   */
+  date_format?: string;
+  /**
+   * wise_csv, generic_csv or plaid
+   */
+  format: string;
+  /**
+   * wise or finance_connector
+   */
+  id: string;
+  url: string;
+}
+export interface FeedUpsertOutput {
+  feed: {
+    account: string;
+    date_format?: string;
+    format: string;
+    id: string;
+    [k: string]: unknown;
+  };
+  secret_set: boolean;
+  /**
+   * where a person enters the bank credential; it never passes through an agent
+   */
+  secret_url: string;
+  [k: string]: unknown;
+}
+export interface FeedbackListInput {
+  /**
+   * 1..200, default 50
+   */
+  limit?: number;
+  /**
+   * open, resolved or all; default open
+   */
+  status?: string;
+}
+export interface FeedbackListOutput {
+  items:
+    | null
+    | {
+        answer?: string;
+        created_at: string;
+        created_by: {
+          id: string;
+          kind: string;
+          [k: string]: unknown;
+        };
+        id: string;
+        note: string;
+        resolution?: string;
+        resolved_at?: null | string;
+        resolved_by?: {
+          id: string;
+          kind: string;
+          [k: string]: unknown;
+        };
+        status: string;
+        target: {
+          component?: string;
+          dashboard?: string;
+          metric?: string;
+          params?: {
+            [k: string]:
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                };
+          };
+          value?: string;
+          [k: string]: unknown;
+        };
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
+export interface FeedbackResolveInput {
+  id: string;
+  /**
+   * what the person who flagged it should read
+   */
+  note?: string;
+  /**
+   * fixed, explained, wont_fix or duplicate
+   */
+  resolution: string;
+}
+export interface FeedbackResolveOutput {
+  answer?: string;
+  created_at: string;
+  created_by: {
+    id: string;
+    kind: string;
+    [k: string]: unknown;
+  };
+  id: string;
+  note: string;
+  resolution?: string;
+  resolved_at?: null | string;
+  resolved_by?: {
+    id: string;
+    kind: string;
+    [k: string]: unknown;
+  };
+  status: string;
+  target: {
+    component?: string;
+    dashboard?: string;
+    metric?: string;
+    params?: {
+      [k: string]:
+        | null
+        | boolean
+        | number
+        | string
+        | unknown[]
+        | {
+            [k: string]: unknown;
+          };
+    };
+    value?: string;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
 export interface FeedsSyncInput {
   feed: string;
   since?: string;
@@ -2570,6 +3504,31 @@ export interface FeedsSyncOutput {
     [k: string]: unknown;
   };
   rows_parsed: number;
+  [k: string]: unknown;
+}
+export interface FieldValuesInput {
+  dimension: string;
+  from?: string;
+  /**
+   * 1..500, default 100
+   */
+  limit?: number;
+  /**
+   * keep values or labels starting with this text, case-insensitive
+   */
+  prefix?: string;
+  to?: string;
+}
+export interface FieldValuesOutput {
+  items:
+    | null
+    | {
+        count: number;
+        label: string;
+        total: string;
+        value: string;
+        [k: string]: unknown;
+      }[];
   [k: string]: unknown;
 }
 export interface ForecastRunInput {
@@ -2668,6 +3627,7 @@ export interface HistoryOfOutput {
               [k: string]: unknown;
             };
         at: string;
+        batch_id?: string;
         before?:
           | null
           | boolean
@@ -2708,7 +3668,9 @@ export interface HistoryOfOutput {
         };
         prev_hash: string;
         reason?: string;
+        routine?: boolean;
         seq: number;
+        summary?: string;
         target: {
           coll: string;
           id: string;
@@ -2977,6 +3939,28 @@ export interface ImportUndoOutput {
       }[];
   [k: string]: unknown;
 }
+export interface ImportsListInput {}
+export interface ImportsListOutput {
+  items:
+    | null
+    | {
+        account: string;
+        closing_balance?: null | {
+          c: string;
+          v: string;
+          [k: string]: unknown;
+        };
+        created_at: string;
+        file_sha256: string;
+        format: string;
+        from: string;
+        id: string;
+        status: string;
+        to: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
 export interface IncomeModelSetInput {
   streams:
     | null
@@ -3072,6 +4056,278 @@ export interface IncomeReconcileOutput {
         variance: number;
         [k: string]: unknown;
       }[];
+  [k: string]: unknown;
+}
+export interface LabelSetInput {
+  key: string;
+  /**
+   * account, category, pot, tag, dimension or series
+   */
+  kind: string;
+  label: string;
+}
+export interface LabelSetOutput {
+  key: string;
+  kind: string;
+  label: string;
+  [k: string]: unknown;
+}
+export interface MetricListInput {}
+export interface MetricListOutput {
+  items:
+    | null
+    | {
+        /**
+         * account id prefixes, such as expenses:
+         */
+        accounts?: null | string[];
+        /**
+         * sum, last, avg or none; how the total folds over time and whether a table may total it
+         */
+        additivity: string;
+        description?: string;
+        /**
+         * dimensions this metric may split by; the first is the default for contributors
+         */
+        dimensions?: null | string[];
+        /**
+         * include, exclude or split; how estimated accounts count
+         */
+        estimates: string;
+        /**
+         * account id prefixes to leave out
+         */
+        exclude?: null | string[];
+        /**
+         * stable id, lowercase letters, digits, _ or -
+         */
+        id: string;
+        /**
+         * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+         */
+        kind: string;
+        /**
+         * human name, used in sentences and titles
+         */
+        label: string;
+        /**
+         * 1 or -1; -1 shows income, stored as negative postings, as positive
+         */
+        sign?: number;
+        /**
+         * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+         */
+        unit: string;
+        /**
+         * escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)
+         */
+        where?: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
+export interface MetricQueryInput {
+  /**
+   * day, week, month or auto; omitted returns no time buckets
+   */
+  bucket?: string;
+  /**
+   * previous_period, previous_year or none
+   */
+  compare?: string;
+  /**
+   * include, exclude or split; omitted uses the metric's policy
+   */
+  estimates?: string;
+  /**
+   * period_change, top_contributors, top_detractors, estimate_share, largest_entry
+   */
+  facts?: null | string[];
+  filters?:
+    | null
+    | {
+        /**
+         * a dimension from catalog_get or field_values
+         */
+        field: string;
+        /**
+         * in, not_in or prefix
+         */
+        op: string;
+        values: null | string[];
+      }[];
+  /**
+   * YYYY-MM-DD; omitted starts at the first entry
+   */
+  from?: string;
+  metric: string;
+  /**
+   * dimension to break the series down by
+   */
+  split?: string;
+  /**
+   * YYYY-MM-DD; omitted ends today
+   */
+  to?: string;
+}
+export interface MetricQueryOutput {
+  compare?: null | {
+    delta_pct: null | number;
+    direction: string;
+    from: string;
+    good: boolean;
+    text: string;
+    to: string;
+    total: string;
+    [k: string]: unknown;
+  };
+  entries: {
+    accounts: null | string[];
+    exclude?: null | string[];
+    from: string;
+    to: string;
+    [k: string]: unknown;
+  };
+  estimates: {
+    policy: string;
+    share_pct: number;
+    text: string;
+    total: string;
+    [k: string]: unknown;
+  };
+  facts?:
+    | null
+    | {
+        contributors?:
+          | null
+          | {
+              delta: string;
+              name: string;
+              share: number;
+              text: string;
+              [k: string]: unknown;
+            }[];
+        direction?: string;
+        good: boolean;
+        kind: string;
+        sentence: string;
+        text?: string;
+        value?: string;
+        [k: string]: unknown;
+      }[];
+  formula: string;
+  label: string;
+  message?: string;
+  metric: string;
+  series:
+    | null
+    | {
+        bucket?: string;
+        estimated: boolean;
+        name: string;
+        text: string;
+        value: string;
+        [k: string]: unknown;
+      }[];
+  text: string;
+  total: string;
+  truncated?: boolean;
+  unit: string;
+  [k: string]: unknown;
+}
+export interface MetricUpsertInput {
+  /**
+   * account id prefixes, such as expenses:
+   */
+  accounts?: null | string[];
+  /**
+   * sum, last, avg or none; how the total folds over time and whether a table may total it
+   */
+  additivity: string;
+  description?: string;
+  /**
+   * dimensions this metric may split by; the first is the default for contributors
+   */
+  dimensions?: null | string[];
+  /**
+   * include, exclude or split; how estimated accounts count
+   */
+  estimates: string;
+  /**
+   * account id prefixes to leave out
+   */
+  exclude?: null | string[];
+  /**
+   * stable id, lowercase letters, digits, _ or -
+   */
+  id: string;
+  /**
+   * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+   */
+  kind: string;
+  /**
+   * human name, used in sentences and titles
+   */
+  label: string;
+  /**
+   * 1 or -1; -1 shows income, stored as negative postings, as positive
+   */
+  sign?: number;
+  /**
+   * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+   */
+  unit: string;
+  /**
+   * escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)
+   */
+  where?: string;
+}
+export interface MetricUpsertOutput {
+  /**
+   * account id prefixes, such as expenses:
+   */
+  accounts?: null | string[];
+  /**
+   * sum, last, avg or none; how the total folds over time and whether a table may total it
+   */
+  additivity: string;
+  description?: string;
+  /**
+   * dimensions this metric may split by; the first is the default for contributors
+   */
+  dimensions?: null | string[];
+  /**
+   * include, exclude or split; how estimated accounts count
+   */
+  estimates: string;
+  /**
+   * account id prefixes to leave out
+   */
+  exclude?: null | string[];
+  /**
+   * stable id, lowercase letters, digits, _ or -
+   */
+  id: string;
+  /**
+   * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+   */
+  kind: string;
+  /**
+   * human name, used in sentences and titles
+   */
+  label: string;
+  /**
+   * 1 or -1; -1 shows income, stored as negative postings, as positive
+   */
+  sign?: number;
+  /**
+   * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+   */
+  unit: string;
+  /**
+   * escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)
+   */
+  where?: string;
   [k: string]: unknown;
 }
 export interface ModelGetInput {}
@@ -3186,6 +4442,59 @@ export interface ModelGetOutput {
         start?: string;
         [k: string]: unknown;
       }[];
+  [k: string]: unknown;
+}
+export interface NavSetInput {
+  items:
+    | null
+    | {
+        /**
+         * dashboard id this item opens; give this or route
+         */
+        dashboard?: string;
+        icon?: string;
+        id: string;
+        label: string;
+        /**
+         * app path this item opens, such as /ledger; give this or dashboard
+         */
+        route?: string;
+      }[];
+}
+export interface NavSetOutput {
+  items:
+    | null
+    | {
+        /**
+         * dashboard id this item opens; give this or route
+         */
+        dashboard?: string;
+        icon?: string;
+        id: string;
+        label: string;
+        /**
+         * app path this item opens, such as /ledger; give this or dashboard
+         */
+        route?: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
+export interface PayeeAliasUpsertInput {
+  name: string;
+  note?: string;
+  /**
+   * case-insensitive RE2 regular expression over the bank's payee text
+   */
+  pattern: string;
+}
+export interface PayeeAliasUpsertOutput {
+  name: string;
+  note?: string;
+  /**
+   * case-insensitive RE2 regular expression over the bank's payee text
+   */
+  pattern: string;
   [k: string]: unknown;
 }
 export interface RateArchiveInput {
@@ -3914,6 +5223,73 @@ export interface UndoOutput {
   inverse_event_ids: null | string[];
   [k: string]: unknown;
 }
+export interface UsageGetInput {
+  /**
+   * YYYY-MM-DD, default 30 days ago
+   */
+  from?: string;
+  /**
+   * YYYY-MM-DD, default today
+   */
+  to?: string;
+}
+export interface UsageGetOutput {
+  from: string;
+  pages:
+    | null
+    | {
+        dashboard?: string;
+        last_at: string;
+        path: string;
+        views: number;
+        [k: string]: unknown;
+      }[];
+  to: string;
+  [k: string]: unknown;
+}
+export interface UserDisableInput {
+  /**
+   * recorded in the audit trail
+   */
+  reason: string;
+  user_id: string;
+}
+export interface UserDisableOutput {
+  confirm_url?: string;
+  message: string;
+  status: string;
+  [k: string]: unknown;
+}
+export interface UserInviteInput {
+  email: string;
+  /**
+   * why this person is being invited; recorded in the audit trail
+   */
+  reason: string;
+}
+export interface UserInviteOutput {
+  email: string;
+  /**
+   * send this to the person; they set their own password from it
+   */
+  invitation_url: string;
+  [k: string]: unknown;
+}
+export interface UserListInput {}
+export interface UserListOutput {
+  items:
+    | null
+    | {
+        created_at: string;
+        disabled?: boolean;
+        email: string;
+        id: string;
+        is_admin: boolean;
+        name: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
 export interface ViewGetInput {
   id: string;
 }
@@ -4049,6 +5425,7 @@ export interface WhoamiOutput {
   scopes: null | string[];
   user: {
     created_at: string;
+    disabled?: boolean;
     email: string;
     id: string;
     is_admin: boolean;
