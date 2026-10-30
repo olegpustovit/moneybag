@@ -281,3 +281,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `8b6841093252-20261030024820` passed its version health check; the service is active and the connected MCP client lists all seven existing dashboards.
 
 - MCP console nullable text: schema fields that accept a string or null now accept ordinary text, while fields with multiple non-null types still accept JSON. The production-build shell browser test exercised nullable text, an integer, a multi-type field and formula evaluation alongside desktop/tablet/mobile light/dark shell checks; `make check` passed. Optional empty values are still omitted and structured values still use JSON entry; full SPA/P0 acceptance remains open.
+  Deployment: release `b5a09ae4ac07-20261030025144` passed its public health check and the service is active.
