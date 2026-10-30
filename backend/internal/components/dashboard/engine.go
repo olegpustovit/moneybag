@@ -42,7 +42,10 @@ type execution struct {
 	memo       *sourceMemo
 	dataBudget *byteBudget // all query results of this execution share 8 MiB
 	programs   map[string]cel.Program
+	selectors  map[string][]string
 }
+
+var rowSelector = regexp.MustCompile(`^row\.[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?$`)
 
 func (x *execution) eval(expr string, row map[string]any) (any, error) {
 	if err := x.ctx.Err(); err != nil {
@@ -54,6 +57,7 @@ func (x *execution) eval(expr string, row map[string]any) (any, error) {
 	}
 	if x.programs == nil {
 		x.programs = map[string]cel.Program{}
+		x.selectors = map[string][]string{}
 	}
 	program := x.programs[expr]
 	if program == nil {
@@ -63,6 +67,39 @@ func (x *execution) eval(expr string, row map[string]any) (any, error) {
 			return nil, err
 		}
 		x.programs[expr] = program
+		if rowSelector.MatchString(expr) {
+			x.selectors[expr] = strings.Split(expr[4:], ".")
+		}
+	}
+	if fields := x.selectors[expr]; row != nil && len(fields) != 0 {
+		var value any = row
+		for _, field := range fields {
+			m, ok := value.(map[string]any)
+			if !ok {
+				value = nil
+				break
+			}
+			value, ok = m[field]
+			if !ok {
+				value = nil
+				break
+			}
+		}
+		// Missing fields and CEL-specific values still go through the interpreter.
+		fast := false
+		switch v := value.(type) {
+		case string, bool:
+			fast = true
+		case float64:
+			fast = !math.IsInf(v, 0) && !math.IsNaN(v)
+		}
+		if fast {
+			x.cost += uint64(len(fields) + 1)
+			if x.cost > 100000000 {
+				return nil, fmt.Errorf("page evaluation exceeds 100 million operations")
+			}
+			return value, nil
+		}
 	}
 	r, e := expressions.EvalProgramRow(x.ctx, expr, program, x.vars, row)
 	x.cost += r.Cost

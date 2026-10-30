@@ -8,6 +8,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -479,4 +480,39 @@ func TestPostingClassFilterPreservesExpressionBehavior(t *testing.T) {
 		}
 	}
 
+}
+
+func TestSimpleRowSelectorsMatchCEL(t *testing.T) {
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []map[string]any{
+		{"value": "text", "nested": map[string]any{"value": true}},
+		{"value": 2.5, "nested": map[string]any{"value": -4.5}},
+		{"value": int64(8), "nested": map[string]any{"value": nil}},
+		{"value": nil, "nested": map[string]string{"value": "text"}},
+		{"nested": "not a map"},
+		{},
+		nil,
+	}
+	for _, source := range []string{"row.value", "row.nested.value", "row.value + 1"} {
+		program, err := expr.Compile(source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		x := &execution{ctx: context.Background(), engine: &Engine{Expr: expr}, vars: map[string]any{}}
+		for _, row := range rows {
+			before := x.cost
+			got, gotErr := x.eval(source, row)
+			want, wantErr := expressions.EvalProgramRow(context.Background(), source, program, x.vars, row)
+			if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want.Value) || x.cost-before != want.Cost {
+				t.Fatalf("%s: got %#v cost %d error %v; want %#v cost %d error %v", source, got, x.cost-before, gotErr, want.Value, want.Cost, wantErr)
+			}
+		}
+	}
+	x := &execution{ctx: context.Background(), engine: &Engine{Expr: expr}, cost: 99999999}
+	if _, err := x.eval("row.value", map[string]any{"value": "text"}); err == nil || !strings.Contains(err.Error(), "100 million") {
+		t.Fatalf("selector did not enforce page cost limit: %v", err)
+	}
 }
