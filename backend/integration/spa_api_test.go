@@ -635,4 +635,5 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	if status, _ := check(`{"expr":"1","role":"unknown"}`, true, true); status != 400 {
 		t.Fatalf("expression role: %d", status)
 	}
+	testSPASettingsWrites(t, ctx, endpoint, p, services, db)
 }
