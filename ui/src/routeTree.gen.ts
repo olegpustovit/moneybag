@@ -13,16 +13,28 @@ import { Route as AppRouteImport } from './routes/_app'
 import { Route as AppIndexRouteImport } from './routes/_app.index'
 import { Route as AppAccountsRouteImport } from './routes/_app.accounts'
 import { Route as AppActivityRouteImport } from './routes/_app.activity'
+import { Route as AppBudgetRouteImport } from './routes/_app.budget'
 import { Route as AppBudgetsRouteImport } from './routes/_app.budgets'
+import { Route as AppChangesRouteImport } from './routes/_app.changes'
+import { Route as AppFutureRouteImport } from './routes/_app.future'
 import { Route as AppJournalRouteImport } from './routes/_app.journal'
 import { Route as AppReconcileRouteImport } from './routes/_app.reconcile'
 import { Route as AppScenariosRouteImport } from './routes/_app.scenarios'
 import { Route as AppSettingsRouteImport } from './routes/_app.settings'
+import { Route as RenderTokenRouteImport } from './routes/render.$token'
 import { Route as AppDashboardsIndexRouteImport } from './routes/_app.dashboards.index'
 import { Route as AppDashboardsIdRouteImport } from './routes/_app.dashboards.$id'
+import { Route as AppDataIndexRouteImport } from './routes/_app.data.index'
+import { Route as AppDataIdRouteImport } from './routes/_app.data.$id'
+import { Route as AppDataImportsRouteImport } from './routes/_app.data.imports'
+import { Route as AppDataRatesRouteImport } from './routes/_app.data.rates'
+import { Route as AppDataReconcileRouteImport } from './routes/_app.data.reconcile'
+import { Route as AppDatabasesIndexRouteImport } from './routes/_app.databases.index'
 import { Route as AppDatabasesIdRouteImport } from './routes/_app.databases.$id'
 import { Route as AppImportsIndexRouteImport } from './routes/_app.imports.index'
 import { Route as AppImportsBatchRouteImport } from './routes/_app.imports.$batch'
+import { Route as AppLedgerIndexRouteImport } from './routes/_app.ledger.index'
+import { Route as AppLedgerAccountsRouteImport } from './routes/_app.ledger.accounts'
 import { Route as AppSharedIndexRouteImport } from './routes/_app.shared.index'
 import { Route as AppSharedIdRouteImport } from './routes/_app.shared.$id'
 
@@ -45,9 +57,24 @@ const AppActivityRoute = AppActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBudgetRoute = AppBudgetRouteImport.update({
+  id: '/budget',
+  path: '/budget',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppBudgetsRoute = AppBudgetsRouteImport.update({
   id: '/budgets',
   path: '/budgets',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppChangesRoute = AppChangesRouteImport.update({
+  id: '/changes',
+  path: '/changes',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFutureRoute = AppFutureRouteImport.update({
+  id: '/future',
+  path: '/future',
   getParentRoute: () => AppRoute,
 } as any)
 const AppJournalRoute = AppJournalRouteImport.update({
@@ -70,6 +97,11 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
   path: '/settings',
   getParentRoute: () => AppRoute,
 } as any)
+const RenderTokenRoute = RenderTokenRouteImport.update({
+  id: '/render/$token',
+  path: '/render/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AppDashboardsIndexRoute = AppDashboardsIndexRouteImport.update({
   id: '/dashboards/',
   path: '/dashboards/',
@@ -78,6 +110,36 @@ const AppDashboardsIndexRoute = AppDashboardsIndexRouteImport.update({
 const AppDashboardsIdRoute = AppDashboardsIdRouteImport.update({
   id: '/dashboards/$id',
   path: '/dashboards/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDataIndexRoute = AppDataIndexRouteImport.update({
+  id: '/data/',
+  path: '/data/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDataIdRoute = AppDataIdRouteImport.update({
+  id: '/data/$id',
+  path: '/data/$id',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDataImportsRoute = AppDataImportsRouteImport.update({
+  id: '/data/imports',
+  path: '/data/imports',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDataRatesRoute = AppDataRatesRouteImport.update({
+  id: '/data/rates',
+  path: '/data/rates',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDataReconcileRoute = AppDataReconcileRouteImport.update({
+  id: '/data/reconcile',
+  path: '/data/reconcile',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDatabasesIndexRoute = AppDatabasesIndexRouteImport.update({
+  id: '/databases/',
+  path: '/databases/',
   getParentRoute: () => AppRoute,
 } as any)
 const AppDatabasesIdRoute = AppDatabasesIdRouteImport.update({
@@ -95,6 +157,16 @@ const AppImportsBatchRoute = AppImportsBatchRouteImport.update({
   path: '/imports/$batch',
   getParentRoute: () => AppRoute,
 } as any)
+const AppLedgerIndexRoute = AppLedgerIndexRouteImport.update({
+  id: '/ledger/',
+  path: '/ledger/',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLedgerAccountsRoute = AppLedgerAccountsRouteImport.update({
+  id: '/ledger/accounts',
+  path: '/ledger/accounts',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSharedIndexRoute = AppSharedIndexRouteImport.update({
   id: '/shared/',
   path: '/shared/',
@@ -110,34 +182,58 @@ export interface FileRoutesByFullPath {
   '/': typeof AppIndexRoute
   '/accounts': typeof AppAccountsRoute
   '/activity': typeof AppActivityRoute
+  '/budget': typeof AppBudgetRoute
   '/budgets': typeof AppBudgetsRoute
+  '/changes': typeof AppChangesRoute
+  '/future': typeof AppFutureRoute
   '/journal': typeof AppJournalRoute
   '/reconcile': typeof AppReconcileRoute
   '/scenarios': typeof AppScenariosRoute
   '/settings': typeof AppSettingsRoute
+  '/render/$token': typeof RenderTokenRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
+  '/data/$id': typeof AppDataIdRoute
+  '/data/imports': typeof AppDataImportsRoute
+  '/data/rates': typeof AppDataRatesRoute
+  '/data/reconcile': typeof AppDataReconcileRoute
   '/databases/$id': typeof AppDatabasesIdRoute
   '/imports/$batch': typeof AppImportsBatchRoute
+  '/ledger/accounts': typeof AppLedgerAccountsRoute
   '/shared/$id': typeof AppSharedIdRoute
   '/dashboards/': typeof AppDashboardsIndexRoute
+  '/data/': typeof AppDataIndexRoute
+  '/databases/': typeof AppDatabasesIndexRoute
   '/imports/': typeof AppImportsIndexRoute
+  '/ledger/': typeof AppLedgerIndexRoute
   '/shared/': typeof AppSharedIndexRoute
 }
 export interface FileRoutesByTo {
   '/accounts': typeof AppAccountsRoute
   '/activity': typeof AppActivityRoute
+  '/budget': typeof AppBudgetRoute
   '/budgets': typeof AppBudgetsRoute
+  '/changes': typeof AppChangesRoute
+  '/future': typeof AppFutureRoute
   '/journal': typeof AppJournalRoute
   '/reconcile': typeof AppReconcileRoute
   '/scenarios': typeof AppScenariosRoute
   '/settings': typeof AppSettingsRoute
+  '/render/$token': typeof RenderTokenRoute
   '/': typeof AppIndexRoute
   '/dashboards/$id': typeof AppDashboardsIdRoute
+  '/data/$id': typeof AppDataIdRoute
+  '/data/imports': typeof AppDataImportsRoute
+  '/data/rates': typeof AppDataRatesRoute
+  '/data/reconcile': typeof AppDataReconcileRoute
   '/databases/$id': typeof AppDatabasesIdRoute
   '/imports/$batch': typeof AppImportsBatchRoute
+  '/ledger/accounts': typeof AppLedgerAccountsRoute
   '/shared/$id': typeof AppSharedIdRoute
   '/dashboards': typeof AppDashboardsIndexRoute
+  '/data': typeof AppDataIndexRoute
+  '/databases': typeof AppDatabasesIndexRoute
   '/imports': typeof AppImportsIndexRoute
+  '/ledger': typeof AppLedgerIndexRoute
   '/shared': typeof AppSharedIndexRoute
 }
 export interface FileRoutesById {
@@ -145,18 +241,30 @@ export interface FileRoutesById {
   '/_app': typeof AppRouteWithChildren
   '/_app/accounts': typeof AppAccountsRoute
   '/_app/activity': typeof AppActivityRoute
+  '/_app/budget': typeof AppBudgetRoute
   '/_app/budgets': typeof AppBudgetsRoute
+  '/_app/changes': typeof AppChangesRoute
+  '/_app/future': typeof AppFutureRoute
   '/_app/journal': typeof AppJournalRoute
   '/_app/reconcile': typeof AppReconcileRoute
   '/_app/scenarios': typeof AppScenariosRoute
   '/_app/settings': typeof AppSettingsRoute
+  '/render/$token': typeof RenderTokenRoute
   '/_app/': typeof AppIndexRoute
   '/_app/dashboards/$id': typeof AppDashboardsIdRoute
+  '/_app/data/$id': typeof AppDataIdRoute
+  '/_app/data/imports': typeof AppDataImportsRoute
+  '/_app/data/rates': typeof AppDataRatesRoute
+  '/_app/data/reconcile': typeof AppDataReconcileRoute
   '/_app/databases/$id': typeof AppDatabasesIdRoute
   '/_app/imports/$batch': typeof AppImportsBatchRoute
+  '/_app/ledger/accounts': typeof AppLedgerAccountsRoute
   '/_app/shared/$id': typeof AppSharedIdRoute
   '/_app/dashboards/': typeof AppDashboardsIndexRoute
+  '/_app/data/': typeof AppDataIndexRoute
+  '/_app/databases/': typeof AppDatabasesIndexRoute
   '/_app/imports/': typeof AppImportsIndexRoute
+  '/_app/ledger/': typeof AppLedgerIndexRoute
   '/_app/shared/': typeof AppSharedIndexRoute
 }
 export interface FileRouteTypes {
@@ -165,57 +273,94 @@ export interface FileRouteTypes {
     | '/'
     | '/accounts'
     | '/activity'
+    | '/budget'
     | '/budgets'
+    | '/changes'
+    | '/future'
     | '/journal'
     | '/reconcile'
     | '/scenarios'
     | '/settings'
+    | '/render/$token'
     | '/dashboards/$id'
+    | '/data/$id'
+    | '/data/imports'
+    | '/data/rates'
+    | '/data/reconcile'
     | '/databases/$id'
     | '/imports/$batch'
+    | '/ledger/accounts'
     | '/shared/$id'
     | '/dashboards/'
+    | '/data/'
+    | '/databases/'
     | '/imports/'
+    | '/ledger/'
     | '/shared/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/accounts'
     | '/activity'
+    | '/budget'
     | '/budgets'
+    | '/changes'
+    | '/future'
     | '/journal'
     | '/reconcile'
     | '/scenarios'
     | '/settings'
+    | '/render/$token'
     | '/'
     | '/dashboards/$id'
+    | '/data/$id'
+    | '/data/imports'
+    | '/data/rates'
+    | '/data/reconcile'
     | '/databases/$id'
     | '/imports/$batch'
+    | '/ledger/accounts'
     | '/shared/$id'
     | '/dashboards'
+    | '/data'
+    | '/databases'
     | '/imports'
+    | '/ledger'
     | '/shared'
   id:
     | '__root__'
     | '/_app'
     | '/_app/accounts'
     | '/_app/activity'
+    | '/_app/budget'
     | '/_app/budgets'
+    | '/_app/changes'
+    | '/_app/future'
     | '/_app/journal'
     | '/_app/reconcile'
     | '/_app/scenarios'
     | '/_app/settings'
+    | '/render/$token'
     | '/_app/'
     | '/_app/dashboards/$id'
+    | '/_app/data/$id'
+    | '/_app/data/imports'
+    | '/_app/data/rates'
+    | '/_app/data/reconcile'
     | '/_app/databases/$id'
     | '/_app/imports/$batch'
+    | '/_app/ledger/accounts'
     | '/_app/shared/$id'
     | '/_app/dashboards/'
+    | '/_app/data/'
+    | '/_app/databases/'
     | '/_app/imports/'
+    | '/_app/ledger/'
     | '/_app/shared/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   AppRoute: typeof AppRouteWithChildren
+  RenderTokenRoute: typeof RenderTokenRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -248,11 +393,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppActivityRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/budget': {
+      id: '/_app/budget'
+      path: '/budget'
+      fullPath: '/budget'
+      preLoaderRoute: typeof AppBudgetRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/budgets': {
       id: '/_app/budgets'
       path: '/budgets'
       fullPath: '/budgets'
       preLoaderRoute: typeof AppBudgetsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/changes': {
+      id: '/_app/changes'
+      path: '/changes'
+      fullPath: '/changes'
+      preLoaderRoute: typeof AppChangesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/future': {
+      id: '/_app/future'
+      path: '/future'
+      fullPath: '/future'
+      preLoaderRoute: typeof AppFutureRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/journal': {
@@ -283,6 +449,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/render/$token': {
+      id: '/render/$token'
+      path: '/render/$token'
+      fullPath: '/render/$token'
+      preLoaderRoute: typeof RenderTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_app/dashboards/': {
       id: '/_app/dashboards/'
       path: '/dashboards'
@@ -295,6 +468,48 @@ declare module '@tanstack/react-router' {
       path: '/dashboards/$id'
       fullPath: '/dashboards/$id'
       preLoaderRoute: typeof AppDashboardsIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/data/': {
+      id: '/_app/data/'
+      path: '/data'
+      fullPath: '/data/'
+      preLoaderRoute: typeof AppDataIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/data/$id': {
+      id: '/_app/data/$id'
+      path: '/data/$id'
+      fullPath: '/data/$id'
+      preLoaderRoute: typeof AppDataIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/data/imports': {
+      id: '/_app/data/imports'
+      path: '/data/imports'
+      fullPath: '/data/imports'
+      preLoaderRoute: typeof AppDataImportsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/data/rates': {
+      id: '/_app/data/rates'
+      path: '/data/rates'
+      fullPath: '/data/rates'
+      preLoaderRoute: typeof AppDataRatesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/data/reconcile': {
+      id: '/_app/data/reconcile'
+      path: '/data/reconcile'
+      fullPath: '/data/reconcile'
+      preLoaderRoute: typeof AppDataReconcileRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/databases/': {
+      id: '/_app/databases/'
+      path: '/databases'
+      fullPath: '/databases/'
+      preLoaderRoute: typeof AppDatabasesIndexRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/databases/$id': {
@@ -318,6 +533,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppImportsBatchRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/ledger/': {
+      id: '/_app/ledger/'
+      path: '/ledger'
+      fullPath: '/ledger/'
+      preLoaderRoute: typeof AppLedgerIndexRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/ledger/accounts': {
+      id: '/_app/ledger/accounts'
+      path: '/ledger/accounts'
+      fullPath: '/ledger/accounts'
+      preLoaderRoute: typeof AppLedgerAccountsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/shared/': {
       id: '/_app/shared/'
       path: '/shared'
@@ -338,36 +567,58 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAccountsRoute: typeof AppAccountsRoute
   AppActivityRoute: typeof AppActivityRoute
+  AppBudgetRoute: typeof AppBudgetRoute
   AppBudgetsRoute: typeof AppBudgetsRoute
+  AppChangesRoute: typeof AppChangesRoute
+  AppFutureRoute: typeof AppFutureRoute
   AppJournalRoute: typeof AppJournalRoute
   AppReconcileRoute: typeof AppReconcileRoute
   AppScenariosRoute: typeof AppScenariosRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppIndexRoute: typeof AppIndexRoute
   AppDashboardsIdRoute: typeof AppDashboardsIdRoute
+  AppDataIdRoute: typeof AppDataIdRoute
+  AppDataImportsRoute: typeof AppDataImportsRoute
+  AppDataRatesRoute: typeof AppDataRatesRoute
+  AppDataReconcileRoute: typeof AppDataReconcileRoute
   AppDatabasesIdRoute: typeof AppDatabasesIdRoute
   AppImportsBatchRoute: typeof AppImportsBatchRoute
+  AppLedgerAccountsRoute: typeof AppLedgerAccountsRoute
   AppSharedIdRoute: typeof AppSharedIdRoute
   AppDashboardsIndexRoute: typeof AppDashboardsIndexRoute
+  AppDataIndexRoute: typeof AppDataIndexRoute
+  AppDatabasesIndexRoute: typeof AppDatabasesIndexRoute
   AppImportsIndexRoute: typeof AppImportsIndexRoute
+  AppLedgerIndexRoute: typeof AppLedgerIndexRoute
   AppSharedIndexRoute: typeof AppSharedIndexRoute
 }
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountsRoute: AppAccountsRoute,
   AppActivityRoute: AppActivityRoute,
+  AppBudgetRoute: AppBudgetRoute,
   AppBudgetsRoute: AppBudgetsRoute,
+  AppChangesRoute: AppChangesRoute,
+  AppFutureRoute: AppFutureRoute,
   AppJournalRoute: AppJournalRoute,
   AppReconcileRoute: AppReconcileRoute,
   AppScenariosRoute: AppScenariosRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppIndexRoute: AppIndexRoute,
   AppDashboardsIdRoute: AppDashboardsIdRoute,
+  AppDataIdRoute: AppDataIdRoute,
+  AppDataImportsRoute: AppDataImportsRoute,
+  AppDataRatesRoute: AppDataRatesRoute,
+  AppDataReconcileRoute: AppDataReconcileRoute,
   AppDatabasesIdRoute: AppDatabasesIdRoute,
   AppImportsBatchRoute: AppImportsBatchRoute,
+  AppLedgerAccountsRoute: AppLedgerAccountsRoute,
   AppSharedIdRoute: AppSharedIdRoute,
   AppDashboardsIndexRoute: AppDashboardsIndexRoute,
+  AppDataIndexRoute: AppDataIndexRoute,
+  AppDatabasesIndexRoute: AppDatabasesIndexRoute,
   AppImportsIndexRoute: AppImportsIndexRoute,
+  AppLedgerIndexRoute: AppLedgerIndexRoute,
   AppSharedIndexRoute: AppSharedIndexRoute,
 }
 
@@ -375,6 +626,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   AppRoute: AppRouteWithChildren,
+  RenderTokenRoute: RenderTokenRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

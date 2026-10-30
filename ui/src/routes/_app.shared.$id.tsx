@@ -1,34 +1,23 @@
-import { useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { dashboardNotice } from '../features/dashboard/undo-notice'
-import { Link, createFileRoute, useBlocker, useRouter } from '@tanstack/react-router'
-import { z } from 'zod'
-import { Button } from '../components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
-import { Input } from '../components/ui/input'
-import { Skeleton } from '../components/ui/skeleton'
-import { DashboardEditor } from '../features/dashboard/editor'
-import { Component } from '../features/dashboard/component'
-import { tableSort } from '../features/dashboard/table-sort'
-import { componentValue } from '../features/dashboard/values'
-import type { DashboardPublishOutput } from '../lib/tools'
-import { sharedDraftQuery, sharedPost, sharedQuery } from '../features/sharing/queries'
+import { useQuery } from '@tanstack/react-query'
+import { RouteError } from '../features/telemetry/route-error'
+import { Link, createFileRoute } from '@tanstack/react-router'
+import { sharedQuery } from '../lib/api'
+import { Panel, type PanelCtx } from '../features/telemetry/panels'
+import { defaultBounds } from '../features/telemetry/time-grammar'
+import { describePage } from '../features/telemetry/shell-store'
+import { RowsSkeleton } from '../features/telemetry/page-bits'
+import { parseRange } from '../features/telemetry/time-grammar'
 
-export const Route=createFileRoute('/_app/shared/$id')({validateSearch:z.object({sort:tableSort,sort_table:z.string().max(200).optional().catch(undefined),page:z.string().optional().catch(undefined)}),loader:async ({context,params}) => {await context.queryClient.fetchQuery(sharedQuery(context.session,params.id))},pendingMs:150,pendingMinMs:300,pendingComponent:SharedPending,errorComponent:SharedError,component:SharedDashboard})
-function SharedPending() {return <section role="status" aria-busy="true"><span className="sr-only">Loading shared dashboard…</span><header className="page-header"><div><p className="breadcrumb">SHARED DASHBOARDS</p><h1>Shared dashboard</h1></div></header><div className="shared-loading" aria-hidden="true"><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/></div></section>}
-function SharedError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Shared dashboard unavailable</h1><p>It may have expired or access may have been revoked.</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button> <Link to="/shared">Back to shares</Link></section>}
+export const Route=createFileRoute('/_app/shared/$id')({errorComponent:p => <RouteError {...p}/>,component:SharedDashboard})
 function SharedDashboard() {
- const {session}=Route.useRouteContext(),{id}=Route.useParams(),search=Route.useSearch(),navigate=Route.useNavigate(),{data}=useSuspenseQuery(sharedQuery(session,id)),pages=data.pages ?? [],page=pages.find(item => item.id===search.page) ?? pages[0]
- const tableCount=(page?.layout ?? []).flatMap(row => row.cols ?? []).filter(item => {const parsed=componentValue.safeParse(data.values?.[item.component]);return parsed.success && (parsed.data.type==='table' || parsed.data.type==='scenario_compare' || parsed.data.type==='chart')}).length
- const client=useQueryClient(),[editing,setEditing]=useState(false),[dirty,setDirty]=useState(false),[publishing,setPublishing]=useState(false),[note,setNote]=useState(''),[notice,setNotice]=useState('')
- const dirtyRef=useRef(false)
- function markDirty(value:boolean) {dirtyRef.current=value;setDirty(value)}
- useBlocker({shouldBlockFn:({current,next}) => {if(!dirtyRef.current || current.pathname===next.pathname)return false;if(!window.confirm('Discard unsaved dashboard changes?'))return true;markDirty(false);return false},enableBeforeUnload:() => dirtyRef.current})
- const draft=useQuery({...sharedDraftQuery(session,id),enabled:data.role==='editor'})
- const publish=useMutation({mutationFn:() => sharedPost<DashboardPublishOutput>(session,id,'publish',{version:draft.data?.version ?? 0,note}),onSuccess:async (result) => {await Promise.all([client.invalidateQueries({queryKey:['shared-view',session.user.id,id]}),client.invalidateQueries({queryKey:['shared-draft',session.user.id,id]})]);setPublishing(false);setNotice(['Dashboard published.',...(result.warnings ?? [])].join(' '));setNote('');dashboardNotice({session,client,eventID:result.event_id,sharedID:id,message:`Published dashboard v${result.published_version}`,description:result.warnings?.join(' · '),onUndo:() => {void client.invalidateQueries({queryKey:['shared-view',session.user.id,id]});void client.invalidateQueries({queryKey:['shared-draft',session.user.id,id]})}})}})
- function closeEditor() {if(dirty && !window.confirm('Discard unsaved dashboard changes?'))return;markDirty(false);setEditing(false)}
- return <><header className="page-header"><div><p className="breadcrumb"><Link to="/shared">SHARED DASHBOARDS</Link></p><h1>{data.title}</h1><p className="description">Shared {data.mode} · {data.role} · v{data.version}</p></div>{data.role==='editor' && <div className="dashboard-toolbar"><Button size="sm" disabled={!draft.data} onClick={() => {setNotice('');setEditing(true)}}>Edit</Button><Button size="sm" variant="outline" disabled={draft.data?.status!=='draft'} onClick={() => {publish.reset();setPublishing(true)}}>Publish draft</Button></div>}</header>{data.role==='editor' && draft.isError && <p role="alert">Could not load editor access. Refresh the page to retry.</p>}{notice && <p role="status">{notice}</p>}{pages.length>1 && <nav className="page-tabs" aria-label="Dashboard pages">{pages.map(item => <button type="button" key={item.id} className={item.id===page?.id ? 'active' : ''} aria-current={item.id===page?.id ? 'page' : undefined} onClick={() => void navigate({search:old => ({...old,page:item.id})})}>{item.title || item.id}</button>)}</nav>}{data.legacy_html !== undefined ? <div className="shared-legacy" dangerouslySetInnerHTML={{__html:data.legacy_html}}/> : <div className="dashboard-grid">{(page?.layout ?? []).flatMap((row,ri) => (row.cols ?? []).map((placement,ci) => {const parsed=componentValue.safeParse(data.values?.[placement.component]);return <section className="panel" key={`${ri}-${ci}`} style={{gridColumn:`span ${placement.span}`}}>{data.issues?.[placement.component] ? <><h2>{placement.component}</h2><p role="alert">{data.issues[placement.component]}</p></> : parsed.success ? <><h2>{parsed.data.title || placement.component}</h2><Component value={parsed.data} tableId={`shared:${id}:${placement.component}`} sort={search.sort_table===placement.component || !search.sort_table && tableCount===1 ? search.sort : undefined} onSortChange={sort => void navigate({search:old => ({...old,sort,sort_table:sort ? placement.component : undefined})})}/></> : <><h2>{placement.component}</h2><p className="muted">This component could not be displayed.</p></>}</section>}))}</div>}
- <Sheet open={editing} onOpenChange={(open) => {if(!open)closeEditor()}}><SheetContent className="dashboard-editor-sheet"><SheetHeader><SheetTitle>Edit shared dashboard</SheetTitle><SheetDescription>Changes create a draft and use only the sources allowed by this share.</SheetDescription></SheetHeader>{editing && draft.data && <DashboardEditor key={`${id}-${draft.data.version}`} session={session} id={id} spec={draft.data.spec} shared onDirty={markDirty} done={(saved) => {if(!saved){closeEditor();return}markDirty(false);setEditing(false);setNotice('Draft saved. Publish it when ready.')}}/>}</SheetContent></Sheet>
- <Dialog open={publishing} onOpenChange={setPublishing}><DialogContent className="dashboard-action-dialog"><DialogHeader><DialogTitle>Publish shared draft</DialogTitle><DialogDescription>The server validates this draft using the sources allowed by the grant.</DialogDescription></DialogHeader><form className="dashboard-action-form" onSubmit={(event) => {event.preventDefault();publish.mutate()}}><label>Publish note<Input value={note} onChange={event => setNote(event.target.value)} maxLength={500}/></label><Button type="submit" disabled={publish.isPending || draft.data?.status!=='draft'}>Publish v{draft.data?.version}</Button>{publish.error && <p role="alert">{publish.error.message}</p>}</form></DialogContent></Dialog></>
+ const {session}=Route.useRouteContext(),{id}=Route.useParams(),data=useQuery(sharedQuery(session,id)),bounds=defaultBounds()
+ const head=(title:string,sub?:string) => <header className="page-header"><div><p className="breadcrumb"><Link to="/shared" className="tm-crumb">← Shared with me</Link></p><h1>{title}</h1>{sub && <p className="description">{sub}</p>}</div></header>
+ if(data.error)return <>{head('Shared dashboard')}<RouteError error={data.error} reset={() => void data.refetch()} title="This share is unavailable"/></>
+ if(!data.data)return <>{head('Shared dashboard')}<RowsSkeleton rows={8}/></>
+ const view=data.data,range=parseRange('12mo',bounds)!
+ describePage({title:view.title,lines:['A dashboard shared with me']})
+ // A share has its own values and no cube, so every panel draws what the server sent.
+ const ctx:PanelCtx={cube:null,range,win:null,compareMode:'none',defaultCompare:'none',pills:[],filtering:false,dashboard:id,syncKey:`share-${id}`,bounds,explore:[],readOnly:true,setRange:() => {},stepOut:() => {},addPill:() => {}}
+ if(view.legacy_html)return <>{head(view.title,`Shared ${view.at ? new Date(view.at).toLocaleDateString() : ''}`)}<div className="shared-legacy" dangerouslySetInnerHTML={{__html:view.legacy_html}}/></>
+ return <>{head(view.title,view.mode==='live' ? 'Live' : view.at ? `As of ${new Date(view.at).toLocaleDateString()}` : undefined)}{(view.pages ?? []).map(page => <div key={page.id} className="dashboard-grid">{page.layout.flatMap((row,ri) => (row.cols ?? []).map((col,ci) => <Panel key={`${ri}-${ci}`} c={{id:col.component,type:'unknown'}} value={view.values?.[col.component]} ctx={ctx} span={col.span}/>))}</div>)}</>
 }

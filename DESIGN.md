@@ -166,7 +166,7 @@ The workspace follows the system light or dark preference. Responsive layouts pr
 - Compact Geist typography with tabular financial numbers.
 - Blue chart data, green within budget, red over budget and amber drafts.
 - Flat light/dark surfaces and visible keyboard focus.
-- Readable mobile charts with expandable semantic data tables.
+- Readable mobile charts with a table view, and a full page for long data.
 
 Evidence: the SPA styles in `ui/src/index.css`, the shared controls in `ui/src/components/ui`, and chart rendering in `ui/src/features/dashboard`. Authentication and generated previews still use their server-side styles.
 
@@ -191,8 +191,8 @@ Neutral paper and recessed surfaces carry most of the interface; color identifie
 
 ### Neutral
 
-- **Paper** (`bg`, `paper`): page, panels and editable cells. The two tokens share a value in each theme but keep separate source roles.
-- **Recessed surface** (`sunk`): sidebar, table headers, calculated cells, formula bar and code surfaces.
+- **Paper** (`bg`, `paper`): page and panels. The two tokens share a value in each theme but keep separate source roles.
+- **Recessed surface** (`sunk`): sidebar, table headers, the answer sentence and code surfaces.
 - **Ink** (`text`, `ink`): primary text, filled controls, strong borders and active-navigation markers.
 - **Supporting text** (`text2`) and **muted text** (`text3`): explanatory copy, metadata, captions and chart labels.
 - **Frame border** (`bd`) and **cell divider** (`bd2`): panel boundaries and quieter internal rules.
@@ -221,9 +221,9 @@ Neutral paper and recessed surfaces carry most of the interface; color identifie
 
 ## Layout
 
-The desktop shell uses a sticky 248px sidebar and a flexible main column capped at 1440px, with `28px 40px 56px` content padding. Dashboard panels occupy a twelve-column grid with shared borders. Toolbars and legends wrap.
+The desktop shell uses a sticky 232px sidebar and a flexible main column capped at 1440px, with `24px 32px 56px` content padding. Dashboard panels occupy a twelve-column grid with shared borders. Toolbars and legends wrap.
 
-Between 761px and 1100px the sidebar becomes a 56px icon rail. At 760px and below a header opens the navigation in a sheet, and main padding becomes `24px 18px 48px`. Data tables and charts scroll locally instead of forcing page overflow. Charts are 240px high with a 360px minimum canvas width.
+Between 761px and 1100px the sidebar becomes a 56px icon rail. At 760px and below a sticky header opens the navigation in a sheet, and main padding becomes `16px 12px 48px`. The page is the only scroller: nothing overflows sideways at 390px, tables use the full page rather than a fixed viewport, and phone rows reflow instead of scrolling locally. Charts follow their container's width, 232px high by default.
 
 ## Elevation & Depth
 
@@ -232,8 +232,7 @@ Paper, recessed surfaces and fine borders establish hierarchy. Overlays use ink 
 ### State Indicators
 
 - **Active navigation:** inset ink stripe (`inset 3px 0 var(--ink)`) in the sidebar and mobile sheet.
-- **Editable-cell focus:** inset blue stroke (`inset 0 0 0 2px var(--focus)`). Invalid cells use a narrower inset error stroke (`1px`).
-- **Keyboard focus:** a blue outline (`2px`, offset `2px`) for elements whose own focus rules do not suppress it. Inputs and textareas use a focus-border shift; editable cells use their inset stroke.
+- **Keyboard focus:** a blue outline (`2px`, offset `2px`) for elements whose own focus rules do not suppress it. Inputs and textareas use a focus-border shift.
 
 **The Flat Workspace Rule.** Separate surfaces with tone and 1px borders. Inset active and focus indicators communicate state; they do not lift cards above the page.
 
@@ -257,23 +256,31 @@ Dashboard panels use a paper surface, frame border and the observed panel paddin
 
 ### Inputs / Fields
 
-Paper fields with a frame border, square corners and compact insets. Labels remain visibly associated with each field. Text inputs and textareas switch border color on focus; text caret uses data blue. Spreadsheet cells save on Enter or blur; Escape cancels. Calculated cells use the recessed surface and stay read-only. Saving uses selection blue; validation uses the inset error stroke. Preserve native select/checkbox behavior rather than claiming a custom selected or invalid treatment that is absent.
+Paper fields with a frame border, square corners and compact insets. Labels remain visibly associated with each field. Text inputs and textareas switch border color on focus; text caret uses data blue. Invalid fields use the error stroke and say what to do. Preserve native select and checkbox behavior rather than claiming a custom selected or invalid treatment that is absent.
 
 ### Navigation
 
-The recessed sidebar uses 13px links and 10px monospace group labels. Hover uses the hover surface; the active link uses paper and an inset ink stripe. The tablet rail keeps labels accessible while visually hiding them. Mobile opens the same navigation in a sheet. Settings offers light, dark and system appearance. Home opens the first saved dashboard, or the creation empty state when none exist. The dashboard breadcrumb and sidebar group link open the full dashboard list.
+The recessed sidebar holds the agent-set navigation (Now, Spending, Income, Budget, Future, Ledger, Data, Changes), any other dashboards in their own scrolling region so a long list can't push navigation away, and a footer with Shared, Settings and Search. Hover uses the hover surface; the active link uses paper and an inset ink stripe. The tablet rail keeps labels accessible while visually hiding them. Mobile opens the same navigation in a sheet. `/` opens the dashboard marked `home`. Datasets live under Data, never in the sidebar.
 
 ### Data Grid
 
-A collapsed-border table with quiet internal rules, recessed uppercase headers and right-aligned numeric cells. Editable cells use paper; calculated cells are recessed. The formula bar uses a monospace value field. Normal table padding is reduced to `7px 10px` inside the editing grid. Long values wrap; local horizontal overflow preserves useful column widths.
+`DataGrid`: recessed uppercase sticky headers and quiet row rules. Alignment follows the column's `type`, and only numeric types align right. Totals appear only on a column declaring `total` whose type can add up. Long tables virtualize against the page scroll. Machine fields never show; a row's "Details" opens them in the drawer. On a phone each row becomes title and amount on the first line, everything else on the second, with a sort select replacing the header. Tables over 50 rows on a dashboard show their first rows and a link to the rest.
 
 ### Charts and Budget Bars
 
-Charts use the five-color series cycle, faint horizontal grid lines, stable legend colors and direct labels for small series sets. A **Table** button switches to a labelled, keyboard-accessible data table. Charts scroll locally on narrow screens. Budget bars use green within limit and red over limit, with actual and limit values written alongside.
+`TimeChart` draws on uPlot in a lazy chunk: a real UTC time axis, faint horizontal grid lines, one tooltip listing every series, a crosshair synced across the page, drag and Ctrl/⌘+scroll zoom, pinch, double-click to step out, click-to-isolate legend, dashed compare overlay, amber annotation bands and direct labels for small series sets. Flows and stacks keep a zero baseline; balances and rates hug their data. A **Table** button switches to a labelled, keyboard-accessible table, and the plot's arrow keys read each point aloud. A category keeps its colour across every chart, range and filter, by all-time rank. Estimates are hatched in every mark that can show them. `RankedBars` replaces most categorical bars and donuts, sorted with direct labels and a comparison tick; near-zero rows collapse into "N small accounts". `Donut` and `Sankey` are small SVG marks. Budget bars use green within limit and red over limit, with actual and limit values written alongside.
+
+### Instruments
+
+`TimeBar` is one per page: a typed date field with live parsing, presets, step and zoom, compare, and a full-history navigator with a draggable brush, all in the URL. `FilterBar` turns dimensions the agent declared into pills with click-to-change operators and value suggestions with counts and totals, with plain-words chips and an Advanced view of the same filter as CEL. `Stat` shows value, change, comparison period and sparkline at a fixed height, whether loaded or not, and its tone follows meaning: lower spending is green. `Answer` renders the server's sentence and a "What moved" list that filters when clicked.
+
+### Reading rules
+
+People read, zoom, filter, drill, save views, flag numbers and ask an agent. There are no editing controls in the web UI. No raw ids, snake_case keys, tool names or templates appear on a page; they live in the Details drawer, the one home for how a number was calculated, its history and "Flag this". Provenance reads "From statement", "Estimated" or "Added by <agent>".
 
 ### Dialogs and Console
 
-Dialogs and sheets use square paper surfaces and viewport-constrained content. The MCP console provides structured tool inputs and displays results in the workspace.
+Dialogs and sheets use square paper surfaces and viewport-constrained content. ⌘K opens the Command bar for pages, accounts, payees and saved views; a question falls through to "Ask an agent", a copyable prompt that already says what the person is looking at.
 
 ## Do's and Don'ts
 
@@ -283,13 +290,13 @@ Dialogs and sheets use square paper surfaces and viewport-constrained content. T
 - **Do** preserve square corners, fine shared borders and the observed compact spacing rhythm.
 - **Do** keep amounts tabular and align numeric table columns to the right.
 - **Do** preserve all workspace tasks on mobile through the navigation sheet and single-column panels.
-- **Do** pair charts with labelled, keyboard-focusable scroll regions and the chart table toggle.
+- **Do** pair every chart with its table toggle and a written summary for screen readers.
 - **Do** use synthetic records in public examples and screenshots.
 
 ### Don't:
 
 - **Don't** add rounded cards, pill controls or decorative drop shadows to this workspace.
 - **Don't** replace the pinned Geist body and operational type with an unrelated display identity.
-- **Don't** shrink mobile charts until their labels become unreadable; retain local chart scrolling.
+- **Don't** let anything scroll sideways at phone width; drop ticks and reflow rows instead.
 - **Don't** communicate a financial status through color alone; retain values, labels and legends.
 - **Don't** copy financial data or private reference material into public documentation.

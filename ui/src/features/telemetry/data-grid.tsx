@@ -1,11 +1,11 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { humanDate, moneyExact, percent } from './format'
 import { Sparkline } from './marks'
 import './telemetry.css'
 
 export type ColumnType='text'|'money'|'number'|'date'|'pct'|'days'|'count'
-export type GridColumn={key:string;label:string;type?:ColumnType;total?:boolean;cell?:'spark'|'bar';machine?:boolean;width?:string;sortable?:boolean;currency?:string}
+export type GridColumn={key:string;label:string;type?:ColumnType;total?:boolean;cell?:'spark'|'bar';machine?:boolean;width?:string;sortable?:boolean;currency?:string;format?:string}
 /** A cell is a raw value, or the server's `{v,t,tone}` where `t` is already formatted. */
 export type GridValue=string|number|null|undefined|number[]|{v:unknown;t:string;tone?:string}
 export type GridRow=Record<string,GridValue>
@@ -42,8 +42,10 @@ const roleFor=(columns:GridColumn[]) => {const title=columns.find(c => (c.type ?
 
 export type DataGridProps={columns:GridColumn[];rows:GridRow[];rowKey:(row:GridRow,index:number) => string;label:string;
  sort?:GridSort;onSortChange?:(sort:GridSort) => void;initialSort?:GridSort;onDetails?:(row:GridRow) => void;onRowActivate?:(row:GridRow) => void;
- renderCell?:(row:GridRow,column:GridColumn) => ReactNode;emptyText?:string;virtualFrom?:number}
-export function DataGrid({columns,rows,rowKey,label,sort:controlled,onSortChange,initialSort=null,onDetails,onRowActivate,renderCell,emptyText='No entries match.',virtualFrom=60}:DataGridProps) {
+ renderCell?:(row:GridRow,column:GridColumn) => ReactNode;emptyText?:string;virtualFrom?:number;
+ /** Replaces the cents total, for server cells whose values are decimals and whose text the server formats. */ totalText?:(column:GridColumn,rows:GridRow[]) => string|null;
+ /** Called as the last rendered rows near the end, to load the next page. */ onEndReached?:() => void}
+export function DataGrid({columns,rows,rowKey,label,sort:controlled,onSortChange,initialSort=null,onDetails,onRowActivate,renderCell,emptyText='No entries match.',virtualFrom=60,totalText,onEndReached}:DataGridProps) {
  const [local,setLocal]=useState<GridSort>(initialSort),sort=controlled===undefined ? local : controlled,setSort=(next:GridSort) => {if(onSortChange)onSortChange(next);if(controlled===undefined)setLocal(next)}
  const [active,setActive]=useState(0),[margin,setMargin]=useState(0),body=useRef<HTMLDivElement>(null),selectId=useId()
  const visible=columns.filter(c => !c.machine),sorted=sortRows(rows,sort),details=!!onDetails,cols=template(visible,details),m=roleFor(visible)
@@ -52,7 +54,9 @@ export function DataGrid({columns,rows,rowKey,label,sort:controlled,onSortChange
  const virtualizer=useWindowVirtualizer({count:sorted.length,estimateSize:() => 36,overscan:14,scrollMargin:margin,enabled:virtual,measureElement:el => el.getBoundingClientRect().height || 36})
  const items=virtual ? virtualizer.getVirtualItems() : sorted.map((_,index) => ({index,start:0}))
  const barPeak=new Map(visible.filter(c => c.cell==='bar').map(c => [c.key,Math.max(1e-9,...rows.map(r => {const v=raw(r[c.key]);return typeof v==='number' ? Math.abs(v) : 0}))]))
- const totals=visible.map(c => columnTotal(c,sorted)),hasTotal=totals.some(t => t!==null)
+ const totals=visible.map(c => {if(!c.total || !ADDITIVE.has(c.type ?? 'text'))return null;if(totalText)return totalText(c,sorted);const sum=columnTotal(c,sorted);return sum===null ? null : gridText(c,sum)}),hasTotal=totals.some(t => t!==null)
+ const lastShown=items.length ? items[items.length-1].index : -1
+ useEffect(() => {if(onEndReached && lastShown>=sorted.length-20)onEndReached()},[lastShown,sorted.length,onEndReached])
  const toggle=(key:string) => setSort(sort?.key===key ? (sort.desc ? null : {key,desc:true}) : {key,desc:false})
  const focusRow=(index:number) => {
   const next=Math.max(0,Math.min(sorted.length-1,index));setActive(next)
@@ -88,7 +92,7 @@ export function DataGrid({columns,rows,rowKey,label,sort:controlled,onSortChange
    {virtual ? <div style={{position:'absolute',top:0,left:0,right:0,transform:`translateY(${(items[0]?.start ?? margin)-margin}px)`}}>{items.map(item => <div key={item.index} ref={virtualizer.measureElement} data-index={item.index}>{line(sorted[item.index],item.index)}</div>)}</div> : sorted.map((row,i) => line(row,i))}
   </div>
   {hasTotal && <div role="row" aria-rowindex={sorted.length+2} className="tm-grid-row tm-grid-total" style={{gridTemplateColumns:cols}}>
-   {visible.map((c,i) => {const t=totals[i];return <div key={c.key} role="cell" data-m={m(c.key)} className={`tm-cell${NUMERIC.has(c.type ?? 'text') ? ' num' : ''}`}>{t!==null ? gridText(c,t) : m(c.key)==='title' ? `Total · ${sorted.length.toLocaleString('en-US')} rows` : ''}</div>})}
+   {visible.map((c,i) => {const t=totals[i];return <div key={c.key} role="cell" data-m={m(c.key)} className={`tm-cell${NUMERIC.has(c.type ?? 'text') ? ' num' : ''}`}>{t!==null ? t : m(c.key)==='title' ? `Total · ${sorted.length.toLocaleString('en-US')} rows` : ''}</div>})}
    {details && <div role="cell" className="tm-cell details" data-m="meta"/>}
   </div>}
  </div>

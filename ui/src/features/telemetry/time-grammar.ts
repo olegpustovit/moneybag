@@ -10,6 +10,8 @@ export type CompareWindow=Range&{mode:Exclude<CompareMode,'none'>;label:string;p
 const MONTHS=['january','february','march','april','may','june','july','august','september','october','november','december']
 export const MONTH_NAMES=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const utc=Date.UTC
+// Before the cube arrives the page still needs a clock; the real start of history replaces this.
+export const defaultBounds=():Bounds => {const today=Math.floor(Date.now()/DAY)*DAY;return {today,start:today-40*365*DAY}}
 const eom=(y:number,m:number) => utc(y,m+1,0)
 const fields=(t:number) => {const d=new Date(t);return {y:d.getUTCFullYear(),m:d.getUTCMonth(),d:d.getUTCDate(),w:(d.getUTCDay()+6)%7}}
 const monthIndex=(s:string) => s.length<3 ? -1 : MONTHS.findIndex(name => name.startsWith(s))

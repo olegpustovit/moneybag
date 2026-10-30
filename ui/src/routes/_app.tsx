@@ -1,80 +1,82 @@
+import { useEffect, useState } from 'react'
+import { RouteError } from '../features/telemetry/route-error'
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
-import { Link, createFileRoute, Outlet, redirect, useLocation, useRouter } from '@tanstack/react-router'
-import { Activity, BookOpen, Boxes, ChartNoAxesCombined, ChevronRight, CircleDollarSign, ClipboardCheck, Database, FileInput, LayoutDashboard, Menu, Plus, Settings, Share2, Wallet } from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
-import { useState } from 'react'
-import { Toaster } from 'sonner'
-import { ApiError, sessionQuery } from '../lib/api'
-import { dashboardsQuery, tablesQuery } from '../lib/queries'
-import { Button } from '../components/ui/button'
+import { Link, Outlet, createFileRoute, redirect, useLocation, useNavigate, useRouter } from '@tanstack/react-router'
+import { Banknote, BookOpen, Database, Gauge, History, LayoutDashboard, Menu, Receipt, Settings, Share2, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
+import { ApiError, bootstrapQuery, savedViewsQuery, usageBeacon, type Bootstrap, type DashboardHead, type NavItem } from '../lib/api'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../components/ui/sheet'
-import { CreateWorkspaceContext, CreateWorkspaceItem } from '../features/workspace/create'
+import { Button } from '../components/ui/button'
+import { CommandBar, type CommandGroup, type CommandItem } from '../features/telemetry/command-bar'
+import { ShellOverlays } from '../features/telemetry/shell-overlays'
+import { askAgent } from '../features/telemetry/shell-store'
+import { useCube } from '../features/telemetry/cube-store'
+import { homeDashboard, normalizeRoute } from '../features/telemetry/nav'
 
-export const Route = createFileRoute('/_app')({
-  beforeLoad: async ({ context, location }) => {
-    try { return { session: await context.queryClient.query({ ...sessionQuery, staleTime: 'static' }) } }
-    catch (error) { if (error instanceof ApiError && error.status === 401) throw redirect({ href: `/login?next=${encodeURIComponent(location.href)}` }); throw error }
-  },
-  loader: async ({ context }) => { await Promise.all([context.queryClient.query({ ...dashboardsQuery(context.session), staleTime: 'static' }), context.queryClient.query({ ...tablesQuery(context.session), staleTime: 'static' })]) },
-  pendingMs: Infinity,
-  pendingComponent: () => <main className="loading" aria-busy="true">Loading workspace…</main>,
-  errorComponent: WorkspaceError,
-  component: Workspace,
+export const Route=createFileRoute('/_app')({
+ beforeLoad:async ({context,location}) => {
+  try {const bootstrap=await context.queryClient.fetchQuery(bootstrapQuery);return {bootstrap,session:bootstrap.session}}
+  catch(error){if(error instanceof ApiError && error.status===401)throw redirect({href:`/login?next=${encodeURIComponent(location.href)}`});throw error}
+ },
+ // The cube is for exploring: fetch it behind the page and never hold a page for it.
+ loader:({context}) => {void import('../features/telemetry/cube-store').then(store => context.queryClient.prefetchQuery(store.cubeQuery(context.session.user.id,context.queryClient)))},
+ shouldReload:false,pendingMs:Infinity,errorComponent:p => <main className="loading"><RouteError {...p} title="Could not load your workspace"/></main>,component:Workspace,
 })
-
-function WorkspaceError({ error, reset }: { error: unknown; reset: () => void }) {
-  const router = useRouter()
-  return <main className="loading"><h1>Could not load your workspace</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></main>
+const ICONS:Record<string,LucideIcon>={gauge:Gauge,receipt:Receipt,banknote:Banknote,wallet:Wallet,'trending-up':TrendingUp,'book-open':BookOpen,database:Database,history:History}
+function usableNav(data:Bootstrap):(NavItem&{to:string})[] {
+ const known=new Set(data.dashboards.map(d => d.id))
+ // An agent's nav may name a dashboard that isn't built yet; a dead link is worse than a shorter list.
+ return data.nav.flatMap(item => item.dashboard ? (known.has(item.dashboard) ? [{...item,to:`/dashboards/${item.dashboard}`}] : []) : [{...item,to:normalizeRoute(item.route ?? '/')}])
 }
-
-type NavLink = { href: '/accounts' | '/journal' | '/budgets' | '/scenarios' | '/imports' | '/reconcile' | '/shared' | '/activity' | '/settings'; label: string; icon: LucideIcon }
-const records: NavLink[] = [
-  { href: '/accounts', label: 'Accounts', icon: Wallet }, { href: '/journal', label: 'Journal', icon: BookOpen },
-  { href: '/budgets', label: 'Budgets', icon: CircleDollarSign }, { href: '/scenarios', label: 'Scenarios', icon: ChartNoAxesCombined },
-]
-const workflows: NavLink[] = [
-  { href: '/imports', label: 'Imports', icon: FileInput }, { href: '/reconcile', label: 'Reconcile', icon: ClipboardCheck },
-  { href: '/shared', label: 'Shared with me', icon: Share2 }, { href: '/activity', label: 'Activity', icon: Activity },
-]
-async function navCount(path:string):Promise<number> {
-  const response=await fetch(path,{credentials:'same-origin'})
-  if(!response.ok) throw new ApiError('Could not load navigation count.',response.status)
-  const data=await response.json() as {count:unknown}
-  if(typeof data.count!=='number' || !Number.isSafeInteger(data.count) || data.count<0) throw new Error('Invalid navigation count.')
-  return data.count
+const count=(item:NavItem,data:Bootstrap) => item.id==='data' ? data.counts.imports+data.counts.reconcile : item.id==='changes' ? data.counts.feedback : 0
+const countHint=(item:NavItem,n:number) => item.id==='data' ? `${n} waiting for review` : `${n} open ${n===1 ? 'flag' : 'flags'}`
+function isActive(to:string,path:string,home:DashboardHead|undefined) {
+ if(to==='/')return path==='/' || (!!home && path===`/dashboards/${home.id}`)
+ return path===to || path.startsWith(`${to}/`)
 }
-function Navigation({ compact = false, onNavigate, onCreate }: { compact?: boolean; onNavigate?: () => void; onCreate: (kind:'dashboard'|'database') => void }) {
-  const { session } = Route.useRouteContext()
-  const { data: dashboards } = useSuspenseQuery(dashboardsQuery(session))
-  const { data: tables } = useSuspenseQuery(tablesQuery(session))
-  const path = useLocation({ select: (location) => location.pathname })
-  const imports = useQuery({queryKey:['imports',session.user.id,'count'],queryFn:() => navCount('/api/imports/count'),staleTime:30_000,refetchInterval:60_000})
-  const discrepancies = useQuery({queryKey:['reconcile',session.user.id,'count'],queryFn:() => navCount('/api/reconcile/count'),staleTime:30_000,refetchInterval:60_000})
-  const link = ({ href, label, icon: Icon }: NavLink) => {const count=href==='/imports' ? imports.data : href==='/reconcile' ? discrepancies.data : undefined,description=href==='/imports' ? 'staged imports' : 'open discrepancies';return <Link key={href} to={href} onClick={onNavigate} title={compact ? count ? `${label}: ${count} ${description}` : label : undefined} className={path === href || path.startsWith(`${href}/`) ? 'nav-link active' : 'nav-link'} aria-current={path === href ? 'page' : undefined}><Icon aria-hidden="true" size={16} /><span className="nav-label">{label}</span>{!!count && <span className="nav-count" aria-label={`${count} ${description}`}>{count}</span>}</Link>}
-  return <div className="navigation">
-    <Link className="workspace" to="/" onClick={onNavigate}><span className="workspace-mark" aria-hidden="true">M</span><span className="nav-label workspace-name">{session.user.name}’s money</span></Link>
-    <nav aria-label="Workspace">
-      <Link className="nav-group" to="/dashboards" onClick={onNavigate}>Dashboards</Link>
-      {(dashboards.items ?? []).map((dashboard) => <Link key={dashboard.id} to="/dashboards/$id" params={{id:dashboard.id}} onClick={onNavigate} title={dashboard.title} className={path === `/dashboards/${dashboard.id}` ? 'nav-link active' : 'nav-link'} aria-current={path === `/dashboards/${dashboard.id}` ? 'page' : undefined}><LayoutDashboard aria-hidden="true" size={16}/><span className="nav-label nav-title">{dashboard.title}</span>{dashboard.draft_version > 0 && <span className="draft-dot" title="Has a draft" aria-label="Has a draft" />}</Link>)}
-      {!(dashboards.items ?? []).length && <span className="nav-empty">No dashboards yet</span>}
-      <button type="button" className="nav-link nav-action" title="New dashboard" onClick={() => onCreate('dashboard')}><span className="nav-create-icon" aria-hidden="true"><LayoutDashboard size={16}/><Plus size={10}/></span><span className="nav-label">New dashboard</span></button>
-      <div className="nav-group">Workspace</div>{records.map(link)}
-      <div className="nav-group">Databases</div>
-      {(tables.items ?? []).map((table) => <Link key={table.id} to="/databases/$id" params={{id:table.id}} onClick={onNavigate} title={compact ? table.name : undefined} className={path === `/databases/${table.id}` ? 'nav-link active' : 'nav-link'} aria-current={path === `/databases/${table.id}` ? 'page' : undefined}><Database aria-hidden="true" size={16}/><span className="nav-label">{table.name}</span></Link>)}
-      {!(tables.items ?? []).length && <span className="nav-empty">No databases yet</span>}
-      <button type="button" className="nav-link nav-action" title="New database" onClick={() => onCreate('database')}><span className="nav-create-icon" aria-hidden="true"><Database size={16}/><Plus size={10}/></span><span className="nav-label">New database</span></button>
-      <div className="nav-group">Manage</div>{workflows.map(link)}
-    </nav>
-    <div className="nav-footer">{link({ href: '/settings', label: 'Settings', icon: Settings })}<span className="nav-label version">{session.version}</span></div>
+function Navigation({data,onNavigate,onSearch}:{data:Bootstrap;onNavigate?:() => void;onSearch:() => void}) {
+ const router=useRouter(),path=useLocation({select:l => l.pathname}),items=usableNav(data),home=homeDashboard(data.dashboards)
+ const preload=(to:string) => {void router.preloadRoute({to:to as never}).catch(() => {})}
+ const inNav=new Set(items.flatMap(i => i.dashboard ? [i.dashboard] : [])),others=data.dashboards.filter(d => !inNav.has(d.id) && d.id!==home?.id)
+ return <div className="navigation">
+  <Link className="workspace" to="/" onClick={onNavigate}><span className="workspace-mark" aria-hidden="true">M</span><span className="nav-label workspace-name">{data.session.user.name}’s money</span></Link>
+  <nav aria-label="Workspace" className="nav-main">
+   {items.map(item => {const Icon=ICONS[item.icon] ?? LayoutDashboard,active=isActive(item.to,path,home),n=count(item,data);return <a key={item.id} href={item.to} className={active ? 'nav-link active' : 'nav-link'} aria-current={active ? 'page' : undefined} title={item.label} onClick={event => {if(!event.metaKey && !event.ctrlKey && !event.shiftKey){event.preventDefault();onNavigate?.();void router.navigate({href:item.to})}}} onMouseEnter={() => preload(item.to)} onFocus={() => preload(item.to)}><Icon aria-hidden="true" size={16}/><span className="nav-label">{item.label}</span>{n>0 && <span className="nav-count" title={countHint(item,n)}><span className="sr-only">, {countHint(item,n)}</span>{n}</span>}</a>})}
+  </nav>
+  {others.length>0 && <nav aria-label="More dashboards" className="nav-more"><span className="nav-group">More</span>{others.map(d => {const to=`/dashboards/${d.id}`,active=path===to;return <Link key={d.id} to="/dashboards/$id" params={{id:d.id}} onClick={onNavigate} title={d.title} className={active ? 'nav-link active' : 'nav-link'} aria-current={active ? 'page' : undefined}><LayoutDashboard aria-hidden="true" size={16}/><span className="nav-label nav-title">{d.title}</span></Link>})}</nav>}
+  <div className="nav-footer">
+   <Link to="/shared" onClick={onNavigate} className={path.startsWith('/shared') ? 'nav-link active' : 'nav-link'} title="Shared with me"><Share2 aria-hidden="true" size={16}/><span className="nav-label">Shared with me</span></Link>
+   <Link to="/settings" onClick={onNavigate} className={path==='/settings' ? 'nav-link active' : 'nav-link'} title="Settings"><Settings aria-hidden="true" size={16}/><span className="nav-label">Settings</span></Link>
+   <button type="button" className="nav-link nav-action" title="Search and jump (Ctrl K)" onClick={() => {onNavigate?.();onSearch()}}><span className="nav-kbd" aria-hidden="true">⌘K</span><span className="nav-label">Search</span></button>
   </div>
+ </div>
 }
 function Workspace() {
-  const [navOpen, setNavOpen] = useState(false)
-  const [creating, setCreating] = useState<'dashboard'|'database'>()
-  const {session}=Route.useRouteContext()
-  function create(kind:'dashboard'|'database') {setNavOpen(false);setCreating(kind)}
-  return <><a href="#main" className="skip">Skip to content</a><div className="workspace-shell">
-    <aside className="desktop-sidebar"><Navigation compact onCreate={create} /></aside>
-    <div className="workspace-content"><header className="mobile-header"><Sheet open={navOpen} onOpenChange={setNavOpen}><SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Open navigation" />}><Menu /></SheetTrigger><SheetContent side="left" className="mobile-sheet"><SheetHeader><SheetTitle>Workspace navigation</SheetTitle></SheetHeader><Navigation onNavigate={() => setNavOpen(false)} onCreate={create} /></SheetContent></Sheet><span className="mobile-brand"><Boxes size={17} aria-hidden="true" /> Moneybag</span><ChevronRight size={14} aria-hidden="true"/></header><main id="main" className="main-content"><CreateWorkspaceContext.Provider value={create}><Outlet /></CreateWorkspaceContext.Provider></main></div>
-  </div>{creating && <CreateWorkspaceItem key={creating} kind={creating} session={session} close={() => setCreating(undefined)}/>}<Toaster position="bottom-right" closeButton toastOptions={{style:{background:'var(--paper)',color:'var(--text)',border:'1px solid var(--bd)',borderRadius:0}}}/></>
+ const {data}=useSuspenseQuery(bootstrapQuery),session=data.session,router=useRouter(),navigate=useNavigate(),cube=useCube(session.user.id),[mobileOpen,setMobileOpen]=useState(false),[commandOpen,setCommandOpen]=useState(false)
+ const views=useQuery({...savedViewsQuery(session),staleTime:60_000,enabled:commandOpen})
+ useEffect(() => {
+  const send=() => {const {pathname}=router.state.location,dashboard=pathname.match(/^\/dashboards\/([^/]+)/)?.[1];usageBeacon(session,pathname,dashboard ? decodeURIComponent(dashboard) : undefined)}
+  send();return router.subscribe('onResolved',event => {if(event.pathChanged)send()})
+ },[router,session])
+ const groups:CommandGroup[]=[
+  {heading:'Pages',items:[...usableNav(data).map(i => ({id:i.to,label:i.label})),{id:'/ledger/accounts',label:'Accounts'},{id:'/data/rates',label:'Rates'},{id:'/data/imports',label:'Imports'},{id:'/data/reconcile',label:'Reconcile'},{id:'/settings',label:'Settings'},...data.dashboards.map(d => ({id:`/dashboards/${d.id}`,label:d.title,hint:'Dashboard'}))].filter((item,i,all) => all.findIndex(x => x.id===item.id)===i)},
+  {heading:'Saved views',items:(views.data ?? []).map(v => ({id:v.id,label:v.name,hint:'Saved view'}))},
+  {heading:'Accounts',items:(cube?.accounts ?? []).filter(a => a.class!=='equity').map(a => ({id:a.id,label:a.label,hint:a.category!==a.label ? a.category : undefined}))},
+  {heading:'Payees',items:(cube?.payees ?? []).map(p => ({id:p,label:p}))},
+ ]
+ const select=(item:CommandItem,group:string) => {
+  if(group==='Pages')void router.navigate({href:item.id})
+  else if(group==='Saved views'){const v=views.data?.find(x => x.id===item.id);if(v)void router.navigate({href:`${v.page}?${new URLSearchParams(v.state ?? {})}`})}
+  else if(group==='Accounts')void navigate({to:'/ledger',search:{accounts:[item.id]}})
+  else void navigate({to:'/ledger',search:{q:item.label}})
+ }
+ return <div className="workspace-shell">
+  <aside className="desktop-sidebar"><Navigation data={data} onSearch={() => setCommandOpen(true)}/></aside>
+  <div className="workspace-content">
+   <a className="skip" href="#main-content">Skip to content</a>
+   <header className="mobile-header"><Sheet open={mobileOpen} onOpenChange={setMobileOpen}><SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Open navigation"/>}><Menu/></SheetTrigger><SheetContent side="left" className="mobile-sheet"><SheetHeader className="sr-only"><SheetTitle>Navigation</SheetTitle></SheetHeader><Navigation data={data} onNavigate={() => setMobileOpen(false)} onSearch={() => setCommandOpen(true)}/></SheetContent></Sheet><Link to="/" className="mobile-brand"><span className="workspace-mark" aria-hidden="true">M</span>Moneybag</Link><Button variant="ghost" size="sm" onClick={() => setCommandOpen(true)}>Search</Button></header>
+   <main id="main-content" className="main-content"><Outlet/></main>
+  </div>
+  <CommandBar groups={groups} onSelect={select} onAsk={question => askAgent(question)} open={commandOpen} onOpenChange={setCommandOpen}/>
+  <ShellOverlays session={session}/>
+ </div>
 }

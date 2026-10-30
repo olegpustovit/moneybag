@@ -7,19 +7,20 @@ export type Annotation={id:string;label:string;from:string;to:string;kind?:strin
 export type CubeWire={revision:number;as_of:string;base:string;start:string;end:string;accounts:CubeAccount[];payees:string[];tag_sets:string[][];
  flows:{d:number[];a:number[];p:number[];t:number[];v:number[];n:number[]};
  balances:{d:number[];net:number[];assets:number[];liabilities:number[];estimated_until?:string};
- rates:Record<string,{d:number[];v:number[]}>;metrics:unknown[];annotations:Annotation[];labels:Record<string,string>}
-export type Dimension='category'|'account'|'payee'|'trip'|'type'|'pot'|'estimate'
+ rates:Record<string,{d:number[];v:number[]}>;metrics:CubeMetric[];annotations:Annotation[];labels:Record<string,string>;aliases?:{pattern:string;name:string}[];unvalued?:number}
+export type CubeMetric={id:string;label:string;description?:string;unit:string;kind:string;additivity:string;estimates:string;accounts?:string[]|null;exclude?:string[]|null;sign?:number;where?:string;dimensions?:string[]|null}
+export type Dimension='category'|'account'|'payee'|'trip'|'type'|'pot'|'source'|'class'|'estimate'
 export type Op='is'|'is not'|'contains'|'does not contain'|'over'|'under'
 export type Pill={field:Dimension|'amount';op:Op;values:string[]}
 export type Query={range:Range;pills?:Pill[]}
-export type Measure='spending'|'income'|'net'
+export type Measure='spending'|'income'|'net'|CubeMetric
 export type EstimatePolicy='include'|'exclude'|'split'
 export type DimIndex={values:string[];row:Int32Array}
 export type Cube={revision:number;asOf:string;base:string;startMs:number;endMs:number;bounds:Bounds;size:number;
  d:Int32Array;a:Int32Array;p:Int32Array;t:Int32Array;v:Float64Array;n:Int32Array;
  accounts:CubeAccount[];payees:string[];tagSets:string[][];cls:Uint8Array;est:Uint8Array;
  balances:{d:Int32Array;net:Float64Array;assets:Float64Array;liabilities:Float64Array;estimatedUntil:number|null};
- rates:Record<string,{d:Int32Array;v:Float64Array}>;annotations:Annotation[];labels:Record<string,string>;dims:Map<Dimension,DimIndex>;colors:Map<Dimension,Map<string,string>>;mask:{key:string;mask:Uint8Array|null}|null}
+ rates:Record<string,{d:Int32Array;v:Float64Array}>;annotations:Annotation[];labels:Record<string,string>;metrics:CubeMetric[];aliases:{re:RegExp;name:string}[];unvalued:number;dims:Map<Dimension,DimIndex>;colors:Map<Dimension,Map<string,string>>;mask:{key:string;mask:Uint8Array|null}|null}
 export type Totals={in:number;out:number;net:number;estimated:number;entries:number}
 export type SeriesOut={key:string;label:string;color:string;values:Float64Array;estimated?:boolean}
 export type Timeseries={bucket:Bucket;xs:number[];series:SeriesOut[];total:Float64Array}
@@ -39,14 +40,16 @@ export function decodeCube(wire:CubeWire):Cube {
  let sorted=true;for(let i=1;i<size;i++)if(f.d[i]<f.d[i-1]){sorted=false;break}
  const order=sorted ? null : Int32Array.from(f.d.keys()).sort((x,y) => f.d[x]-f.d[y])
  const accounts=wire.accounts,cls=new Uint8Array(accounts.length),est=new Uint8Array(accounts.length)
- accounts.forEach((a,i) => {cls[i]=a.class==='expense' ? EXPENSE : a.class==='income' ? INCOME : 0;est[i]=a.estimated ? 1 : 0})
+ // `class` is an optional field on the account, so the id prefix decides when it is empty.
+ accounts.forEach((a,i) => {cls[i]=a.class==='expense' || a.id.startsWith('expenses:') ? EXPENSE : a.class==='income' || a.id.startsWith('income:') ? INCOME : 0;est[i]=a.estimated ? 1 : 0})
  const b=wire.balances
  return {revision:wire.revision,asOf:wire.as_of,base:wire.base,startMs,endMs,bounds:{today:asOf,start:startMs,end:endMs},size,
   d:column(Int32Array,f.d,order),a:column(Int32Array,f.a,order),p:column(Int32Array,f.p,order),t:column(Int32Array,f.t,order),v:column(Float64Array,f.v,order),n:column(Int32Array,f.n,order),
   accounts,payees:wire.payees,tagSets:wire.tag_sets,cls,est,
   balances:{d:Int32Array.from(b?.d ?? []),net:Float64Array.from(b?.net ?? []),assets:Float64Array.from(b?.assets ?? []),liabilities:Float64Array.from(b?.liabilities ?? []),estimatedUntil:b?.estimated_until ? dayFromIso(b.estimated_until) : null},
   rates:Object.fromEntries(Object.entries(wire.rates ?? {}).map(([k,r]) => [k,{d:Int32Array.from(r.d),v:Float64Array.from(r.v)}])),
-  annotations:wire.annotations ?? [],labels:wire.labels ?? {},dims:new Map(),colors:new Map(),mask:null}
+  annotations:wire.annotations ?? [],labels:wire.labels ?? {},metrics:wire.metrics ?? [],unvalued:wire.unvalued ?? 0,
+  aliases:(wire.aliases ?? []).flatMap(a => {try {return [{re:new RegExp(a.pattern,'i'),name:a.name}]} catch {return []}}),dims:new Map(),colors:new Map(),mask:null}
 }
 export const label=(cube:Cube,value:string) => cube.labels[value] ?? value
 const lower=(a:Int32Array,x:number) => {let l=0,h=a.length;while(l<h){const m=(l+h)>>>1;if(a[m]<x)l=m+1;else h=m}return l}
@@ -62,7 +65,7 @@ export function dim(c:Cube,key:Dimension):DimIndex {
   values=[...seen.keys()];for(let i=0;i<c.size;i++)row[i]=of[c.t[i]] ?? -1
  } else if(key==='estimate'){values=['Recorded','Estimated'];for(let i=0;i<c.size;i++)row[i]=c.est[c.a[i]]}
  else {
-  const pick=(a:CubeAccount) => key==='category' ? a.category : key==='account' ? a.label : key==='type' ? a.type : a.pot
+  const pick=(a:CubeAccount) => key==='category' ? a.category : key==='account' ? a.label : key==='type' ? a.type : key==='source' ? a.source : key==='class' ? a.class : a.pot
   const seen=new Map<string,number>(),of=c.accounts.map(a => {const v=pick(a);if(!v)return -1;if(!seen.has(v))seen.set(v,seen.size);return seen.get(v)!})
   values=[...seen.keys()];for(let i=0;i<c.size;i++)row[i]=of[c.a[i]]
  }
@@ -89,8 +92,47 @@ function pillMask(c:Cube,pills:Pill[]|undefined):Uint8Array|null {
  const key=JSON.stringify(pills);if(c.mask?.key===key)return c.mask.mask
  const mask=buildMask(c,pills);c.mask={key,mask};return mask
 }
-// The sign convention lives here: expense postings are positive, income postings negative, refunds reduce spending.
-const measureOf=(m:Measure,cls:number,v:number) => cls===EXPENSE ? (m==='income' ? 0 : m==='spending' ? v : -v) : cls===INCOME ? (m==='spending' ? 0 : -v) : 0
+// The sign convention lives here and matches semantic/cube.go: `v` is the raw posting, so expenses are positive, income negative, refunds reduce spending.
+// A measure becomes one multiplier per account, which is all the row loops need.
+const matches=(id:string,prefixes:string[]|null|undefined) => !!prefixes?.some(p => id===p || id.startsWith(p))
+export function weights(c:Cube,m:Measure):Float64Array {
+ const w=new Float64Array(c.accounts.length)
+ c.accounts.forEach((a,i) => {
+  if(typeof m==='object'){if((!m.accounts?.length || matches(a.id,m.accounts)) && !matches(a.id,m.exclude))w[i]=m.sign || 1;return}
+  const k=c.cls[i];w[i]=k===EXPENSE ? (m==='income' ? 0 : m==='spending' ? 1 : -1) : k===INCOME ? (m==='spending' ? 0 : -1) : 0
+ })
+ return w
+}
+// Only what the cube can reproduce: valued flows with no CEL filter, or net worth from its balance columns. The rest stays on the server's figure.
+export const balanceField=(m:CubeMetric):BalanceField|null => {
+ if(m.kind!=='balance' || m.where || m.exclude?.length)return null
+ const a=m.accounts ?? [],assets=a.includes('assets:'),debts=a.includes('liabilities:')
+ return a.length===2 && assets && debts ? 'net' : a.length===1 && assets ? 'assets' : a.length===1 && debts ? 'liabilities' : null
+}
+export const cubeCanCompute=(m:CubeMetric|undefined,split?:string):m is CubeMetric => !!m && !m.where && (m.unit==='eur' || m.unit==='int') && (m.kind==='flow' || m.kind==='rate' || balanceField(m)!==null) && (!split || ['category','account','payee','trip','type','pot','source','class'].includes(split))
+// Polarity from the ledger's signs, as the server's lowerIsGood reads it: spending and income with sign 1 are good when they fall; assets and debts run the other way.
+export function goodWhen(m:CubeMetric):'up'|'down'|'neutral' {
+ const a=m.accounts ?? [];if(!a.length)return 'neutral'
+ const lower=(id:string) => (id.startsWith('expenses:') || id.startsWith('income:'))===((m.sign || 1)!==-1),first=lower(a[0])
+ return a.every(id => lower(id)===first) ? (first ? 'down' : 'up') : 'neutral'
+}
+const months=(r:Range) => Math.max(1,(new Date(r.to).getUTCFullYear()-new Date(r.from).getUTCFullYear())*12+new Date(r.to).getUTCMonth()-new Date(r.from).getUTCMonth()+1)
+// The figure a metric shows for a range: flows sum, `avg` and `rate` read per month, `last` the closing month, balances the closing value.
+export function metricTotal(c:Cube,q:Query,m:CubeMetric,estimates?:EstimatePolicy):{total:number;estimated:number;entries:number} {
+ const field=balanceField(m)
+ if(field){const v=balanceAt(c,q.range.to,field);return {total:(v ?? 0)*(m.sign || 1),estimated:0,entries:0}}
+ const [lo,hi]=span(c,q.range),mask=pillMask(c,q.pills),w=weights(c,m),{a,v,n,est}=c,count=m.unit==='int',policy=estimates ?? (m.estimates as EstimatePolicy)
+ let total=0,estimated=0,entries=0
+ const lastMonth=m.additivity==='last' ? Date.UTC(new Date(q.range.to).getUTCFullYear(),new Date(q.range.to).getUTCMonth(),1) : -Infinity
+ for(let i=lo;i<hi;i++){
+  if((mask && !mask[i]) || !w[a[i]])continue
+  if(policy==='exclude' && est[a[i]])continue
+  if(c.startMs+c.d[i]*DAY<lastMonth)continue
+  const x=count ? n[i] : w[a[i]]*v[i];total+=x;entries+=n[i];if(est[a[i]])estimated+=x
+ }
+ if(m.kind==='rate' || m.additivity==='avg'){const k=months(q.range);total/=k;estimated/=k}
+ return {total,estimated,entries}
+}
 
 export function totals(c:Cube,q:Query):Totals {
  const [lo,hi]=span(c,q.range),m=pillMask(c,q.pills);let inn=0,out=0,estimated=0,entries=0
@@ -102,9 +144,11 @@ export function totals(c:Cube,q:Query):Totals {
 const SLOTS=['--c0','--c1','--c2','--c3','--c4']
 export function entityColors(c:Cube,key:Dimension):Map<string,string> {
  const hit=c.colors.get(key);if(hit)return hit
- const {values,row}=dim(c,key),sum=new Float64Array(values.length)
- for(let i=0;i<c.size;i++)if(row[i]>=0 && c.cls[c.a[i]]===EXPENSE && !c.est[c.a[i]])sum[row[i]]+=Math.abs(c.v[i])
- const map=new Map<string,string>();[...values.keys()].sort((x,y) => sum[y]-sum[x] || x-y).forEach((idx,rank) => map.set(values[idx],rank<SLOTS.length ? SLOTS[rank] : '--series-other'))
+ const {values,row}=dim(c,key),spend=new Float64Array(values.length),earn=new Float64Array(values.length)
+ for(let i=0;i<c.size;i++){if(row[i]<0 || c.est[c.a[i]])continue;const k=c.cls[c.a[i]];if(k===EXPENSE)spend[row[i]]+=Math.abs(c.v[i]);else if(k===INCOME)earn[row[i]]+=Math.abs(c.v[i])}
+ // Spending and income rank separately: they rarely share a chart, and income categories must not all land in Other.
+ const map=new Map<string,string>(),assign=(sum:Float64Array) => {let rank=0;for(const idx of [...values.keys()].sort((x,y) => sum[y]-sum[x] || x-y)){if(!sum[idx] || map.has(values[idx]))continue;map.set(values[idx],rank<SLOTS.length ? SLOTS[rank] : '--series-other');rank++}}
+ assign(spend);assign(earn)
  c.colors.set(key,map);return map
 }
 export const ESTIMATED='Estimated',OTHER='Other'
@@ -116,19 +160,20 @@ const bucketIndex=(c:Cube,r:Range,b:Bucket):{xs:number[];loD:number;of:Int32Arra
  return {xs,loD,of}
 }
 export function timeseries(c:Cube,q:Query,{measure='spending',bucket,split,estimates='include'}:{measure?:Measure;bucket?:Bucket;split?:Dimension;estimates?:EstimatePolicy}={}):Timeseries {
+ const w=weights(c,measure),mInt=typeof measure==='object' && measure.unit==='int'
  const b=bucket ?? autoBucket(q.range),[lo,hi]=span(c,q.range),m=pillMask(c,q.pills),{xs,loD,of}=bucketIndex(c,q.range,b),len=xs.length,total=new Float64Array(len)
- const {a,d,v,cls,est}=c
+ const {a,d,v,n,est}=c
  if(!split){
-  for(let i=lo;i<hi;i++){if(m && !m[i])continue;if(estimates==='exclude' && est[a[i]])continue;total[of[d[i]-loD]]+=measureOf(measure,cls[a[i]],v[i])}
-  return {bucket:b,xs,total,series:[{key:'total',label:measure==='income' ? 'Money in' : measure==='net' ? 'Net' : 'Money out',color:measure==='income' ? '--c2' : measure==='net' ? '--c3' : '--c4',values:total}]}
+  for(let i=lo;i<hi;i++){if(m && !m[i])continue;if(estimates==='exclude' && est[a[i]])continue;const k=w[a[i]];if(k)total[of[d[i]-loD]]+=mInt ? n[i] : k*v[i]}
+  return {bucket:b,xs,total,series:[{key:'total',label:typeof measure==='object' ? measure.label : measure==='income' ? 'Money in' : measure==='net' ? 'Net' : 'Money out',color:typeof measure==='object' ? '--c0' : measure==='income' ? '--c2' : measure==='net' ? '--c3' : '--c4',values:total}]}
  }
  const {values,row}=dim(c,split),colors=entityColors(c,split),slot=new Int32Array(values.length+1).fill(-1),named:string[]=[]
- values.forEach((value,i) => {if(colors.get(value)!=='--series-other'){slot[i+1]=named.length;named.push(value)}})
+ values.forEach((value,i) => {const color=colors.get(value);if(color && color!=='--series-other'){slot[i+1]=named.length;named.push(value)}})
  const otherIdx=named.length,estIdx=named.length+1,grid=Array.from({length:named.length+2},() => new Float64Array(len))
  for(let i=lo;i<hi;i++){
   if(m && !m[i])continue
-  const k=cls[a[i]],isEst=est[a[i]];if(isEst && estimates==='exclude')continue
-  const value=measureOf(measure,k,v[i]);if(value===0)continue
+  const isEst=est[a[i]];if(isEst && estimates==='exclude')continue
+  const value=w[a[i]]*(mInt ? n[i] : v[i]);if(value===0)continue
   const s=isEst && estimates==='split' ? estIdx : slot[row[i]+1]<0 ? otherIdx : slot[row[i]+1]
   const at=of[d[i]-loD];grid[s][at]+=value;total[at]+=value
  }
@@ -144,8 +189,8 @@ export function compareSeries(c:Cube,q:Query,win:CompareWindow|null,{measure='sp
 }
 export function compareTotals(c:Cube,q:Query,win:CompareWindow|null):{current:Totals;previous:Totals|null} {return {current:totals(c,q),previous:win?.available ? totals(c,{range:win,pills:q.pills}) : null}}
 const groupSum=(c:Cube,q:Query,row:Int32Array,size:number,measure:Measure) => {
- const [lo,hi]=span(c,q.range),m=pillMask(c,q.pills),sum=new Float64Array(size),{a,v,cls}=c
- for(let i=lo;i<hi;i++){if((m && !m[i]) || row[i]<0)continue;sum[row[i]]+=measureOf(measure,cls[a[i]],v[i])}
+ const [lo,hi]=span(c,q.range),m=pillMask(c,q.pills),sum=new Float64Array(size),w=weights(c,measure),{a,v}=c
+ for(let i=lo;i<hi;i++){if((m && !m[i]) || row[i]<0)continue;sum[row[i]]+=w[a[i]]*v[i]}
  return sum
 }
 // With no window this ranks by size, so the same list still answers "where did it go".
@@ -190,17 +235,19 @@ export function rowsIn(c:Cube,q:Query):Int32Array {
  return out.subarray(0,k)
 }
 // Facts the browser can compute while exploring. A saved view's sentence comes from the server's `facts`.
-export function localFacts(c:Cube,q:Query,win:CompareWindow|null):Fact[] {
- const t=totals(c,q),prev=win?.available ? totals(c,{range:win,pills:q.pills}) : null,facts:Fact[]=[],code=c.base
+export function localFacts(c:Cube,q:Query,win:CompareWindow|null,metric?:CubeMetric):Fact[] {
+ const name=metric?.label ?? 'Spending',lowerGood=metric ? goodWhen(metric)==='down' : true,measure:Measure=metric ?? 'spending'
+ const read=(range:Range) => {if(metric){const r=metricTotal(c,{range,pills:q.pills},metric);return {out:r.total,estimated:r.estimated,entries:r.entries || (r.total ? 1 : 0)}}const r=totals(c,{range,pills:q.pills});return {out:r.out,estimated:r.estimated,entries:r.entries}}
+ const t=read(q.range),prev=win?.available ? read(win) : null,facts:Fact[]=[],code=c.base
  if(!t.entries)return [{kind:'period_change',sentence:'No entries match this range and filter.'}]
- const moved=whatMoved(c,q,win),contributors=moved.map(x => ({name:x.label,key:x.key,delta:prev ? x.delta : x.now,text:prev ? `${x.delta>=0 ? '+' : ''}${money(x.delta,code)}` : money(x.now,code),share:x.share}))
+ const moved=metric && balanceField(metric) ? [] : whatMoved(c,q,win,{measure}),contributors=moved.map(x => ({name:x.label,key:x.key,delta:prev ? x.delta : x.now,text:prev ? `${x.delta>=0 ? '+' : ''}${money(x.delta,code)}` : money(x.now,code),share:x.share}))
  if(prev && prev.out){
   const delta=t.out-prev.out,top=moved[0],direction=delta>0 ? 'up' as const : delta<0 ? 'down' as const : 'flat' as const
-  facts.push({kind:'period_change',direction,good:delta===0 ? null : delta<0,value:delta,text:money(delta,code),contributors,
-   sentence:delta===0 ? `Spending matched the ${win!.label}.` : `Spending ${delta>0 ? 'rose' : 'fell'} ${money(Math.abs(delta),code)} (${percent(Math.abs(delta)/prev.out*100,0)}) compared with the ${win!.label}.${top ? ` The biggest change was ${top.label} (${top.delta>=0 ? '+' : ''}${money(top.delta,code)}).` : ''}`})
+  facts.push({kind:'period_change',direction,good:delta===0 ? null : lowerGood ? delta<0 : delta>0,value:delta,text:money(delta,code),contributors,
+   sentence:delta===0 ? `${name} matched the ${win!.label}.` : `${name} ${delta>0 ? 'rose' : 'fell'} ${money(Math.abs(delta),code)} (${percent(Math.abs(delta)/Math.abs(prev.out)*100,0)}) compared with the ${win!.label}.${top ? ` The biggest change was ${top.label} (${top.delta>=0 ? '+' : ''}${money(top.delta,code)}).` : ''}`})
  } else {
-  const top=moved[0];facts.push({kind:'period_change',direction:'flat',good:null,value:t.out,text:money(t.out,code),contributors,sentence:`You spent ${money(t.out,code)} from ${rangeLabel(q.range)}.${top ? ` The largest category was ${top.label}.` : ''}`})
+  const top=moved[0];facts.push({kind:'period_change',direction:'flat',good:null,value:t.out,text:money(t.out,code),contributors,sentence:`${metric ? `${name} was ${money(t.out,code)}` : `You spent ${money(t.out,code)}`} from ${rangeLabel(q.range)}.${top ? ` The largest category was ${top.label}.` : ''}`})
  }
- if(t.estimated){const share=t.estimated/t.out*100;facts.push({kind:'estimate_share',value:share,text:percent(share,0),direction:'flat',good:null,sentence:`${percent(share,0)} of this is estimated, not from statements.`})}
+ if(t.estimated && t.out){const share=t.estimated/t.out*100;facts.push({kind:'estimate_share',value:share,text:percent(share,0),direction:'flat',good:null,sentence:`${percent(share,0)} of this is estimated, not from statements.`})}
  return facts
 }

@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Link, useNavigate } from '@tanstack/react-router'
+import { useNavigate } from '@tanstack/react-router'
 import { chartNumber, chartRows, foldChart, journalFilter } from '../dashboard/chart-data'
-import { DataTable } from '../dashboard/data-table'
+import { DataGrid } from './data-grid'
 import type { ChartValue } from '../dashboard/values'
 import { legacyFormat } from './format'
 import { TimeChart, type ChartSeries } from './time-chart'
@@ -16,14 +16,15 @@ const toTime=(x:string,kind:string):number|null => {
  return null
 }
 // Drop-in for ../dashboard/chart: same props, same fold rules, same table and drilldown, no Recharts.
-export default function LegacyChart({value:source,drilldown=false,tableId=source.title || 'chart',sort,onSortChange}:{value:ChartValue;drilldown?:boolean;tableId?:string;sort?:string;onSortChange?:(sort:string|undefined) => void}) {
+export default function LegacyChart({value:source,drilldown=false,tableId=source.title || 'chart',syncKey='dashboard'}:{value:ChartValue;drilldown?:boolean;tableId?:string;syncKey?:string}) {
  const value=foldChart(source),navigate=useNavigate(),[hidden,setHidden]=useState<string[]>([]),[donutTable,setDonutTable]=useState(false)
  const filter=(x:string) => drilldown ? journalFilter(value.x,x) : undefined
- const openJournal=(x:string) => {const search=filter(x);if(search)void navigate({to:'/journal',search})}
+ const searchOf=(x:string) => {const f=filter(x);return f ? {t:f.from && f.to ? `${f.from} to ${f.to}` : undefined,accounts:f.account ? [f.account] : undefined} : undefined}
+ const openJournal=(x:string) => {const search=searchOf(x);if(search)void navigate({to:'/ledger',search})}
  const series=value.series.length ? value.series : [{name:'',color_index:0}]
  const format=legacyFormat(value.y_format)
  const donut=value.mark==='donut'
- const table=(off:string[]) => <DataTable storageKey={tableId} sort={sort} onSortChange={onSortChange} regionLabel={`${value.title || 'Chart'} data`} value={{type:'table',title:value.title,columns:[{key:'category',label:'Category',format:'text',align:'left'},{key:'series',label:'Series',format:'text',align:'left'},{key:'value',label:'Value',format:value.y_format || 'number',align:'right'}],rows:value.points.filter(point => !off.includes(donut ? point.x : point.series)).map(point => ({category:{v:point.x,t:point.x},series:{v:point.series || 'Value',t:point.series || 'Value'},value:{v:point.y,t:point.y_text ?? chartNumber(point.y,value.y_format)}}))}} renderCell={(row,column) => {const text=row[column]?.t ?? '—',search=column==='category' ? filter(text) : undefined;return search ? <Link to="/journal" search={search}>{text}</Link> : text}}/>
+ const table=(off:string[]) => <DataGrid label={`${value.title || 'Chart'} data`} rowKey={(_,i) => `${tableId}-${i}`} columns={[{key:'category',label:'Category',type:'text'},...(value.series.length>1 || value.series[0]?.name ? [{key:'series',label:'Series',type:'text' as const}] : []),{key:'value',label:'Value',type:'number'}]} rows={value.points.filter(point => !off.includes(donut ? point.x : point.series)).map(point => ({category:point.x,series:point.series || 'Value',value:{v:point.y,t:point.y_text ?? chartNumber(point.y,value.y_format)}}))}/>
  const foldNote=value!==source && <p className="chart-fold-note">{value.points.some(point => (donut ? point.x : point.series)==='Other') ? `Other is the sum of the remaining ${donut ? 'categories' : 'series'}.` : `Showing the five largest ${donut ? 'categories' : 'series'}.`}</p>
  if(!value.points.length)return <div className="dashboard-chart">{foldNote}<div className="chart-controls"><button type="button" className="tm-btn small" aria-pressed={donutTable} onClick={() => setDonutTable(!donutTable)}>{donutTable ? 'Chart' : 'Table'}</button></div>{donutTable ? table(hidden) : <p className="muted">No data for this chart.</p>}</div>
  if(donut){
@@ -56,6 +57,6 @@ export default function LegacyChart({value:source,drilldown=false,tableId=source
  const baseline=additive || /^(usd0?|eur0?|pct0?|int|mo)$/.test(value.y_format) ? 'zero' as const : 'auto' as const
  const visible=cols.filter(c => !hidden.includes(c.key)).length
  return <div className="dashboard-chart">{foldNote}
-  <TimeChart title={value.title || 'Chart'} heading={<span/>} mark={value.mark==='donut' ? 'line' : value.mark} format={format} series={cols} xs={isTime ? xs : undefined} categories={isTime ? undefined : labelsX} bucket={bucket} baseline={baseline} height={240} rule={value.rule} direct={visible>0 && visible<=4 && cols.length>1} legend="toggle" hidden={hidden} onHiddenChange={setHidden} syncKey="dashboard" onPick={drilldown ? index => openJournal(labelsX[index]) : undefined} renderTable={table}/>
+  <TimeChart title={value.title || 'Chart'} heading={<span/>} mark={value.mark==='donut' ? 'line' : value.mark} format={format} series={cols} xs={isTime ? xs : undefined} categories={isTime ? undefined : labelsX} bucket={bucket} baseline={baseline} height={240} rule={value.rule} direct={visible>0 && visible<=4 && cols.length>1} legend="toggle" hidden={hidden} onHiddenChange={setHidden} syncKey={syncKey} onPick={drilldown ? index => openJournal(labelsX[index]) : undefined} renderTable={table}/>
  </div>
 }

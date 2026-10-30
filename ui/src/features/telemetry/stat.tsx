@@ -11,17 +11,18 @@ export function changeBetween(current:number,previous:number|null|undefined,good
  const good=goodWhen==='neutral' || delta===0 ? null : (delta>0)===(goodWhen==='up')
  return {direction,good,text:`${delta>0 ? '+' : delta<0 ? '−' : ''}${percent(Math.abs(delta)/Math.abs(previous)*100)}`,detail:`${delta>0 ? '+' : delta<0 ? '−' : ''}${format(Math.abs(delta))}`}
 }
-export type StatProps={label:string;value:string;change?:StatChange|null;comparison?:string;note?:ReactNode;spark?:ArrayLike<number|null>;sparkColor?:string;sparkLabel?:string;estimatedShare?:number;fixedRange?:string;href?:string;onOpen?:(event:MouseEvent) => void;openLabel?:string;onDetails?:() => void}
+export type StatProps={label:string;value:string;change?:StatChange|null;comparison?:string;note?:ReactNode;spark?:ArrayLike<number|null>;sparkColor?:string;sparkLabel?:string;estimatedShare?:number;fixedRange?:string;href?:string;onOpen?:(event:MouseEvent) => void;openLabel?:string;onDetails?:() => void;
+ /** A router link wrapping the value, for pages inside the app. */ entriesTo?:ReactNode;hideEmptyCompare?:boolean}
 // Every line keeps its height with or without content, so a loading page and a loaded page occupy the same space.
-export function Stat({label,value,change,comparison,note,spark,sparkColor,sparkLabel,estimatedShare,fixedRange,href,onOpen,openLabel,onDetails}:StatProps) {
+export function Stat({label,value,change,comparison,note,spark,sparkColor,sparkLabel,estimatedShare,fixedRange,href,onOpen,openLabel,onDetails,entriesTo,hideEmptyCompare}:StatProps) {
  const tone=change?.good===true ? 'good' : change?.good===false ? 'bad' : 'flat'
  const open=href || onOpen
  const number=<div className="tm-stat-value data">{value}</div>
  return <div className="tm-stat">
   <div className="tm-stat-label"><span>{label}</span>{fixedRange && <span className="tm-badge">Fixed range</span>}{onDetails && <button type="button" className="tm-details-link" aria-label={`How was ${label} calculated?`} onClick={onDetails}>Details</button>}</div>
-  {open ? <a className="tm-stat-open" href={href ?? '#'} onClick={event => {if(onOpen){if(!href)event.preventDefault();onOpen(event)}}} aria-label={`${label} ${value}. ${openLabel ?? 'See the entries'}.`}>{number}</a> : number}
+  {entriesTo ?? (open ? <a className="tm-stat-open" href={href ?? '#'} onClick={event => {if(onOpen){if(!href)event.preventDefault();onOpen(event)}}} aria-label={`${label} ${value}. ${openLabel ?? 'See the entries'}.`}>{number}</a> : number)}
   <div className="tm-stat-change">
-   {change ? <><span className={tone}><span aria-hidden="true">{change.direction==='up' ? '▲' : change.direction==='down' ? '▼' : '='}</span> <span className="sr-only">{change.direction==='up' ? 'Up' : change.direction==='down' ? 'Down' : 'No change'} </span>{change.text}</span>{change.detail && <span className="muted"> {change.detail}</span>}{comparison && <span className="muted"> vs {comparison}</span>}</> : <span className="muted">{comparison ? `No earlier data to compare with ${comparison}` : 'No comparison'}</span>}
+   {change ? <><span className={tone}><span aria-hidden="true">{change.direction==='up' ? '▲' : change.direction==='down' ? '▼' : '='}</span> <span className="sr-only">{change.direction==='up' ? 'Up' : change.direction==='down' ? 'Down' : 'No change'} </span>{change.text}</span>{change.detail && <span className="muted"> {change.detail}</span>}{comparison && <span className="muted"> vs {comparison}</span>}</> : hideEmptyCompare ? null : <span className="muted">{comparison ? `No earlier data to compare with ${comparison}` : 'No comparison'}</span>}
   </div>
   <div className="tm-stat-note">{note}{estimatedShare ? <span className="tm-badge warn">{Math.round(estimatedShare*100)}% estimated</span> : null}</div>
   <Sparkline values={spark ?? []} color={sparkColor} label={sparkLabel}/>

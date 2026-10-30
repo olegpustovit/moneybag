@@ -1,22 +1,21 @@
-import { useState } from 'react'
-import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { Link, createFileRoute, useRouter } from '@tanstack/react-router'
-import { Button } from '../components/ui/button'
-import { LoadingTable } from '../components/loading-table'
-import { ownedQuery, receivedQuery } from '../features/sharing/queries'
-import { tool, type Session } from '../lib/api'
-import type { DashboardSharesListOutput } from '../lib/tools'
+import { useQuery } from '@tanstack/react-query'
+import { RouteError } from '../features/telemetry/route-error'
+import { Link, createFileRoute } from '@tanstack/react-router'
+import { receivedQuery, sharedQuery, type Session } from '../lib/api'
+import { describePage } from '../features/telemetry/shell-store'
+import { Empty, PageHead, RowsSkeleton } from '../features/telemetry/page-bits'
 
-type Share=NonNullable<DashboardSharesListOutput['items']>[number]
-export const Route=createFileRoute('/_app/shared/')({loader:async ({context}) => {await Promise.all([context.queryClient.query({...receivedQuery(context.session),staleTime:'static'}),context.queryClient.query({...ownedQuery(context.session),staleTime:'static'})])},pendingMs:150,pendingMinMs:300,pendingComponent:SharedPending,errorComponent:SharedError,component:Shared})
-function SharedPending() {return <section role="status" aria-busy="true"><span className="sr-only">Loading shares…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SHARED</p><h1>Shared dashboards</h1><p className="description">Dashboards shared with you and access you have granted.</p></div></header><div aria-hidden="true"><section className="import-panel"><h2>Shared with you</h2><LoadingTable columns={['Dashboard','Owner','Access','Expires','Status']}/></section><section className="import-panel"><h2>Shared by you</h2><LoadingTable columns={['Dashboard','Recipient','Access','Expires','Status','Actions']}/></section></div></section>}
-function SharedError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error" role="alert"><h1>Could not load shared dashboards</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
-function status(share:Share) {return share.revoked_at ? 'Revoked' : share.expires_at && Date.parse(share.expires_at)<=Date.now() ? 'Expired' : 'Active'}
-function Shared() {
- const {session}=Route.useRouteContext(),{data:received}=useSuspenseQuery(receivedQuery(session)),{data:owned}=useSuspenseQuery(ownedQuery(session))
- return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SHARED</p><h1>Shared dashboards</h1><p className="description">Dashboards shared with you and access you have granted.</p></div></header><section className="import-panel"><h2>Shared with you</h2>{!received.items?.length ? <p>No dashboards have been shared with you.</p> : <div className="table-scroll" role="region" aria-label="Received shares" tabIndex={0}><table><thead><tr><th>Dashboard</th><th>Owner</th><th>Access</th><th>Expires</th><th>Status</th></tr></thead><tbody>{received.items.map((share) => <tr key={share.id}><td>{status(share)==='Active' ? <Link to="/shared/$id" params={{id:share.id}}>{share.dashboard_id}</Link> : share.dashboard_id}</td><td>{share.owner_user}</td><td>{share.role} · {share.mode}</td><td>{share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}</td><td>{status(share)}</td></tr>)}</tbody></table></div>}</section><section className="import-panel"><h2>Shared by you</h2>{!owned.items?.length ? <p>You have not shared any dashboards.</p> : <div className="table-scroll" role="region" aria-label="Granted shares" tabIndex={0}><table><thead><tr><th>Dashboard</th><th>Recipient</th><th>Access</th><th>Expires</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{owned.items.map((share) => <OwnedShare key={share.id} share={share} session={session}/>)}</tbody></table></div>}</section></>
+export const Route=createFileRoute('/_app/shared/')({errorComponent:p => <RouteError {...p}/>,component:Shared})
+function SharedRow({session,id,until}:{session:Session;id:string;until?:string|null}) {
+ const view=useQuery(sharedQuery(session,id))
+ return <li><Link to="/shared/$id" params={{id}}><span className="n">{view.data?.title ?? 'Shared dashboard'}</span><span className="t">{until ? `Until ${new Date(until).toLocaleDateString()}` : 'No end date'}</span></Link></li>
 }
-function OwnedShare({share,session}:{share:Share;session:Session}) {
- const [confirm,setConfirm]=useState(false),client=useQueryClient(),revoke=useMutation({mutationFn:() => tool(session,'dashboard_unshare',{share_id:share.id}),onSettled:async () => {await client.invalidateQueries({queryKey:['shares-owned',session.user.id]})}})
- return <tr><td>{share.dashboard_id}</td><td>{share.grantee_user}</td><td>{share.role} · {share.mode}</td><td>{share.expires_at ? new Date(share.expires_at).toLocaleDateString() : 'Never'}</td><td>{status(share)}</td><td>{status(share)==='Active' && (confirm ? <div><p>Revoke access?</p><Button size="xs" variant="destructive" disabled={revoke.isPending} onClick={() => revoke.mutate()}>Confirm revoke<span className="sr-only"> {share.dashboard_id} {share.grantee_user}</span></Button> <Button size="xs" variant="outline" onClick={() => setConfirm(false)}>Cancel</Button></div> : <Button size="xs" variant="outline" onClick={() => setConfirm(true)}>Revoke<span className="sr-only"> {share.dashboard_id} {share.grantee_user}</span></Button>)}{revoke.error && <p role="alert">{revoke.error.message}</p>}</td></tr>
+function Shared() {
+ const {session}=Route.useRouteContext(),received=useQuery(receivedQuery(session))
+ describePage({title:'Shared with me',lines:[]})
+ const head=<PageHead title="Shared with me" description="Dashboards other people have shared with you."/>
+ if(received.error)return <>{head}<RouteError error={received.error} reset={() => void received.refetch()} title="Shared dashboards didn’t load"/></>
+ if(!received.data)return <>{head}<RowsSkeleton rows={4}/></>
+ const items=received.data.items ?? []
+ return <>{head}{items.length ? <ul className="tm-list">{items.map(item => <SharedRow key={item.id} session={session} id={item.id} until={item.expires_at}/>)}</ul> : <Empty title="Nothing shared with you yet">When someone shares a dashboard, it appears here.</Empty>}</>
 }
