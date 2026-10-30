@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
@@ -210,6 +211,55 @@ func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Princi
 		must("metric_upsert", map[string]any{"id": "bank", "label": "Bank balance", "unit": "eur", "kind": "balance", "additivity": "last", "estimates": "include", "accounts": []string{"assets:bank"}})
 		if bank := must("metric_query", map[string]any{"metric": "bank", "to": "2026-06-30"}); bank["total"] != "520" {
 			t.Fatal("balance values holdings at the period end", bank)
+		}
+	})
+
+	// The cube's gold column must make net-gold equal the where-metric's figure to the cent, valued at each date's own gold quote.
+	t.Run("cube gold column matches the ex-gold metric", func(t *testing.T) {
+		for _, a := range []ledger.Account{{ID: "assets:vault", Type: "asset", Name: "Vault", Commodities: []string{"USD", "XAU_g"}}, {ID: "equity:vault", Type: "equity", Name: "Vault opening", Commodities: []string{"USD", "XAU_g"}}} {
+			if _, e := s.Ledger.CreateAccount(ctx, owner, a); e != nil {
+				t.Fatal(e)
+			}
+		}
+		for _, q := range []struct{ at, v string }{{"2026-06-01T12:00:00Z", "100"}, {"2026-06-15T12:00:00Z", "120"}} {
+			if _, e := s.Rates.Set(ctx, owner, rates.SetInput{Pair: "XAU_g/USD", Value: ledger.MustDecimal(q.v), At: q.at, Source: "Synthetic"}); e != nil {
+				t.Fatal(e)
+			}
+		}
+		put := func(date, commodity, amount string) {
+			t.Helper()
+			v := ledger.MustDecimal(amount)
+			neg := ledger.MustDecimal("-" + amount)
+			if _, e := s.Ledger.Post(ctx, owner, ledger.EntryInput{Date: date, Payee: "Vault", Commit: true, Postings: []ledger.Posting{{Account: "assets:vault", Amount: ledger.Amount{Value: v, Commodity: commodity}}, {Account: "equity:vault", Amount: ledger.Amount{Value: neg, Commodity: commodity}}}}); e != nil {
+				t.Fatal(e)
+			}
+		}
+		put("2026-06-10", "USD", "333.33")
+		put("2026-06-10", "XAU_g", "5")
+		put("2026-06-20", "XAU_g", "3")
+		must("metric_upsert", map[string]any{"id": "net_worth_ex_gold", "label": "Net worth without gold", "unit": "eur", "kind": "balance", "additivity": "last", "estimates": "include", "accounts": []string{"assets:", "liabilities:"}, "where": "row.commodity != 'XAU_g'"})
+		cube, e := s.Semantic.Cube(ctx, owner, 0)
+		if e != nil {
+			t.Fatal(e)
+		}
+		start, _ := time.Parse("2006-01-02", cube.Start)
+		for _, date := range []string{"2026-06-10", "2026-06-30"} {
+			d, _ := time.Parse("2006-01-02", date)
+			off, at := int(d.Sub(start).Hours()/24), -1
+			for i, v := range cube.Balances.D {
+				if v == off {
+					at = i
+				}
+			}
+			if at < 0 || len(cube.Balances.Gold) != len(cube.Balances.Net) || cube.Balances.Gold[at] == 0 {
+				t.Fatal("gold column missing on", date, at)
+			}
+			metric := must("metric_query", map[string]any{"metric": "net_worth_ex_gold", "to": date})
+			total, _ := new(big.Rat).SetString(metric["total"].(string))
+			cents := new(big.Rat).Mul(total, big.NewRat(100, 1))
+			if got := cube.Balances.Net[at] - cube.Balances.Gold[at]; !cents.IsInt() || cents.Num().Int64() != got {
+				t.Fatal("net-gold differs from the metric on", date, got, metric["total"])
+			}
 		}
 	})
 

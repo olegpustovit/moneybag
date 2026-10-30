@@ -34,10 +34,12 @@ type CubeFlows struct {
 	N []int   `json:"n"`
 }
 type CubeBalances struct {
-	D              []int   `json:"d"`
-	Net            []int64 `json:"net"`
-	Assets         []int64 `json:"assets"`
-	Liabilities    []int64 `json:"liabilities"`
+	D           []int   `json:"d"`
+	Net         []int64 `json:"net"`
+	Assets      []int64 `json:"assets"`
+	Liabilities []int64 `json:"liabilities"`
+	// Gold is the part of Net held as XAU_g, so net-gold is the net_worth_ex_gold figure to the cent.
+	Gold           []int64 `json:"gold"`
 	EstimatedUntil string  `json:"estimated_until,omitempty"`
 }
 type CubeAlias struct {
@@ -129,7 +131,7 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 				holdings[holdKey{r.acct.Type, r.commodity}].Add(holdings[holdKey{r.acct.Type, r.commodity}], r.amount.Rat())
 			}
 		}
-		assets, liabilities := new(big.Rat), new(big.Rat)
+		assets, liabilities, rest := new(big.Rat), new(big.Rat), new(big.Rat)
 		for key, amount := range holdings {
 			if amount.Sign() == 0 {
 				continue
@@ -139,6 +141,9 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 				continue // No quote yet for this commodity on this day; the earliest balances read low rather than failing the cube.
 			}
 			value := new(big.Rat).Mul(amount, rate)
+			if key.commodity != "XAU_g" {
+				rest.Add(rest, value)
+			}
 			if key.kind == "asset" {
 				assets.Add(assets, value)
 			} else {
@@ -148,7 +153,9 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 		out.Balances.D = append(out.Balances.D, offset(date))
 		out.Balances.Assets = append(out.Balances.Assets, cents(assets))
 		out.Balances.Liabilities = append(out.Balances.Liabilities, cents(liabilities))
-		out.Balances.Net = append(out.Balances.Net, cents(new(big.Rat).Add(assets, liabilities)))
+		net := cents(new(big.Rat).Add(assets, liabilities))
+		out.Balances.Net = append(out.Balances.Net, net)
+		out.Balances.Gold = append(out.Balances.Gold, net-cents(rest))
 	}
 	if e = s.cubeRates(ctx, p, b, &out, offset); e != nil {
 		return Cube{}, e
