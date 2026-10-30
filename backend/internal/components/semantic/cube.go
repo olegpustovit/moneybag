@@ -91,6 +91,74 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 		t, _ := time.Parse(day, date)
 		return int(t.Sub(start).Hours() / 24)
 	}
+	if e = s.cubeFlows(ctx, p, b, &out, offset); e != nil {
+		return Cube{}, e
+	}
+	holdings := map[holdKey]*big.Rat{}
+	changed := map[string]bool{}
+	for i := range b.rows {
+		if t := b.rows[i].acct.Type; t == "asset" || t == "liability" {
+			holdings[holdKey{t, b.rows[i].commodity}] = new(big.Rat)
+			changed[b.rows[i].date] = true
+		}
+	}
+	// Valuation days are the days holdings changed plus every month end and today, so a chart can read any month's closing balance.
+	for t := start; !t.After(time.Now().UTC()); t = t.AddDate(0, 1, 0) {
+		changed[time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, time.UTC).Format(day)] = true
+	}
+	changed[today] = true
+	dates := make([]string, 0, len(changed))
+	for date := range changed {
+		if date <= today {
+			dates = append(dates, date)
+		}
+	}
+	sort.Strings(dates)
+	next := 0
+	for _, date := range dates {
+		for ; next < len(b.rows) && b.rows[next].date <= date; next++ {
+			r := &b.rows[next]
+			if r.acct.Type == "asset" || r.acct.Type == "liability" {
+				holdings[holdKey{r.acct.Type, r.commodity}].Add(holdings[holdKey{r.acct.Type, r.commodity}], r.amount.Rat())
+			}
+		}
+		assets, liabilities := new(big.Rat), new(big.Rat)
+		for key, amount := range holdings {
+			if amount.Sign() == 0 {
+				continue
+			}
+			rate, e := s.rates.Rate(ctx, p, key.commodity, "EUR", date+"T23:59:59Z")
+			if e != nil {
+				continue // No quote yet for this commodity on this day; the earliest balances read low rather than failing the cube.
+			}
+			value := new(big.Rat).Mul(amount, rate)
+			if key.kind == "asset" {
+				assets.Add(assets, value)
+			} else {
+				liabilities.Add(liabilities, value)
+			}
+		}
+		out.Balances.D = append(out.Balances.D, offset(date))
+		out.Balances.Assets = append(out.Balances.Assets, cents(assets))
+		out.Balances.Liabilities = append(out.Balances.Liabilities, cents(liabilities))
+		out.Balances.Net = append(out.Balances.Net, cents(new(big.Rat).Add(assets, liabilities)))
+	}
+	if e = s.cubeRates(ctx, p, b, &out, offset); e != nil {
+		return Cube{}, e
+	}
+	if out.Metrics, e = s.Metrics(ctx, p); e != nil {
+		return Cube{}, e
+	}
+	if out.Annotations, e = s.Annotations(ctx, p, "trips", "", ""); e != nil {
+		return Cube{}, e
+	}
+	return out, nil
+}
+
+type holdKey struct{ kind, commodity string }
+
+// cubeFlows fills the account list and one row per day, account, payee and tag set.
+func (s *Service) cubeFlows(ctx context.Context, p principal.Principal, b *book, out *Cube, offset func(string) int) error {
 	ids := make([]string, 0, len(b.accounts))
 	for id := range b.accounts {
 		ids = append(ids, id)
@@ -115,20 +183,10 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 		v *big.Rat
 		n int
 	}{}
-	type holdKey struct{ kind, commodity string }
-	holdings := map[holdKey]*big.Rat{}
-	changed := map[string]bool{}
 	for i := range b.rows {
 		r := &b.rows[i]
 		if i%1000 == 0 && ctx.Err() != nil {
-			return Cube{}, ctx.Err()
-		}
-		if r.acct.Type == "asset" || r.acct.Type == "liability" {
-			key := holdKey{r.acct.Type, r.commodity}
-			if holdings[key] == nil {
-				holdings[key] = new(big.Rat)
-			}
-			changed[r.date] = true
+			return ctx.Err()
 		}
 		if strings.HasPrefix(r.account, "equity:") {
 			continue
@@ -197,57 +255,7 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 		out.Flows.V = append(out.Flows.V, cents(item.v))
 		out.Flows.N = append(out.Flows.N, item.n)
 	}
-	// Valuation days are the days holdings changed plus every month end and today, so a chart can read any month's closing balance.
-	for t := start; !t.After(time.Now().UTC()); t = t.AddDate(0, 1, 0) {
-		changed[time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, time.UTC).Format(day)] = true
-	}
-	changed[today] = true
-	dates := make([]string, 0, len(changed))
-	for date := range changed {
-		if date <= today {
-			dates = append(dates, date)
-		}
-	}
-	sort.Strings(dates)
-	next := 0
-	for _, date := range dates {
-		for ; next < len(b.rows) && b.rows[next].date <= date; next++ {
-			r := &b.rows[next]
-			if r.acct.Type == "asset" || r.acct.Type == "liability" {
-				holdings[holdKey{r.acct.Type, r.commodity}].Add(holdings[holdKey{r.acct.Type, r.commodity}], r.amount.Rat())
-			}
-		}
-		assets, liabilities := new(big.Rat), new(big.Rat)
-		for key, amount := range holdings {
-			if amount.Sign() == 0 {
-				continue
-			}
-			rate, e := s.rates.Rate(ctx, p, key.commodity, "EUR", date+"T23:59:59Z")
-			if e != nil {
-				continue // No quote yet for this commodity on this day; the earliest balances read low rather than failing the cube.
-			}
-			value := new(big.Rat).Mul(amount, rate)
-			if key.kind == "asset" {
-				assets.Add(assets, value)
-			} else {
-				liabilities.Add(liabilities, value)
-			}
-		}
-		out.Balances.D = append(out.Balances.D, offset(date))
-		out.Balances.Assets = append(out.Balances.Assets, cents(assets))
-		out.Balances.Liabilities = append(out.Balances.Liabilities, cents(liabilities))
-		out.Balances.Net = append(out.Balances.Net, cents(new(big.Rat).Add(assets, liabilities)))
-	}
-	if e = s.cubeRates(ctx, p, b, &out, offset); e != nil {
-		return Cube{}, e
-	}
-	if out.Metrics, e = s.Metrics(ctx, p); e != nil {
-		return Cube{}, e
-	}
-	if out.Annotations, e = s.Annotations(ctx, p, "trips", "", ""); e != nil {
-		return Cube{}, e
-	}
-	return out, nil
+	return nil
 }
 
 // cubeRates keeps the last quote per day for each commodity against EUR, or against USD when only that exists, plus EUR/USD.

@@ -765,12 +765,13 @@ func rounded(m Metric, v *big.Rat) string {
 	return decimalText(v)
 }
 
-// lowerIsGood reads polarity from the ledger's signs: spending is positive and bad to grow, while income, assets and
-// debts are only "lower is better" when the metric's sign has turned them around. Mixed accounts count as higher is better.
+// lowerIsGood reads polarity from the ledger's signs: expenses post positive and hurt, income posts negative and helps,
+// so with sign 1 a falling value is good for both; assets and debts run the other way. Mixed accounts must all agree.
 func lowerIsGood(m Metric) bool {
 	lower := len(m.Accounts) > 0
 	for _, prefix := range m.Accounts {
-		lower = lower && strings.HasPrefix(prefix, "expenses:") == (m.Sign != -1)
+		natural := strings.HasPrefix(prefix, "expenses:") || strings.HasPrefix(prefix, "income:")
+		lower = lower && natural == (m.Sign != -1)
 	}
 	return lower
 }
@@ -786,11 +787,28 @@ func judge(m Metric, delta int) (string, bool) {
 }
 
 func (s *Service) Query(ctx context.Context, p principal.Principal, in QueryInput) (Result, error) {
-	return s.queryWhere(ctx, p, in, "")
+	return s.QueryWhere(ctx, p, in, "")
 }
 
-// queryWhere narrows a query with one more CEL filter, for drill-downs.
-func (s *Service) queryWhere(ctx context.Context, p principal.Principal, in QueryInput, where string) (Result, error) {
+// HasEstimatedAccounts tells lint whether silently mixing estimates is possible at all.
+func (s *Service) HasEstimatedAccounts(ctx context.Context, p principal.Principal) (bool, error) {
+	if e := p.Require("ledger:read"); e != nil {
+		return false, e
+	}
+	b, e := s.book(reqcache.With(ctx), p)
+	if e != nil {
+		return false, e
+	}
+	for _, a := range b.accounts {
+		if a.IsEstimated() {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// QueryWhere narrows a query with one more CEL filter, for drill-downs.
+func (s *Service) QueryWhere(ctx context.Context, p principal.Principal, in QueryInput, where string) (Result, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return Result{}, e
 	}
