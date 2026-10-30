@@ -165,19 +165,13 @@ func (s *Service) Undo(ctx context.Context, p principal.Principal, in UndoInput)
 }
 func decodeBefore[T any](event audit.Event) (T, error) {
 	var out T
-	b := event.Before
-	if event.Outcome != nil {
-		b = event.Outcome.Before
-	}
+	b, _ := event.Result()
 	e := json.Unmarshal(b, &out)
 	return out, e
 }
 func decodeAfter[T any](event audit.Event) (T, error) {
 	var out T
-	b := event.After
-	if event.Outcome != nil {
-		b = event.Outcome.After
-	}
+	_, b := event.Result()
 	e := json.Unmarshal(b, &out)
 	return out, e
 }

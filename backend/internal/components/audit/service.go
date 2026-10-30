@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -103,7 +104,11 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		if err != nil {
 			return err
 		}
-		writeErr := s.Mutation(tx, p, fn)
+		// A nil fn records a read: nothing changed, so cached views stay valid.
+		var writeErr error
+		if fn != nil {
+			writeErr = s.Mutation(tx, p, fn)
+		}
 		beforeJSON, encodeErr := json.Marshal(before)
 		if encodeErr != nil {
 			return encodeErr
@@ -112,7 +117,14 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		if encodeErr != nil {
 			return encodeErr
 		}
-		outcome := Outcome{ID: event.ID, UserID: p.UserID, Status: "completed", Before: beforeJSON, After: afterJSON, At: time.Now().UTC().Truncate(time.Millisecond)}
+		outcome := Outcome{ID: event.ID, UserID: p.UserID, Status: "completed", At: time.Now().UTC().Truncate(time.Millisecond)}
+		// The event already holds both payloads; the outcome keeps one only when the write changed it.
+		if !bytes.Equal(beforeJSON, event.Before) {
+			outcome.Before = beforeJSON
+		}
+		if !bytes.Equal(afterJSON, event.After) {
+			outcome.After = afterJSON
+		}
 		if writeErr != nil {
 			outcome.Status = "failed"
 		}
@@ -129,6 +141,18 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		return nil
 	})
 	return event.ID, err
+}
+
+// Result returns the final before/after payloads, preferring what the outcome recorded.
+func (e Event) Result() (before, after json.RawMessage) {
+	before, after = e.Before, e.After
+	if e.Outcome != nil && len(e.Outcome.Before) > 0 {
+		before = e.Outcome.Before
+	}
+	if e.Outcome != nil && len(e.Outcome.After) > 0 {
+		after = e.Outcome.After
+	}
+	return before, after
 }
 func Digest(e Event) string {
 	e.Hash = ""
@@ -201,7 +225,7 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 	if limit < 1 || limit > 200 {
 		return Page{}, fmt.Errorf("limit must be 1..200")
 	}
-	cur, err := db.Collection("events").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "seq", Value: -1}}).SetLimit(int64(limit+1)))
+	cur, err := db.Collection("events").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "seq", Value: -1}}).SetLimit(int64(limit+1)).SetBatchSize(int32(limit+1)))
 	if err != nil {
 		return Page{}, err
 	}
@@ -214,13 +238,47 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 		out.Events = out.Events[:limit]
 		out.NextCursor = out.Events[limit-1].Seq
 	}
-	for i := range out.Events {
-		out.Events[i].Outcome, err = s.outcome(ctx, p, out.Events[i].ID)
-		if err != nil {
-			return Page{}, err
-		}
+	if err = s.attachOutcomes(ctx, p, out.Events); err != nil {
+		return Page{}, err
 	}
 	return out, nil
+}
+
+// attachOutcomes reads a page's outcomes in one query and drops payloads older rows repeat from their event.
+func (s *Service) attachOutcomes(ctx context.Context, p principal.Principal, events []Event) error {
+	if len(events) == 0 {
+		return nil
+	}
+	ids := make([]string, len(events))
+	for i := range events {
+		ids[i] = events[i].ID
+	}
+	cur, err := s.repo.DB.Collection("audit_outcomes").Find(ctx, bson.M{"_id": bson.M{"$in": ids}, "user_id": p.UserID}, options.Find().SetBatchSize(int32(len(ids)+1)))
+	if err != nil {
+		return err
+	}
+	var outcomes []Outcome
+	if err = cur.All(ctx, &outcomes); err != nil {
+		return err
+	}
+	byID := make(map[string]*Outcome, len(outcomes))
+	for i := range outcomes {
+		byID[outcomes[i].ID] = &outcomes[i]
+	}
+	for i := range events {
+		o := byID[events[i].ID]
+		if o == nil {
+			continue
+		}
+		if bytes.Equal(o.Before, events[i].Before) {
+			o.Before = nil
+		}
+		if bytes.Equal(o.After, events[i].After) {
+			o.After = nil
+		}
+		events[i].Outcome = o
+	}
+	return nil
 }
 
 // HasLaterTarget reports whether a later write was recorded for the same target.
