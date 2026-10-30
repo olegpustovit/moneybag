@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
@@ -180,6 +181,47 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	otherCombined, err := svc.Months(combinedCtx, other, "2026-01-01", "2026-02-28")
 	if err != nil || len(otherCombined) != 2 || otherCombined[0].Total != 999 || reads.Load() != 2 {
 		t.Fatal("combined monthly results crossed user boundaries")
+	}
+	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewMongoRepository(db)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cacheEngine := dashboard.Engine{Expr: expr, Reader: &dashboard.Sources{Budget: svc, Snapshots: cache}}
+	budgetQuery := map[string]dashboard.Query{"lines": {From: "budget_lines"}}
+	budgetValue := func(params map[string]any) (any, error) {
+		v, e := cacheEngine.Evaluate(ctx, p, "data.lines[0].actual", budgetQuery, params)
+		return v.Value, e
+	}
+	reads.Store(0)
+	if v, e := budgetValue(map[string]any{"month": "2026-01", "unrelated": 1}); e != nil || v != float64(7) {
+		t.Fatalf("budget baseline: %v", e)
+	}
+	if v, e := budgetValue(map[string]any{"month": "2026-01", "unrelated": 2}); e != nil || v != float64(7) || reads.Load() != 1 {
+		t.Fatal("unrelated parameter missed budget cache")
+	}
+	if v, e := budgetValue(map[string]any{"month": "2026-02"}); e != nil || v != float64(0.3) || reads.Load() != 2 {
+		t.Fatal("budget month reused incompatible cache")
+	}
+	if _, e := budgetValue(map[string]any{"month": "2026-02", "include_current": true}); e != nil || reads.Load() != 3 {
+		t.Fatal("budget window mode reused incompatible cache")
+	}
+	if _, e := budgetValue(map[string]any{"month": "2026-02", "window_months": float64(1)}); e != nil || reads.Load() != 4 {
+		t.Fatal("budget window length reused incompatible cache")
+	}
+	monthsQuery := map[string]dashboard.Query{"months": {From: "months"}}
+	monthValue := func(params map[string]any) (any, error) {
+		v, e := cacheEngine.Evaluate(ctx, p, "data.months[5].total", monthsQuery, params)
+		return v.Value, e
+	}
+	reads.Store(0)
+	if v, e := monthValue(map[string]any{"month": "2026-01", "unrelated": 1}); e != nil || v != float64(7) {
+		t.Fatal("monthly baseline differs")
+	}
+	if v, e := monthValue(map[string]any{"month": "2026-01", "unrelated": 2}); e != nil || v != float64(7) || reads.Load() != 1 {
+		t.Fatal("unrelated parameter missed monthly cache")
+	}
+	if v, e := monthValue(map[string]any{"month": "2026-02"}); e != nil || v != float64(0.3) || reads.Load() != 2 {
+		t.Fatal("monthly source reused incompatible month")
 	}
 	many := make([]any, 5001)
 	for i := range many {

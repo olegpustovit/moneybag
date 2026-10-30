@@ -43,6 +43,38 @@ func (s *Sources) Rows(ctx context.Context, p principal.Principal, source string
 	return out, nil
 }
 
+// sourceParams keeps each shared source keyed by the parameters it actually reads.
+func sourceParams(source string, params any, dates []string) any {
+	values, _ := params.(map[string]any)
+	stringParam := func(name string) string { value, _ := values[name].(string); return value }
+	switch source {
+	case "journal", "effective_entries", "accounts":
+		return nil
+	case "postings":
+		return []string{stringParam("from"), stringParam("to")}
+	case "balance_history":
+		return dates
+	case "months":
+		return stringParam("month")
+	case "budget_lines":
+		months := 0
+		if n, ok := values["window_months"].(float64); ok {
+			months = int(n)
+		}
+		if months == 0 {
+			months = 6
+		}
+		include, _ := values["include_current"].(bool)
+		return struct {
+			Month   string
+			Months  int
+			Include bool
+		}{stringParam("month"), months, include}
+	default:
+		return params
+	}
+}
+
 // sharedRows returns immutable rows for the query engine, which copies each row before deriving fields.
 func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
 	ctx = expressions.WithVolatility(ctx)
@@ -58,7 +90,15 @@ func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source 
 			return nil, fmt.Errorf("views nest deeper than %d", maxViewDepth)
 		}
 	}
-	params, _ := json.Marshal(ctx.Value(paramsKey{}))
+	var dates []string
+	if source == "balance_history" {
+		dates, _ = ctx.Value(balanceDatesKey{}).([]string)
+		if dates == nil {
+			dates = balanceHistoryDates(time.Now())
+			ctx = context.WithValue(ctx, balanceDatesKey{}, dates)
+		}
+	}
+	params, _ := json.Marshal(sourceParams(source, ctx.Value(paramsKey{}), dates))
 	read := func() ([]map[string]any, error) { return s.rows(ctx, p, source) }
 	stack, _ := ctx.Value(viewStackKey{}).([]string)
 	if s.Snapshots != nil && !(len(stack) > 0 && strings.HasPrefix(source, "view:")) {
