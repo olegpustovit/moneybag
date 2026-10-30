@@ -539,6 +539,24 @@ func (x *execution) evalAt(field, expr string, row map[string]any) (any, error) 
 	return v, nil
 }
 
+func shareJournalAndBalances(ctx context.Context, data map[string]Query, params map[string]any) context.Context {
+	from, _ := params["from"].(string)
+	to, _ := params["to"].(string)
+	if from != "" || to != "" {
+		return ctx
+	}
+	dates, ok := ctx.Value(balanceDatesKey{}).([]string)
+	if !ok {
+		return ctx
+	}
+	for _, q := range data {
+		if q.From == "journal" || q.From == "effective_entries" || q.From == "postings" {
+			return ledger.WithCombinedJournal(ctx, dates)
+		}
+	}
+	return ctx
+}
+
 func sharePostedSources(ctx context.Context, data map[string]Query, params map[string]any) context.Context {
 	from, _ := params["from"].(string)
 	to, _ := params["to"].(string)
@@ -602,7 +620,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
-	ctx = context.WithValue(sharePostedSources(shareBalanceHistory(shareBudgetMonths(ctx, spec.Data, spec.Params), spec.Data), spec.Data, spec.Params), paramsKey{}, spec.Params)
+	ctx = context.WithValue(shareJournalAndBalances(sharePostedSources(shareBalanceHistory(shareBudgetMonths(ctx, spec.Data, spec.Params), spec.Data), spec.Data, spec.Params), spec.Data, spec.Params), paramsKey{}, spec.Params)
 	result := Rendered{Values: map[string]any{}, Validation: Validation{OK: true, Errors: []Issue{}, Warnings: []Issue{}}}
 	issue := func(path string, err error) {
 		i := Issue{Path: path, Msg: err.Error()}
@@ -915,7 +933,7 @@ func (e *Engine) Evaluate(ctx context.Context, p principal.Principal, expr strin
 	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
-	ctx = context.WithValue(sharePostedSources(shareBalanceHistory(shareBudgetMonths(ctx, data, params), data), data, params), paramsKey{}, params)
+	ctx = context.WithValue(shareJournalAndBalances(sharePostedSources(shareBalanceHistory(shareBudgetMonths(ctx, data, params), data), data, params), data, params), paramsKey{}, params)
 	spec := Spec{Data: data, Computed: map[string]string{"result": expr}, Params: params}
 	raw, err := json.Marshal(spec)
 	if err != nil {

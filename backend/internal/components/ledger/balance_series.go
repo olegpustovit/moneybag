@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -64,6 +65,15 @@ func WithBalanceSeries(ctx context.Context, dates []string) context.Context {
 }
 
 func (s *Service) balanceSeriesRows(ctx context.Context, p principal.Principal, dates []string) ([][]rawBalance, error) {
+	if combinedDates, ok := ctx.Value(combinedJournalKey{}).([]string); ok && slices.Equal(combinedDates, dates) {
+		combined, err := s.repo.combinedJournal(ctx, p, dates)
+		if err == nil {
+			return combined.balances, nil
+		}
+		if ctx.Err() != nil {
+			return nil, err
+		}
+	}
 	db, err := s.repo.db(p)
 	if err != nil {
 		return nil, err

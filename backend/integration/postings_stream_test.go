@@ -468,4 +468,162 @@ func TestPostedStreamLargeCacheFallback(t *testing.T) {
 	if reads.Load() < 4 {
 		t.Fatalf("large journal did not fall back to streaming: %d reads", reads.Load())
 	}
+	dates := []string{"2026-01-01"}
+	combined := ledger.WithCombinedJournal(reqcache.With(ctx), dates)
+	reads.Store(0)
+	n := 0
+	err = sources.Ledger.PostedStream(combined, p, "2026-01-01", "2026-01-01", false, func(ledger.Entry) error { n++; return nil })
+	if err != nil || n != 1 || reads.Load() < 4 {
+		t.Fatal("oversized combined query did not fall back")
+	}
+	if _, err := db.Collection("journal").DeleteMany(ctx, bson.M{"user_id": p.UserID, "seq": bson.M{"$gt": 17}}); err != nil {
+		t.Fatal(err)
+	}
+	combined = ledger.WithCombinedJournal(reqcache.With(ctx), dates)
+	reads.Store(0)
+	n = 0
+	err = sources.Ledger.PostedStream(combined, p, "", "", false, func(ledger.Entry) error { n++; return nil })
+	if err != nil || n != 17 {
+		t.Fatal("combined query failed above the BSON output-document limit")
+	}
+	before := reads.Load()
+	series, err := sources.Ledger.BalanceSeries(combined, p, dates, historyValuer{})
+	if err != nil || len(series) != 1 || reads.Load() != before+1 {
+		t.Fatal("large combined result was not reused by balance history")
+	}
+}
+
+func TestDashboardSharesJournalAndBalances(t *testing.T) {
+	ctx, p, _, _ := postingsFixture(t)
+	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
+	var journalReads, journalOtherReads atomic.Int64
+	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
+		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
+			journalReads.Add(1)
+		}
+		if e.CommandName == "find" && e.Command.Lookup("find").StringValue() == "journal" || e.CommandName == "getMore" && e.Command.Lookup("collection").StringValue() == "journal" {
+			journalOtherReads.Add(1)
+		}
+	}}
+	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")).SetMonitor(monitor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
+	book := ledger.NewService(ledger.NewMongoRepository(db), nil)
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := dashboard.Engine{Expr: expr, Reader: &dashboard.Sources{Ledger: book, Valuer: historyValuer{}}}
+	data := map[string]dashboard.Query{"accounts": {From: "accounts"}, "history": {From: "balance_history"}, "postings": {From: "postings", Agg: map[string]string{"n": "count()"}}}
+	result, err := engine.Evaluate(ctx, p, "size(data.accounts) + size(data.history) + size(data.postings)", data, nil)
+	if err != nil || result.Value == nil || journalReads.Load() != 1 || journalOtherReads.Load() != 0 {
+		t.Fatalf("dashboard used %d journal aggregates and %d additional reads: %v", journalReads.Load(), journalOtherReads.Load(), err)
+	}
+}
+
+func TestCombinedJournalParity(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
+	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
+	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "later", Seq: 20030, Date: "2026-02-15", Status: "posted", Kind: "entry", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("0.123456"), Commodity: "EUR"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dates := []string{"2025-12-31", "2026-01-01", "2026-02-28"}
+	expected, err := sources.Ledger.BalanceSeries(ctx, p, dates, historyValuer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := func(ctx context.Context, from, to string, effective bool) (string, error) {
+		h := sha256.New()
+		enc := json.NewEncoder(h)
+		err := sources.Ledger.PostedStream(ctx, p, from, to, effective, func(e ledger.Entry) error { return enc.Encode(e) })
+		return fmt.Sprintf("%x", h.Sum(nil)), err
+	}
+	full, err := digest(ctx, "", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filtered, err := digest(ctx, "2026-01-01", "2026-01-31", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := ledger.WithBalanceSeries(ledger.WithCombinedJournal(reqcache.With(ctx), dates), dates)
+	var got []ledger.BalancesResult
+	var fullShared, filteredShared string
+	var errs [3]error
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		got, errs[0] = sources.Ledger.BalanceSeries(shared, p, dates, historyValuer{})
+	}()
+	go func() { defer wg.Done(); fullShared, errs[1] = digest(shared, "", "", false) }()
+	go func() { defer wg.Done(); filteredShared, errs[2] = digest(shared, "2026-01-01", "2026-01-31", true) }()
+	wg.Wait()
+	a, _ := json.Marshal(expected)
+	b, _ := json.Marshal(got)
+	if errs[0] != nil || errs[1] != nil || errs[2] != nil || string(a) != string(b) || full != fullShared || filtered != filteredShared {
+		t.Fatalf("combined results differ: %v", errs)
+	}
+	current, err := sources.Ledger.Balances(shared, p, ledger.BalancesInput{At: dates[2]}, nil)
+	if err != nil || len(current.Rows) != 1 || current.Rows[0].Amounts[0].Value.String() != "20000.123456" {
+		t.Fatal("combined current balance differs")
+	}
+	err = sources.Ledger.PostedStream(shared, p, "", "", false, func(entry ledger.Entry) error {
+		if len(entry.Postings) > 0 {
+			entry.Postings[0].Account = "modified"
+		}
+		if len(entry.Tags) > 0 {
+			entry.Tags[0] = "modified"
+		}
+		return nil
+	})
+	again, checkErr := digest(shared, "", "", false)
+	if err != nil || checkErr != nil || again != full {
+		t.Fatal("combined data was mutated by a callback")
+	}
+	other := p
+	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+	count := 0
+	err = sources.Ledger.PostedStream(shared, other, "", "", false, func(ledger.Entry) error { count++; return nil })
+	otherBalance, balanceErr := sources.Ledger.Balances(shared, other, ledger.BalancesInput{At: dates[2]}, nil)
+	if err != nil || count != 1 || balanceErr != nil || len(otherBalance.Rows) != 1 || otherBalance.Rows[0].Amounts[0].Value.String() != "1" {
+		t.Fatal("combined results crossed user boundaries")
+	}
+	denied := p
+	denied.Scopes = nil
+	if err := sources.Ledger.PostedStream(shared, denied, "", "", false, func(ledger.Entry) error { return nil }); err == nil {
+		t.Fatal("combined stream bypassed authorization")
+	}
+	empty := p
+	empty.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+	count = 0
+	err = sources.Ledger.PostedStream(shared, empty, "", "", false, func(ledger.Entry) error { count++; return nil })
+	emptyHistory, historyErr := sources.Ledger.BalanceSeries(shared, empty, dates, historyValuer{})
+	if err != nil || count != 0 || historyErr != nil || len(emptyHistory) != len(dates) {
+		t.Fatal("empty combined result failed")
+	}
+	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "duplicate-reversal", Seq: 20040, Date: "2026-01-01", Status: "posted", Kind: "reversal", Links: []ledger.Link{{Rel: "reverses", ID: "entry-00001"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateBaseline, err := digest(ctx, "", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicateCtx := ledger.WithCombinedJournal(reqcache.With(ctx), dates)
+	reads.Store(0)
+	duplicateCombined, err := digest(duplicateCtx, "", "", true)
+	if err != nil || duplicateCombined != duplicateBaseline || reads.Load() != 3 {
+		t.Fatalf("duplicate reversal fallback differed: %v, %d reads", err, reads.Load())
+	}
 }

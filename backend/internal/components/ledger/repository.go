@@ -205,6 +205,34 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 // reversed returns original entries cancelled by an odd reversal chain.
 func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (map[string]bool, error) {
 	return reqcache.Do(ctx, "reversed|"+p.UserID, func() (map[string]bool, error) {
+		if dates, ok := ctx.Value(combinedJournalKey{}).([]string); ok {
+			combined, err := r.combinedJournal(ctx, p, dates)
+			if err == nil {
+				var revs []Entry
+				for i, doc := range combined.entries {
+					if i%1000 == 0 && ctx.Err() != nil {
+						return nil, ctx.Err()
+					}
+					kind, ok := doc.Lookup("kind").StringValueOK()
+					if !ok || kind != "reversal" {
+						continue
+					}
+					var item struct {
+						ID    string `bson:"_id"`
+						Links []Link `bson:"links"`
+					}
+					if err := bson.Unmarshal(doc, &item); err != nil {
+						return nil, err
+					}
+					revs = append(revs, Entry{ID: item.ID, Links: item.Links})
+				}
+				if result, unique := reversalSet(revs); unique {
+					return result, nil
+				}
+			} else if ctx.Err() != nil {
+				return nil, err
+			}
+		}
 		db, err := r.db(p)
 		if err != nil {
 			return nil, err
@@ -218,30 +246,39 @@ func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (
 		if err := cur.All(ctx, &revs); err != nil {
 			return nil, err
 		}
-		reversedBy, isReversal := map[string]string{}, map[string]bool{}
-		for _, r := range revs {
-			isReversal[r.ID] = true
-			for _, l := range r.Links {
-				if l.Rel == "reverses" {
-					reversedBy[l.ID] = r.ID
-				}
-			}
-		}
-		reversed := map[string]bool{}
-		for id := range reversedBy {
-			if isReversal[id] {
-				continue
-			}
-			n := 0
-			for cur, ok := reversedBy[id]; ok && n <= len(revs); cur, ok = reversedBy[cur] {
-				n++
-			}
-			if n%2 == 1 {
-				reversed[id] = true
-			}
-		}
-		return reversed, nil
+		result, _ := reversalSet(revs)
+		return result, nil
 	})
+}
+
+func reversalSet(revs []Entry) (map[string]bool, bool) {
+	reversedBy, isReversal := map[string]string{}, map[string]bool{}
+	unique := true
+	for _, r := range revs {
+		isReversal[r.ID] = true
+		for _, l := range r.Links {
+			if l.Rel == "reverses" {
+				if prior, exists := reversedBy[l.ID]; exists && prior != r.ID {
+					unique = false
+				}
+				reversedBy[l.ID] = r.ID
+			}
+		}
+	}
+	reversed := map[string]bool{}
+	for id := range reversedBy {
+		if isReversal[id] {
+			continue
+		}
+		n := 0
+		for cur, ok := reversedBy[id]; ok && n <= len(revs); cur, ok = reversedBy[cur] {
+			n++
+		}
+		if n%2 == 1 {
+			reversed[id] = true
+		}
+	}
+	return reversed, unique
 }
 
 type sharedPostedKey struct{}
@@ -253,6 +290,15 @@ func WithSharedPostedStream(ctx context.Context) context.Context {
 
 // PostedStream reads posted journal entries without paging or joining tags.
 func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principal, from, to string, fn func(Entry) error) error {
+	if dates, ok := ctx.Value(combinedJournalKey{}).([]string); ok {
+		combined, err := r.combinedJournal(ctx, p, dates)
+		if err == nil {
+			return streamPostedRaw(ctx, combined.entries, from, to, fn)
+		}
+		if ctx.Err() != nil {
+			return err
+		}
+	}
 	if shared, _ := ctx.Value(sharedPostedKey{}).(bool); shared {
 		db, err := r.db(p)
 		if err != nil {
@@ -278,25 +324,7 @@ func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principa
 			return rows, cur.Err()
 		})
 		if err == nil {
-			for _, doc := range raw {
-				if err := ctx.Err(); err != nil {
-					return err
-				}
-				if from != "" || to != "" {
-					date, ok := doc.Lookup("date").StringValueOK()
-					if !ok || from != "" && date < from || to != "" && date > to {
-						continue
-					}
-				}
-				var entry Entry
-				if err := bson.Unmarshal(doc, &entry); err != nil {
-					return err
-				}
-				if err := fn(entry); err != nil {
-					return err
-				}
-			}
-			return nil
+			return streamPostedRaw(ctx, raw, from, to, fn)
 		}
 		if ctx.Err() != nil {
 			return err
@@ -317,6 +345,28 @@ func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principa
 		}
 	}
 	return cur.Err()
+}
+
+func streamPostedRaw(ctx context.Context, raw []bson.Raw, from, to string, fn func(Entry) error) error {
+	for _, doc := range raw {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if from != "" || to != "" {
+			date, ok := doc.Lookup("date").StringValueOK()
+			if !ok || from != "" && date < from || to != "" && date > to {
+				continue
+			}
+		}
+		var entry Entry
+		if err := bson.Unmarshal(doc, &entry); err != nil {
+			return err
+		}
+		if err := fn(entry); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *MongoRepository) postedCursor(ctx context.Context, p principal.Principal, from, to string) (*mongo.Cursor, error) {
