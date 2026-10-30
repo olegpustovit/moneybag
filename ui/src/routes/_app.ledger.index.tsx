@@ -6,16 +6,16 @@ import type { EntriesListInput, EntriesListOutput } from '../lib/tools'
 import { commodityLabel, decimalLabel, tidyPayee } from '../lib/format'
 import { useCube } from '../features/telemetry/cube-store'
 import { dim, suggestValues, totals, type Cube, type Pill } from '../features/telemetry/cube'
-import { decodePills, encodePills, pillsToCel } from '../features/telemetry/filters'
+import { decodePills, encodePills } from '../features/telemetry/filters'
 import { TimeBar } from '../features/telemetry/time-bar'
 import { FilterBar } from '../features/telemetry/filter-bar'
 import { DataGrid, type GridColumn, type GridRow, type GridSort } from '../features/telemetry/data-grid'
 import { money, percent } from '../features/telemetry/format'
 import { ledgerSearch, type LedgerSearch, type LedgerSort } from '../features/telemetry/search'
 import { useTimeState } from '../features/telemetry/use-time-state'
-import { canonicalText, isoDay, rangeLabel } from '../features/telemetry/time-grammar'
+import { canonicalText, isoDay } from '../features/telemetry/time-grammar'
 import { defaultBounds } from '../features/telemetry/time-grammar'
-import { describePage, openDetails, promptSaveView } from '../features/telemetry/shell-store'
+import { openDetails, promptSaveView } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton, SubNav } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/ledger/')({validateSearch:ledgerSearch,errorComponent:p => <RouteError {...p}/>,component:Ledger})
@@ -69,9 +69,8 @@ function Ledger() {
   getNextPageParam:page => page.next_cursor ? {cursor:page.next_cursor,date:page.next_cursor_date ?? '',amount:page.next_cursor_amount ?? ''} : undefined})
  const all=mapped.none ? [] : (entries.data?.pages ?? []).flatMap(p => p.items ?? []),rows=all.map(e => rowOf(e,cube,agentNames)).filter(r => {const v=Math.abs((r.amount as {v:number}).v);return (mapped.over===undefined || v>mapped.over) && (mapped.under===undefined || v<mapped.under)})
  const gridSort:GridSort=sort.endsWith('amount') ? {key:'amount',desc:sort.startsWith('-')} : {key:'date',desc:sort.startsWith('-')}
- const q={range,pills},t=cube ? totals(cube,q) : null,cel=pillsToCel(pills)
+ const q={range,pills},t=cube ? totals(cube,q) : null
  const estimateShare=t && t.out ? t.estimated/t.out : 0
- describePage({title:'Ledger entries',lines:[`Time range: ${rangeLabel(range)}`,...(cel ? [`Filter: ${cel}`] : [])]})
  const byId=new Map(all.map(e => [e.id,e]))
  const open=(row:GridRow) => {
   const e=byId.get(String(row.id));if(!e)return

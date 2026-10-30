@@ -7,7 +7,6 @@ import { DataGrid } from '../features/telemetry/data-grid'
 import { CurrencySwitch, useCurrencyCube } from '../features/telemetry/currency'
 import { useCube } from '../features/telemetry/cube-store'
 import { unitFormat } from '../features/telemetry/format'
-import { describePage } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/future')({errorComponent:p => <RouteError {...p}/>,component:Future})
@@ -16,11 +15,10 @@ const runwayText=(months:number|null|undefined) => months===null || months===und
 function Future() {
  const {session}=Route.useRouteContext(),{currency,switchable}=useCurrencyCube(useCube(session.user.id)),fmt=unitFormat(currency==='USD' ? 'usd' : 'eur')
  const data=useQuery({queryKey:['future',session.user.id,currency],staleTime:60_000,queryFn:async () => {const model=await tool(session,'model_get',{}),ids=(model.scenarios ?? []).filter(s => !s.archived).map(s => s.id);if(!ids.length)return [];const out=[];for(let i=0;i<ids.length;i+=20)out.push(...((await tool(session,'forecast_run',{scenario_ids:ids.slice(i,i+20),horizon_months:HORIZON,value_in:currency})).series ?? []));return out}})
- describePage({title:'Future',lines:[]})
  const head=<PageHead title="Future" description="How long does this last under each plan?">{switchable && <CurrencySwitch value={currency}/>}</PageHead>
  if(data.error)return <>{head}<RouteError error={data.error} reset={() => void data.refetch()} title="The forecast didn’t load"/></>
  if(!data.data)return <>{head}<RowsSkeleton rows={10}/></>
- if(!data.data.length)return <>{head}<Empty title="No plans yet">Ask an agent to model a plan and compare it with what you’re doing now.</Empty></>
+ if(!data.data.length)return <>{head}<Empty title="No plans yet">An agent models a plan and compares it with what you’re doing now.</Empty></>
  // The plan that spends most comes first: the cheapest plan always looks best, and shouldn't lead.
  const series=[...data.data].sort((a,b) => (b.spend ?? 0)-(a.spend ?? 0)),start=Date.parse(`${(series[0].start_as_of || new Date().toISOString()).slice(0,7)}-01T00:00:00Z`),months=Math.max(...series.map(s => s.months?.length ?? 0)),xs=Array.from({length:months},(_,i) => {const d=new Date(start);d.setUTCMonth(d.getUTCMonth()+i);return d.getTime()})
  const lines=series.slice(0,6).map((s,i) => ({key:s.scenario,label:s.name,color:i<5 ? `--c${i}` : '--series-other',values:xs.map((_,k) => s.months?.[k]?.net ?? null)}))

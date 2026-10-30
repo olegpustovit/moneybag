@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { Cube, Pill } from './cube'
 import { dim, localFacts, suggestValues, totals, whatMoved, type Fact } from './cube'
-import { addPill, decodePills, encodePills, FIELDS, pillsToCel, type FieldDef } from './filters'
-import { DAY, canonicalText, dayLabel, defaultBounds, isoDay, rangeLabel } from './time-grammar'
+import { addPill, decodePills, encodePills, FIELDS, type FieldDef } from './filters'
+import { DAY, canonicalText, dayLabel, defaultBounds, isoDay } from './time-grammar'
 import { currencySymbol, money } from './format'
 import { useTimeState, type TelemetrySearch } from './use-time-state'
 import type { DashboardSearch } from './search'
@@ -11,7 +11,7 @@ import { useCurrencyCube } from './currency'
 import { FilterBar } from './filter-bar'
 import { Answer } from './answer'
 import { FullTable, Panel, type PanelCtx } from './panels'
-import { askAgent, describePage, promptSaveView } from './shell-store'
+import { promptSaveView } from './shell-store'
 import type { SpecComponent, ViewBody, ViewPage } from './view-data'
 import './telemetry.css'
 
@@ -45,11 +45,9 @@ export function DashboardBody({view,cube:fullCube,search,onSearch,dashboardId,he
  const nav=cube ? {xs:netDays(cube).xs,values:netDays(cube).values,bands:cube.annotations.map(a => ({from:Date.parse(a.from),to:Date.parse(a.to),label:a.label})),label:'Net worth across all history'} : undefined
  const t=cube ? totals(cube,q) : null
  const title=spec.question || view.head.title
- const sayRange=rangeLabel(range),cel=pillsToCel(pills,fields)
  const movedTop=cube && !render ? whatMoved(cube,{range},null,{limit:1})[0]?.label : undefined
  const asks=movedTop ? [`${movedTop} this year`,`Everything except ${movedTop}, no estimates`,`Charges above ${currencySymbol(cube!.base)}500 last 3 months`] : undefined
  const suggest=(field:Parameters<typeof suggestValues>[2],query:string) => cube ? suggestValues(cube,q,field,query) : []
- useEffect(() => {describePage({title,lines:[`Dashboard: ${view.head.title}`,`Time range: ${sayRange}${win?.available ? `, compared with the ${win.label}` : ''}`,...(cel ? [`Filter: ${cel}`] : []),...(facts?.[0]?.sentence ? [`The page says: ${facts[0].sentence}`] : [])]})})
  const tableComponent=search.table ? components.get(search.table) : undefined
  if(tableComponent){
   const value=view.values?.[tableComponent.id] as {title?:string}|undefined,name=value?.title ?? 'All rows'
@@ -61,7 +59,6 @@ export function DashboardBody({view,cube:fullCube,search,onSearch,dashboardId,he
    <div className="tm-dash-tools">
     {view.stale ? <span className="tm-asof" title={`Numbers from ${new Date(view.as_of).toLocaleString()}`}>Refreshing prices…</span> : !render && view.as_of ? <span className="tm-asof">As of {asOfLabel(view.as_of)}</span> : null}
     {headerExtra}
-    {!render && <button type="button" className="tm-btn small" onClick={() => askAgent()}>Ask an agent</button>}
    </div>
   </header>
   <div className="tm-sheet">

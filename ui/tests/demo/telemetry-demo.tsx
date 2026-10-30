@@ -31,8 +31,8 @@ const ASKS=['Groceries over €50 last 3 months','Travel this year','Everything 
 const m=(c:number) => money(c,code)
 // Arguments make the React Compiler re-run this whenever the inputs change, instead of caching one reading forever.
 const clock=(..._inputs:unknown[]) => performance.now()
-declare global {interface Window {__demo:{readCached:typeof readCached;writeCached:typeof writeCached;wire:typeof wire;ask:string[];flags:unknown[];saved:number};__router?:unknown}}
-window.__demo={readCached,writeCached,wire,ask:[],flags:[],saved:0}
+declare global {interface Window {__demo:{readCached:typeof readCached;writeCached:typeof writeCached;wire:typeof wire;flags:unknown[];saved:number};__router?:unknown}}
+window.__demo={readCached,writeCached,wire,flags:[],saved:0}
 const legacy:Record<string,ChartValue>={
  line:{type:'chart',title:'Scenario runway',mark:'line',x:{field:'month',kind:'month'},y_format:'eur0',rule:{y:42000,label:'Safety floor'},series:[{name:'Base',color_index:0},{name:'Card trend',color_index:1},{name:'Cut travel',color_index:2}],points:Array.from({length:24},(_,i) => ['Base','Card trend','Cut travel'].map((s,k) => ({x:`20${25+Math.floor(i/12)}-${String(i%12+1).padStart(2,'0')}`,series:s,y:60000-i*(700+k*220)+k*900}))).flat()},
  bar:{type:'chart',title:'Rent by month',mark:'bar',x:{field:'month',kind:'month'},y_format:'eur0',series:[{name:'',color_index:0}],points:Array.from({length:12},(_,i) => ({x:`2026-${String(i+1).padStart(2,'0')}`,series:'',y:1250}))},
@@ -99,7 +99,7 @@ function Demo() {
   <section className="demo-section"><h2 className="demo-h2">Grid with spark, bar and declared totals</h2><DataGrid label="Categories" rowKey={r => String((r.name as string))} columns={[{key:'name',label:'Category',type:'text'},{key:'spend',label:'Spend',type:'money',total:true},{key:'share',label:'Share',type:'pct',cell:'bar'},{key:'trend',label:'Trend',cell:'spark'},{key:'days',label:'Days covered',type:'days'},{key:'n',label:'Entries',type:'count',total:true}]} rows={leaders.slice(0,8).map(x => {const ts=timeseries(cube,{range,pills:[{field:'category',op:'is',values:[x.key]}]},{bucket:spend.bucket});return {name:x.label,spend:x.now,share:t.out ? x.now/t.out*100 : 0,trend:Array.from(ts.total),days:Math.round((range.to-range.from)/864e5)+1,n:totals(cube,{range,pills:[{field:'category',op:'is',values:[x.key]}]}).entries}})}/></section>
   <section className="demo-section" id="entries"><h2 className="demo-h2">The entries behind these numbers</h2><p className="demo-note">{rows.length.toLocaleString('en-US')} rows, virtualized against the page scroll. {pots.size} categories. CEL: <code>{pillsToCel(pills) || 'no filter'}</code></p><DataGrid label="Entries" rowKey={(r,i) => `${r.date}${r.payee}${r.id}${i}`} columns={columns} rows={grid} initialSort={{key:'date',desc:true}} onDetails={row => openDetails({title:String(row.payee),value:typeof row.amount==='object' && row.amount && 't' in row.amount ? row.amount.t : '',subtitle:`${String(row.date)} · ${String(row.category)}`,calculation:{summary:'One line of the ledger, in base currency at that day’s rate.',rates:[{label:'EUR/USD',value:'1.0843'}]},sourceRows:{columns:['Field','Value'],rows:[['Bank text',`${String(row.payee).toUpperCase()} 0042`],['Imported from','Statement, October']]},machine:[{label:'Account',value:String(row.id)},{label:'Entry',value:'01J9YH7Q3ZK8P2N6'}]})}/></section>
   <DetailsDrawer open={drawerOpen} onOpenChange={setDrawerOpen} content={details} target={{metric:details?.title,value:details?.value}} onFlag={async flag => {window.__demo.flags.push(flag)}}/>
-  <CommandBar groups={commandGroups} onSelect={item => setMessage(`Jumped to ${item.label}`)} onAsk={q2 => {window.__demo.ask.push(q2);setMessage(`Asked an agent: ${q2}`)}}/>
+  <CommandBar groups={commandGroups} onSelect={item => setMessage(`Jumped to ${item.label}`)}/>
   <div className="demo-toast" role="status">{message}</div>
  </main>
 }

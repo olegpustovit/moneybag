@@ -2,7 +2,6 @@ import { useQuery } from '@tanstack/react-query'
 import { RouteError } from '../features/telemetry/route-error'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { receivedQuery, sharedQuery, type Session } from '../lib/api'
-import { describePage } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/shared/')({errorComponent:p => <RouteError {...p}/>,component:Shared})
@@ -12,7 +11,6 @@ function SharedRow({session,id,until}:{session:Session;id:string;until?:string|n
 }
 function Shared() {
  const {session}=Route.useRouteContext(),received=useQuery(receivedQuery(session))
- describePage({title:'Shared with me',lines:[]})
  const head=<PageHead title="Shared with me" description="Dashboards other people have shared with you."/>
  if(received.error)return <>{head}<RouteError error={received.error} reset={() => void received.refetch()} title="Shared dashboards didn’t load"/></>
  if(!received.data)return <>{head}<RowsSkeleton rows={4}/></>

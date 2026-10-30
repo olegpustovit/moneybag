@@ -4,7 +4,7 @@ import { Link } from '@tanstack/react-router'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui/dialog'
 import { flagNumber, saveView, savedViewsQuery, tool, type Session } from '../../lib/api'
 import { DetailsDrawer, type DetailsContent } from './details-drawer'
-import { agentPrompt, closeAsk, closeDetails, closeSaveView, useShell, type DetailsRequest, type MetricRequest } from './shell-store'
+import { closeDetails, closeSaveView, useShell, type DetailsRequest, type MetricRequest } from './shell-store'
 import { humanDate } from './format'
 import { verbFor } from './verbs'
 import './telemetry.css'
@@ -35,19 +35,6 @@ function MetricDrawer({session,request,metric}:{session:Session;request:DetailsR
  const content=useMetricDetails(session,request,metric)
  return <DetailsDrawer open onOpenChange={next => {if(!next)closeDetails()}} content={content} target={request.target} onFlag={async flag => {await flagNumber(session,flag.target,flag.note)}}/>
 }
-function AskDialog({question,page}:{question:string;page:Parameters<typeof agentPrompt>[1]}) {
- const [text,setText]=useState(question),[copied,setCopied]=useState(false),prompt=agentPrompt(text,page)
- return <Dialog open onOpenChange={next => {if(!next)closeAsk()}}>
-  <DialogContent className="tm-ask">
-   <DialogHeader><DialogTitle>Ask an agent</DialogTitle><DialogDescription>Moneybag doesn’t talk to agents itself. Paste this into the one you use. It already says what you’re looking at.</DialogDescription></DialogHeader>
-   <label className="tm-field-label" htmlFor="tm-ask-question">Your question</label>
-   <input id="tm-ask-question" className="tm-input" value={text} autoFocus onChange={e => {setText(e.target.value);setCopied(false)}}/>
-   <label className="tm-field-label" htmlFor="tm-ask-prompt">What gets copied</label>
-   <textarea id="tm-ask-prompt" className="tm-textarea" rows={9} readOnly value={prompt}/>
-   <div className="tm-row"><button type="button" className="tm-btn primary" onClick={async () => {try {await navigator.clipboard.writeText(prompt);setCopied(true)} catch {document.getElementById('tm-ask-prompt')?.focus()}}}>{copied ? 'Copied' : 'Copy prompt'}</button><span role="status" className="tm-muted">{copied ? 'Paste it into your agent.' : ''}</span></div>
-  </DialogContent>
- </Dialog>
-}
 function SaveDialog({session,request}:{session:Session;request:NonNullable<ReturnType<typeof useShell>['saveView']>}) {
  const [name,setName]=useState(request.suggested),[error,setError]=useState(''),[busy,setBusy]=useState(false),client=useQueryClient()
  return <Dialog open onOpenChange={next => {if(!next)closeSaveView()}}>
@@ -62,10 +49,9 @@ function SaveDialog({session,request}:{session:Session;request:NonNullable<Retur
  </Dialog>
 }
 export function ShellOverlays({session}:{session:Session}) {
- const {details,ask,saveView:saving,page}=useShell()
+ const {details,saveView:saving}=useShell()
  return <>
   {details && (details.metric ? <MetricDrawer session={session} request={details} metric={details.metric}/> : <Drawer session={session} request={details}/>)}
-  {ask && <AskDialog question={ask.question} page={page}/>}
   {saving && <SaveDialog session={session} request={saving}/>}
  </>
 }

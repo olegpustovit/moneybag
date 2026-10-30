@@ -9,7 +9,6 @@ import { percent, unitFormat } from '../features/telemetry/format'
 import { telemetrySearch } from '../features/telemetry/search'
 import { useTimeState, type SearchWriter } from '../features/telemetry/use-time-state'
 import { defaultBounds } from '../features/telemetry/time-grammar'
-import { describePage } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton, SubNav } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/data/rates')({validateSearch:telemetrySearch,errorComponent:p => <RouteError {...p}/>,component:Rates})
@@ -20,7 +19,6 @@ function Rates() {
  const {session,bootstrap}=Route.useRouteContext(),params=Route.useSearch(),navigate=Route.useNavigate(),cube=useCube(session.user.id),bounds=cube?.bounds ?? defaultBounds()
  const onSearch:SearchWriter=(next,{push}) => {void navigate({search:old => ({...old,...next}),replace:!push,resetScroll:false})}
  const time=useTimeState({bounds,search:params,onSearch,defaultText:'12mo',defaultCompare:'none'}),pairs=Object.keys(cube?.rates ?? {}).sort()
- describePage({title:'Rates',lines:[]})
  return <>
   <PageHead title="Data" description="What feeds this, and can I trust it?"/>
   <SubNav of="data" counts={{'/data/imports':bootstrap.counts.imports,'/data/reconcile':bootstrap.counts.reconcile}}/>

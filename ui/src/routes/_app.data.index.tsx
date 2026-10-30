@@ -1,12 +1,10 @@
 import { RouteError } from '../features/telemetry/route-error'
 import { Link, createFileRoute } from '@tanstack/react-router'
-import { describePage } from '../features/telemetry/shell-store'
 import { Empty, PageHead, SubNav } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/data/')({errorComponent:p => <RouteError {...p}/>,component:Datasets})
 function Datasets() {
  const {bootstrap}=Route.useRouteContext(),tables=bootstrap.tables.filter(t => !t.archived)
- describePage({title:'Datasets',lines:[]})
  return <>
   <PageHead title="Data" description="What feeds this, and can I trust it?"/>
   <SubNav of="data" counts={{'/data/imports':bootstrap.counts.imports,'/data/reconcile':bootstrap.counts.reconcile}}/>

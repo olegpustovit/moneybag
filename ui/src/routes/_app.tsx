@@ -8,7 +8,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../c
 import { Button } from '../components/ui/button'
 import { CommandBar, type CommandGroup, type CommandItem } from '../features/telemetry/command-bar'
 import { ShellOverlays } from '../features/telemetry/shell-overlays'
-import { askAgent, searchKey } from '../features/telemetry/shell-store'
+import { searchKey } from '../features/telemetry/shell-store'
 import { useCube } from '../features/telemetry/cube-store'
 import { homeDashboard, normalizeRoute } from '../features/telemetry/nav'
 
@@ -84,7 +84,7 @@ function Workspace() {
    <header className="mobile-header"><Sheet open={mobileOpen} onOpenChange={setMobileOpen}><SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Open navigation"/>}><Menu/></SheetTrigger><SheetContent side="left" className="mobile-sheet"><SheetHeader className="sr-only"><SheetTitle>Navigation</SheetTitle></SheetHeader><Navigation data={data} onNavigate={() => setMobileOpen(false)} onSearch={() => setCommandOpen(true)}/></SheetContent></Sheet><Link to="/" className="mobile-brand"><span className="workspace-mark" aria-hidden="true">M</span>Moneybag</Link><Button variant="ghost" size="sm" onClick={() => setCommandOpen(true)}>Search</Button></header>
    <main id="main-content" className="main-content"><Outlet/></main>
   </div>
-  <CommandBar groups={groups} onSelect={select} onAsk={question => askAgent(question)} open={commandOpen} onOpenChange={setCommandOpen}/>
+  <CommandBar groups={groups} onSelect={select} open={commandOpen} onOpenChange={setCommandOpen}/>
   <ShellOverlays session={session}/>
  </div>
 }

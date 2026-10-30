@@ -276,11 +276,11 @@ The recessed sidebar holds the agent-set navigation (Now, Spending, Income, Budg
 
 ### Reading rules
 
-People read, zoom, filter, drill, save views, flag numbers and ask an agent. There are no editing controls in the web UI. No raw ids, snake_case keys, tool names or templates appear on a page; they live in the Details drawer, the one home for how a number was calculated, its history and "Flag this". Provenance reads "From statement", "Estimated" or "Added by <agent>".
+People read, zoom, filter, drill, save views, and flag numbers. There are no editing controls in the web UI. No raw ids, snake_case keys, tool names or templates appear on a page; they live in the Details drawer, the one home for how a number was calculated, its history and "Flag this". Provenance reads "From statement", "Estimated" or "Added by <agent>".
 
 ### Dialogs and Console
 
-Dialogs and sheets use square paper surfaces and viewport-constrained content. ⌘K opens the Command bar for pages, accounts, payees and saved views; a question falls through to "Ask an agent", a copyable prompt that already says what the person is looking at.
+Dialogs and sheets use square paper surfaces and viewport-constrained content. ⌘K opens the Command bar for pages, accounts, payees and saved views; a query that matches nothing says "No matches".
 
 ## Do's and Don'ts
 

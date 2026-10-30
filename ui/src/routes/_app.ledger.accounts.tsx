@@ -10,7 +10,7 @@ import { money, moneyExact } from '../features/telemetry/format'
 import { useCube } from '../features/telemetry/cube-store'
 import { CurrencySwitch, useCurrencyCube } from '../features/telemetry/currency'
 import { balanceAt } from '../features/telemetry/cube'
-import { describePage, openDetails } from '../features/telemetry/shell-store'
+import { openDetails } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton, SubNav, humanKey } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/ledger/accounts')({errorComponent:p => <RouteError {...p}/>,component:Accounts})
@@ -38,7 +38,6 @@ function Accounts() {
  const balances=useQuery({queryKey:['balances',session.user.id,currency],staleTime:60_000,
   // One commodity with no quote must not hide every account: fall back to native amounts and say so per row.
   queryFn:() => tool(session,'balances_get',{value_in:currency,group_by:'account'}).catch(() => tool(session,'balances_get',{group_by:'account'}))})
- describePage({title:'Accounts',lines:[]})
  if(accounts.error || balances.error)return <><PageHead title="Ledger"/><SubNav of="ledger"/><RouteError error={accounts.error ?? balances.error} reset={() => {void accounts.refetch();void balances.refetch()}} title="Accounts didn’t load"/></>
  if(!accounts.data || !balances.data)return <><PageHead title="Ledger" description="Show me the entries and the accounts."/><SubNav of="ledger"/><RowsSkeleton rows={12}/></>
  const byKey=new Map((balances.data.rows ?? []).map(r => [r.key,r])),rows:Row[]=accounts.data.map(account => {const b=byKey.get(account.id),value=Number(b?.value?.v ?? 0),amounts=(b?.amounts ?? []).filter(x => Number(x.v)!==0);return {account,value,text:b?.value ? moneyExact(Number(b.value.v)*100,currency) : amounts.length ? 'Not valued' : money(0,currency),native:amounts.filter(x => x.c!==currency).map(x => amountLabel(x,2)).join(' · ')}})

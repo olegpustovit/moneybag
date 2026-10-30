@@ -266,13 +266,12 @@ it('DetailsDrawer shows calculation, machine fields and sends a flag',async () =
  expect(flag).toHaveBeenCalledWith({target:{metric:'burn',value:'€9'},note:'Too high'});expect(within(dialog).getByRole('status').textContent).toContain('Sent to an agent')
 })
 
-it('CommandBar opens on the shortcut, jumps, and passes a question to the agent',async () => {
- const select=vi.fn(),ask=vi.fn()
- render(<CommandBar groups={[{heading:'Pages',items:[{id:'now',label:'Now'}]}]} onSelect={select} onAsk={ask}/>)
+it('CommandBar opens on the shortcut, jumps, and says so when nothing matches',async () => {
+ const select=vi.fn()
+ render(<CommandBar groups={[{heading:'Pages',items:[{id:'now',label:'Now'}]}]} onSelect={select}/>)
  expect(screen.queryByRole('dialog')).toBeNull()
  await act(async () => {fireEvent.keyDown(document,{key:'k',ctrlKey:true})})
- const input=await screen.findByLabelText('Search or ask');expect(screen.getByText('Now')).toBeTruthy()
+ const input=await screen.findByLabelText('Search');expect(screen.getByText('Now')).toBeTruthy()
  await act(async () => {fireEvent.change(input,{target:{value:'why is rent up'}})})
- const askItem=await screen.findByText(/Ask: “why is rent up”/);await act(async () => {fireEvent.click(askItem)})
- expect(ask).toHaveBeenCalledWith('why is rent up');expect(select).not.toHaveBeenCalled()
+ expect(await screen.findByText('No matches')).toBeTruthy();expect(screen.queryByText(/Ask/)).toBeNull();expect(select).not.toHaveBeenCalled()
 })

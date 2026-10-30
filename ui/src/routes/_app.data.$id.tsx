@@ -3,7 +3,7 @@ import { RouteError } from '../features/telemetry/route-error'
 import { Link, createFileRoute } from '@tanstack/react-router'
 import { tool } from '../lib/api'
 import { DataGrid, type ColumnType, type GridColumn, type GridRow } from '../features/telemetry/data-grid'
-import { describePage, openDetails } from '../features/telemetry/shell-store'
+import { openDetails } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton, humanKey } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/data/$id')({errorComponent:p => <RouteError {...p}/>,component:Dataset})
@@ -14,7 +14,6 @@ function Dataset() {
  const {session,bootstrap}=Route.useRouteContext(),{id}=Route.useParams(),table=bootstrap.tables.find(t => t.id===id)
  const data=useQuery({queryKey:['dataset',session.user.id,id],staleTime:30_000,queryFn:() => tool(session,'db_query',{db:id,limit:5000})})
  const name=table?.name ?? 'Dataset'
- describePage({title:`Dataset: ${name}`,lines:[]})
  const head=<><p className="breadcrumb"><Link to="/data" className="tm-crumb">← Data</Link></p><PageHead title={name}/></>
  if(data.error)return <>{head}<RouteError error={data.error} reset={() => void data.refetch()} title="This dataset didn’t load"/></>
  if(!data.data)return <>{head}<RowsSkeleton rows={12}/></>

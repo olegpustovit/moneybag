@@ -4,7 +4,6 @@ import { Link, createFileRoute } from '@tanstack/react-router'
 import { sharedQuery } from '../lib/api'
 import { Panel, type PanelCtx } from '../features/telemetry/panels'
 import { defaultBounds } from '../features/telemetry/time-grammar'
-import { describePage } from '../features/telemetry/shell-store'
 import { RowsSkeleton } from '../features/telemetry/page-bits'
 import { parseRange } from '../features/telemetry/time-grammar'
 
@@ -15,7 +14,6 @@ function SharedDashboard() {
  if(data.error)return <>{head('Shared dashboard')}<RouteError error={data.error} reset={() => void data.refetch()} title="This share is unavailable"/></>
  if(!data.data)return <>{head('Shared dashboard')}<RowsSkeleton rows={8}/></>
  const view=data.data,range=parseRange('12mo',bounds)!
- describePage({title:view.title,lines:['A dashboard shared with me']})
  // A share has its own values and no cube, so every panel draws what the server sent.
  const ctx:PanelCtx={cube:null,range,win:null,compareMode:'none',defaultCompare:'none',pills:[],filtering:false,dashboard:id,syncKey:`share-${id}`,bounds,explore:[],readOnly:true,setRange:() => {},stepOut:() => {},addPill:() => {}}
  if(view.legacy_html)return <>{head(view.title,`Shared ${view.at ? new Date(view.at).toLocaleDateString() : ''}`)}<div className="shared-legacy" dangerouslySetInnerHTML={{__html:view.legacy_html}}/></>

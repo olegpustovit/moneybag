@@ -1,10 +1,9 @@
 import type { ReactNode } from 'react'
 import { Link } from '@tanstack/react-router'
-import { askAgent } from './shell-store'
 import './telemetry.css'
 
 export function PageHead({title,description,children}:{title:string;description?:ReactNode;children?:ReactNode}) {
- return <header className="page-header"><div><h1>{title}</h1>{description && <p className="description">{description}</p>}</div><div className="tm-dash-tools">{children}<button type="button" className="tm-btn small" onClick={() => askAgent()}>Ask an agent</button></div></header>
+ return <header className="page-header"><div><h1>{title}</h1>{description && <p className="description">{description}</p>}</div><div className="tm-dash-tools">{children}</div></header>
 }
 const LEDGER=[{to:'/ledger',label:'Entries'},{to:'/ledger/accounts',label:'Accounts'}] as const
 const DATA=[{to:'/data',label:'Datasets'},{to:'/data/rates',label:'Rates'},{to:'/data/imports',label:'Imports'},{to:'/data/reconcile',label:'Reconcile'}] as const

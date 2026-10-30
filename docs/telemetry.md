@@ -1,6 +1,6 @@
 # Telemetry redesign contract
 
-The product rule: **agents build and run everything through MCP; people read, zoom, filter, drill, save personal views, flag numbers and ask an agent.** A feature is finished only when it has its spec field, catalog entry, lint rule and eval task. Everything below is optional in the spec so existing dashboards keep working until they are rebuilt.
+The product rule: **agents build and run everything through MCP; people read, zoom, filter, drill, save personal views, and flag numbers.** A feature is finished only when it has its spec field, catalog entry, lint rule and eval task. Everything below is optional in the spec so existing dashboards keep working until they are rebuilt.
 
 ## Spec v2 additions
 

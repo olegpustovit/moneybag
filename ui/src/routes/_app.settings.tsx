@@ -8,7 +8,7 @@ import { Input } from '../components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
 import { deleteView, savedViewsQuery, settingsPost, settingsQuery, type Session } from '../lib/api'
 import { clearCached } from '../features/telemetry/cube-store'
-import { describePage, searchKey } from '../features/telemetry/shell-store'
+import { searchKey } from '../features/telemetry/shell-store'
 import { RowsSkeleton, humanKey } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/settings')({errorComponent:p => <RouteError {...p}/>,component:Settings})
@@ -53,7 +53,6 @@ function SavedViews({session}:{session:Session}) {
 }
 function Settings() {
  const {session}=Route.useRouteContext(),data=useQuery(settingsQuery(session))
- describePage({title:'Settings',lines:[]})
  return <><header className="page-header"><div><h1>Settings</h1><p className="description">Your account and the agents working for you.</p></div></header>
   <div className="settings-layout">
    <section className="settings-section"><Theme/></section>

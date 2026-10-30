@@ -5,7 +5,7 @@ import { tool } from '../lib/api'
 import { budgetSearch } from '../features/telemetry/search'
 import { dateLabel } from '../lib/format'
 import { Stat } from '../features/telemetry/stat'
-import { describePage, openDetails } from '../features/telemetry/shell-store'
+import { openDetails } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton } from '../features/telemetry/page-bits'
 import { money } from '../features/telemetry/format'
 
@@ -16,13 +16,12 @@ function Budget() {
  const {session}=Route.useRouteContext(),{month:param}=Route.useSearch(),now=new Date().toISOString().slice(0,7),month=param ?? now
  const data=useQuery({queryKey:['budget',session.user.id,month],staleTime:30_000,placeholderData:keepPreviousData,queryFn:() => tool(session,'budget_get',{month})})
  const b=data.data,windowLabel=b?.window?.label ?? (b?.window?.months ? `${b.window.months}-month average` : 'recent average'),over=(b?.lines ?? []).filter(l => l.status==='over').length
- describePage({title:'Budget',lines:[`Month: ${dateLabel(month)}`]})
  const nav=<div className="tm-row tm-month"><Link className="tm-btn square" to="/budget" search={{month:shift(month,-1)}} aria-label="Previous month">←</Link><strong>{dateLabel(month)}</strong>{month<now ? <Link className="tm-btn square" to="/budget" search={{month:shift(month,1)}} aria-label="Next month">→</Link> : <span className="tm-btn square" aria-hidden="true" style={{opacity:.35}}>→</span>}</div>
  const head=<PageHead title="Budget" description={b ? `Am I on pace this month? Averages on this page all use one window: ${windowLabel}.` : 'Am I on pace this month?'}>{nav}</PageHead>
  if(data.error)return <>{head}<RouteError error={data.error} reset={() => void data.refetch()} title="The budget didn’t load"/></>
  if(!b)return <>{head}<RowsSkeleton rows={8}/></>
  const lines=b.lines ?? [],peak=Math.max(1,...lines.flatMap(l => [l.actual,l.limit,l.avg6])),t=b.total,left=t.limit-t.actual
- if(!lines.length)return <>{head}<Empty title="No budget yet">Ask an agent to set one up from what you’ve been spending.</Empty></>
+ if(!lines.length)return <>{head}<Empty title="No budget yet">An agent sets one up from what you’ve been spending.</Empty></>
  return <>{head}
   <div className="tm-stats tm-sheet-stats">
    <Stat label="Spent" value={eur(t.actual)} hideEmptyCompare note={`of ${eur(t.limit)} budgeted`}/>
