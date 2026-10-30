@@ -28,7 +28,7 @@ export function serverFacts(answer:unknown):Fact[]|null {
 }
 // Everything between the page heading and the footer, shared by the app route and the headless render route.
 export function DashboardBody({view,cube,search,onSearch,dashboardId,headerExtra,render}:{view:ViewBody;cube:Cube|null;search:DashboardSearch;onSearch:(next:Partial<DashboardSearch>,options:{push:boolean}) => void;dashboardId:string;headerExtra?:ReactNode;render?:boolean}) {
- const spec=view.spec,scope=spec.scope,bounds=cube?.bounds ?? defaultBounds(),hasClock=!!scope,defaultCompare=scope?.compare ?? 'previous_period'
+ const spec=view.spec,scope=spec.scope,bounds=cube?.bounds ?? defaultBounds(),hasClock=!!scope,allFixed=!!spec.components?.length && spec.components.every(c => c.fixed),defaultCompare=scope?.compare ?? 'previous_period'
  const time=useTimeState({bounds,search,onSearch,defaultText:scope?.time?.default ?? '12mo',defaultCompare})
  const [optimisticPills,setOptimisticPills]=useState<Pill[]|null>(null),[seenF,setSeenF]=useState(search.f)
  if(seenF!==search.f){setSeenF(search.f);setOptimisticPills(null)}
@@ -64,8 +64,8 @@ export function DashboardBody({view,cube,search,onSearch,dashboardId,headerExtra
    </div>
   </header>
   <div className="tm-sheet">
-   {hasClock || !render ? <TimeBar state={time} bounds={bounds} presets={defaultPresets(bounds,scope?.time?.presets)} navigator={nav}/> : null}
-   {!hasClock && !render && <p className="tm-clock-note">The agent who built this page hasn’t connected its panels to the clock yet, so some may ignore the range.</p>}
+   {hasClock || (!render && !allFixed) ? <TimeBar state={time} bounds={bounds} presets={defaultPresets(bounds,scope?.time?.presets)} navigator={nav}/> : null}
+   {!hasClock && !render && !allFixed && <p className="tm-clock-note">The agent who built this page hasn’t connected its panels to the clock yet, so some may ignore the range.</p>}
    {dims.length>0 && !render && <FilterBar pills={pills} onChange={setPills} fields={fields} suggest={suggest} formatTotal={c => money(c,cube?.base)} countAmount={(op,amount) => cube ? totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries : 0} asks={cube ? asks : undefined} ask={cube ? {dictionary:{category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values},bounds,onRange:text => time.setText(text)} : undefined} summary={t ? `${t.entries.toLocaleString('en-US')} entries · ${money(t.out,cube?.base)} out · ${money(t.in,cube?.base)} in` : undefined} onSaveView={() => promptSaveView(location.pathname,cleanState(search,canonicalText(range),pills),title)}/>}
    {facts && <Answer facts={facts} onContributor={!render && dims.includes('category') ? key => setPills(addPill(pills.filter(p => p.field!=='category'),{field:'category',op:'is',values:[key]})) : undefined}/>}
   </div>
