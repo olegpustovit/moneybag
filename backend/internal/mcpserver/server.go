@@ -441,7 +441,7 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, err
 	})
-	add(r, "dashboard_patch", "dashboard", "dash:write", "Use this for RFC6902 JSON Patch edits to a dashboard draft. ops is a JSON array of operations, or a string containing that array. At most 500 operations and 1 MiB; unknown spec fields are rejected. A failing operation is reported as op <index>: path <path> not found (or its error).", false, false, func(ctx context.Context, p principal.Principal, in struct {
+	add(r, "dashboard_patch", "dashboard", "dash:write", "Use this for RFC6902 JSON Patch edits to a dashboard draft. ops is a JSON array of operations, or a string containing that array. To guard against stale edits, start ops with a test operation on path /version whose value is the version from dashboard_get; a stale version is rejected. At most 500 operations and 1 MiB; unknown spec fields are rejected. A failing operation is reported as op <index>: path <path> not found (or its error).", false, false, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string          `json:"dashboard_id"`
 		Ops         json.RawMessage `json:"ops" jsonschema:"RFC6902 operations: a JSON array, or a string containing that array"`
 	}) (dashboard.EditResult, error) {
