@@ -104,7 +104,7 @@ function SankeyPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  let links:{from:string;to:string;value:number;text:string}[]
  const keys=new Map<string,string>()
  if(cube && cubeCanCompute(m,split) && !balanceField(m)){
-  links=whatMoved(cube,{range:ctx.range,pills:ctx.pills},null,{by:split,measure:m,limit:12}).filter(x => x.now).map(x => {const inward=(m.sign===-1)===(x.now>0),value=Math.abs(x.now),text=metricText(ctx,m,value);return keys.set(x.label,x.key);return inward ? {from:x.label,to:center,value,text} : {from:center,to:x.label,value,text}})
+  links=whatMoved(cube,{range:ctx.range,pills:ctx.pills},null,{by:split,measure:m,limit:12}).filter(x => x.now).map(x => {const inward=(m.sign===-1)===(x.now>0),value=Math.abs(x.now),text=metricText(ctx,m,value);keys.set(x.label,x.key);return inward ? {from:x.label,to:center,value,text} : {from:center,to:x.label,value,text}})
  } else links=(v.links ?? []).map(l => ({from:l.from,to:l.to,value:tryNumber(l.value),text:l.text}))
  const names=[...new Set(links.flatMap(l => [l.from,l.to]))],text=new Map(links.flatMap(l => [[l.from===center ? l.to : l.from,l.text]])),totalIn=links.filter(l => l.to===center).reduce((n,l) => n+l.value,0),totalOut=links.filter(l => l.from===center).reduce((n,l) => n+l.value,0)
  const unitIsCents=!!(cube && cubeCanCompute(m,split) && !balanceField(m)),fmt=(x:number) => unitIsCents ? money(x,cube!.base) : compactNumber(x)

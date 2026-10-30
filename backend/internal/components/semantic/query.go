@@ -453,7 +453,7 @@ func autoBucket(from, to string) string {
 	switch days := b.Sub(a).Hours() / 24; {
 	case days <= 45:
 		return "day"
-	case days <= 200:
+	case days <= 120:
 		return "week"
 	}
 	return "month"
