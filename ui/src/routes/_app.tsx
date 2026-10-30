@@ -1,6 +1,6 @@
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, createFileRoute, Outlet, redirect, useLocation, useRouter } from '@tanstack/react-router'
-import { Activity, BookOpen, Boxes, ChartNoAxesCombined, ChevronRight, CircleDollarSign, ClipboardCheck, Database, FileInput, LayoutDashboard, Menu, Settings, Share2, Wallet } from 'lucide-react'
+import { Activity, BookOpen, Boxes, ChartNoAxesCombined, ChevronRight, CircleDollarSign, ClipboardCheck, Database, FileInput, LayoutDashboard, Menu, Plus, Settings, Share2, Wallet } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Toaster } from 'sonner'
@@ -8,6 +8,7 @@ import { ApiError, sessionQuery } from '../lib/api'
 import { dashboardsQuery, tablesQuery } from '../lib/queries'
 import { Button } from '../components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../components/ui/sheet'
+import { CreateWorkspaceContext, CreateWorkspaceItem } from '../features/workspace/create'
 
 export const Route = createFileRoute('/_app')({
   beforeLoad: async ({ context, location }) => {
@@ -42,7 +43,7 @@ async function navCount(path:string):Promise<number> {
   if(typeof data.count!=='number' || !Number.isSafeInteger(data.count) || data.count<0) throw new Error('Invalid navigation count.')
   return data.count
 }
-function Navigation({ compact = false, onNavigate }: { compact?: boolean; onNavigate?: () => void }) {
+function Navigation({ compact = false, onNavigate, onCreate }: { compact?: boolean; onNavigate?: () => void; onCreate: (kind:'dashboard'|'database') => void }) {
   const { session } = Route.useRouteContext()
   const { data: dashboards } = useSuspenseQuery(dashboardsQuery(session))
   const { data: tables } = useSuspenseQuery(tablesQuery(session))
@@ -56,10 +57,12 @@ function Navigation({ compact = false, onNavigate }: { compact?: boolean; onNavi
       <div className="nav-group">Dashboards</div>
       {(dashboards.items ?? []).map((dashboard) => <Link key={dashboard.id} to="/dashboards/$id" params={{id:dashboard.id}} onClick={onNavigate} title={dashboard.title} className={path === `/dashboards/${dashboard.id}` ? 'nav-link active' : 'nav-link'} aria-current={path === `/dashboards/${dashboard.id}` ? 'page' : undefined}><LayoutDashboard aria-hidden="true" size={16}/><span className="nav-label nav-title">{dashboard.title}</span>{dashboard.draft_version > 0 && <span className="draft-dot" title="Has a draft" aria-label="Has a draft" />}</Link>)}
       {!(dashboards.items ?? []).length && <span className="nav-empty">No dashboards yet</span>}
+      <button type="button" className="nav-link nav-action" title="New dashboard" onClick={() => onCreate('dashboard')}><span className="nav-create-icon" aria-hidden="true"><LayoutDashboard size={16}/><Plus size={10}/></span><span className="nav-label">New dashboard</span></button>
       <div className="nav-group">Workspace</div>{records.map(link)}
       <div className="nav-group">Databases</div>
       {(tables.items ?? []).map((table) => <Link key={table.id} to="/databases/$id" params={{id:table.id}} onClick={onNavigate} title={compact ? table.name : undefined} className={path === `/databases/${table.id}` ? 'nav-link active' : 'nav-link'} aria-current={path === `/databases/${table.id}` ? 'page' : undefined}><Database aria-hidden="true" size={16}/><span className="nav-label">{table.name}</span></Link>)}
       {!(tables.items ?? []).length && <span className="nav-empty">No databases yet</span>}
+      <button type="button" className="nav-link nav-action" title="New database" onClick={() => onCreate('database')}><span className="nav-create-icon" aria-hidden="true"><Database size={16}/><Plus size={10}/></span><span className="nav-label">New database</span></button>
       <div className="nav-group">Manage</div>{workflows.map(link)}
     </nav>
     <div className="nav-footer">{link({ href: '/settings', label: 'Settings', icon: Settings })}<span className="nav-label version">{session.version}</span></div>
@@ -67,8 +70,11 @@ function Navigation({ compact = false, onNavigate }: { compact?: boolean; onNavi
 }
 function Workspace() {
   const [navOpen, setNavOpen] = useState(false)
+  const [creating, setCreating] = useState<'dashboard'|'database'>()
+  const {session}=Route.useRouteContext()
+  function create(kind:'dashboard'|'database') {setNavOpen(false);setCreating(kind)}
   return <><a href="#main" className="skip">Skip to content</a><div className="workspace-shell">
-    <aside className="desktop-sidebar"><Navigation compact /></aside>
-    <div className="workspace-content"><header className="mobile-header"><Sheet open={navOpen} onOpenChange={setNavOpen}><SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Open navigation" />}><Menu /></SheetTrigger><SheetContent side="left" className="mobile-sheet"><SheetHeader><SheetTitle>Workspace navigation</SheetTitle></SheetHeader><Navigation onNavigate={() => setNavOpen(false)} /></SheetContent></Sheet><span className="mobile-brand"><Boxes size={17} aria-hidden="true" /> Moneybag</span><ChevronRight size={14} aria-hidden="true"/></header><main id="main" className="main-content"><Outlet /></main></div>
-  </div><Toaster position="bottom-right" closeButton toastOptions={{style:{background:'var(--paper)',color:'var(--text)',border:'1px solid var(--bd)',borderRadius:0}}}/></>
+    <aside className="desktop-sidebar"><Navigation compact onCreate={create} /></aside>
+    <div className="workspace-content"><header className="mobile-header"><Sheet open={navOpen} onOpenChange={setNavOpen}><SheetTrigger render={<Button variant="ghost" size="icon" aria-label="Open navigation" />}><Menu /></SheetTrigger><SheetContent side="left" className="mobile-sheet"><SheetHeader><SheetTitle>Workspace navigation</SheetTitle></SheetHeader><Navigation onNavigate={() => setNavOpen(false)} onCreate={create} /></SheetContent></Sheet><span className="mobile-brand"><Boxes size={17} aria-hidden="true" /> Moneybag</span><ChevronRight size={14} aria-hidden="true"/></header><main id="main" className="main-content"><CreateWorkspaceContext.Provider value={create}><Outlet /></CreateWorkspaceContext.Provider></main></div>
+  </div>{creating && <CreateWorkspaceItem key={creating} kind={creating} session={session} close={() => setCreating(undefined)}/>}<Toaster position="bottom-right" closeButton toastOptions={{style:{background:'var(--paper)',color:'var(--text)',border:'1px solid var(--bd)',borderRadius:0}}}/></>
 }
