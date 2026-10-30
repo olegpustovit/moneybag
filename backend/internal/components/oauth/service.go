@@ -396,20 +396,36 @@ func (s *Service) grant(ctx context.Context, id string) (Grant, error) {
 	return g, e
 }
 func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.Principal, error) {
-	var tok token
-	e := s.repo.db.Collection("oauth_tokens").FindOne(ctx, bson.M{"_id": identity.Hash(raw), "access_expires_at": bson.M{"$gt": time.Now()}}).Decode(&tok)
-	if e != nil {
+	now := time.Now()
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"_id": identity.Hash(raw), "access_expires_at": bson.M{"$gt": now}, "$expr": bson.M{"$and": bson.A{bson.M{"$eq": bson.A{bson.M{"$type": "$grant_id"}, "string"}}, bson.M{"$eq": bson.A{bson.M{"$type": "$access_expires_at"}, "date"}}}}}}},
+		{{Key: "$set", Value: bson.M{"token": "$$ROOT"}}},
+		{{Key: "$lookup", Value: bson.M{"from": "oauth_grants", "localField": "grant_id", "foreignField": "_id", "as": "grant"}}},
+		{{Key: "$unwind", Value: "$grant"}},
+		{{Key: "$match", Value: bson.M{"grant.revoked": false, "grant.expires_at": bson.M{"$gt": now}}}},
+		// Authentication needs the current user existence check as well as the current grant.
+		{{Key: "$lookup", Value: bson.M{"from": "users", "localField": "grant.user_id", "foreignField": "_id", "pipeline": mongo.Pipeline{{{Key: "$project", Value: bson.M{"_id": 1}}}}, "as": "users"}}},
+		{{Key: "$project", Value: bson.M{"token": 1, "grant": 1, "users": 1}}},
+	}
+	cursor, err := s.repo.db.Collection("oauth_tokens").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(1))
+	if err != nil {
 		return principal.Principal{}, principal.ErrForbidden
 	}
-	g, e := s.grant(ctx, tok.GrantID)
-	if e != nil || g.Resource != resource {
+	defer cursor.Close(ctx)
+	var result struct {
+		Token token `bson:"token"`
+		Grant Grant `bson:"grant"`
+		Users []struct {
+			ID string `bson:"_id"`
+		} `bson:"users"`
+	}
+	if !cursor.Next(ctx) || cursor.Decode(&result) != nil || result.Grant.Resource != resource {
 		return principal.Principal{}, principal.ErrForbidden
 	}
-	u, e := s.identity.User(ctx, g.UserID)
-	if e != nil {
-		return principal.Principal{}, e
+	if len(result.Users) != 1 || result.Users[0].ID != result.Grant.UserID {
+		return principal.Principal{}, principal.ErrNotFound
 	}
-	return principal.Principal{UserID: u.ID, Scopes: g.Scopes, Actor: principal.Actor{Kind: "agent", ID: g.ClientID}}, nil
+	return principal.Principal{UserID: result.Grant.UserID, Scopes: result.Grant.Scopes, Actor: principal.Actor{Kind: "agent", ID: result.Grant.ClientID}}, nil
 }
 func (s *Service) Revoke(ctx context.Context, c Client, raw string) error {
 	var tok token
