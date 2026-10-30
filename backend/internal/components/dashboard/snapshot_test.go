@@ -469,6 +469,26 @@ func TestSourceCloneIsolatesNestedValues(t *testing.T) {
 	}
 }
 
+type retainedReader struct{ rows []map[string]any }
+
+func (r retainedReader) Rows(context.Context, principal.Principal, string) ([]map[string]any, error) {
+	return r.rows, nil
+}
+
+func TestQueryCopiesRowsFromExternalReaders(t *testing.T) {
+	rows := []map[string]any{{"value": float64(1)}}
+	engine := &Engine{Reader: retainedReader{rows: rows}}
+	x := &execution{ctx: context.Background(), engine: engine, vars: map[string]any{"data": map[string]any{}}}
+	value, err := x.query(Query{From: "external"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.([]map[string]any)[0]["value"] = float64(2)
+	if rows[0]["value"] != float64(1) {
+		t.Fatal("query mutated external reader rows")
+	}
+}
+
 func TestQuerySharedRowsKeepPublicResultsIsolated(t *testing.T) {
 	cache := testSnapshots()
 	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
@@ -486,7 +506,7 @@ func TestQuerySharedRowsKeepPublicResultsIsolated(t *testing.T) {
 	}
 	engine := &Engine{Expr: expr, Reader: source}
 	data := map[string]Query{"a": {From: "journal", Where: "row.value == 1.0", Derive: map[string]string{"value": "row.value + 1.0"}}, "b": {From: "journal", Where: "row.value == 1.0"}}
-	result, err := engine.Evaluate(ctx, p, "[data.a[0].value, data.b[0].value, data.a[0].nested]", data, nil)
+	result, err := engine.Evaluate(ctx, p, "[data.a[0].value, data.b[0].value, data.a[0].nested, data.b[0]]", data, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,6 +515,7 @@ func TestQuerySharedRowsKeepPublicResultsIsolated(t *testing.T) {
 		t.Fatalf("query rows were shared: %v", values)
 	}
 	values[2].(map[string]any)["value"] = float64(99)
+	values[3].(map[string]any)["value"] = float64(66)
 	public, err := source.Rows(ctx, p, "journal")
 	if err != nil || public[0]["value"] != float64(1) || public[0]["nested"].(map[string]any)["value"] != float64(7) {
 		t.Fatalf("source was changed: %v, %v", public, err)

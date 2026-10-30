@@ -98,6 +98,7 @@ func (x *execution) query(q Query) (any, error) {
 		return nil, err
 	}
 	var rows []map[string]any
+	immutable := false
 	var e error
 	data := x.vars["data"].(map[string]any)
 	switch {
@@ -144,6 +145,7 @@ func (x *execution) query(q Query) (any, error) {
 			x.source[q.From] = cached
 		}
 		rows = cached
+		_, immutable = x.engine.Reader.(*Sources)
 	}
 	if len(rows) > 250000 {
 		return nil, fmt.Errorf("source exceeds 250000 rows")
@@ -166,8 +168,10 @@ func (x *execution) query(q Query) (any, error) {
 				continue
 			}
 		}
-		// Derivations modify rows, so copy only after the read-only filter accepts them.
-		r = maps.Clone(r)
+		// Derivations modify rows; external readers may also retain their results.
+		if !immutable || len(q.Derive) > 0 {
+			r = maps.Clone(r)
+		}
 		pending := map[string]string{}
 		originals := map[string]any{}
 		for k, v := range q.Derive {
