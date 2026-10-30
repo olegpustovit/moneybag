@@ -38,6 +38,10 @@ export interface MoneybagTools {
     input: BudgetSetLineInput;
     output: BudgetSetLineOutput;
   };
+  catalog_get: {
+    input: CatalogGetInput;
+    output: CatalogGetOutput;
+  };
   categories_list: {
     input: CategoriesListInput;
     output: CategoriesListOutput;
@@ -49,6 +53,10 @@ export interface MoneybagTools {
   dashboard_add_component: {
     input: DashboardAddComponentInput;
     output: DashboardAddComponentOutput;
+  };
+  dashboard_apply: {
+    input: DashboardApplyInput;
+    output: DashboardApplyOutput;
   };
   dashboard_compose: {
     input: DashboardComposeInput;
@@ -70,6 +78,10 @@ export interface MoneybagTools {
     input: DashboardGetInput;
     output: DashboardGetOutput;
   };
+  dashboard_lint: {
+    input: DashboardLintInput;
+    output: DashboardLintOutput;
+  };
   dashboard_list: {
     input: DashboardListInput;
     output: DashboardListOutput;
@@ -90,6 +102,10 @@ export interface MoneybagTools {
     input: DashboardRemoveComponentInput;
     output: DashboardRemoveComponentOutput;
   };
+  dashboard_render: {
+    input: DashboardRenderInput;
+    output: DashboardRenderOutput;
+  };
   dashboard_rollback: {
     input: DashboardRollbackInput;
     output: DashboardRollbackOutput;
@@ -101,6 +117,10 @@ export interface MoneybagTools {
   dashboard_shares_list: {
     input: DashboardSharesListInput;
     output: DashboardSharesListOutput;
+  };
+  dashboard_summary: {
+    input: DashboardSummaryInput;
+    output: DashboardSummaryOutput;
   };
   dashboard_unpublish: {
     input: DashboardUnpublishInput;
@@ -249,6 +269,10 @@ export interface MoneybagTools {
   reconcile_suggest: {
     input: ReconcileSuggestInput;
     output: ReconcileSuggestOutput;
+  };
+  reconcile_verify: {
+    input: ReconcileVerifyInput;
+    output: ReconcileVerifyOutput;
   };
   rule_apply: {
     input: RuleApplyInput;
@@ -661,6 +685,40 @@ export interface BudgetSetLineOutput {
   };
   [k: string]: unknown;
 }
+export interface CatalogGetInput {}
+export interface CatalogGetOutput {
+  aggregates:
+    | null
+    | {
+        description: string;
+        member: boolean;
+        name: string;
+        signature: string;
+        [k: string]: unknown;
+      }[];
+  functions:
+    | null
+    | {
+        description: string;
+        member: boolean;
+        name: string;
+        signature: string;
+        [k: string]: unknown;
+      }[];
+  revision: number;
+  sources:
+    | null
+    | {
+        fields: {
+          [k: string]: string;
+        };
+        label: string;
+        name: string;
+        [k: string]: unknown;
+      }[];
+  variables: null | string[];
+  [k: string]: unknown;
+}
 export interface CategoriesListInput {}
 export interface CategoriesListOutput {
   items:
@@ -757,6 +815,56 @@ export interface DashboardAddComponentInput {
   };
 }
 export interface DashboardAddComponentOutput {
+  component_id?: string;
+  draft_version: number;
+  event_id?: string;
+  validation: {
+    cost: number;
+    errors:
+      | null
+      | {
+          component_id?: string;
+          expr?: string;
+          field?: string;
+          hint?: string;
+          msg: string;
+          path: string;
+          [k: string]: unknown;
+        }[];
+    ok: boolean;
+    warnings:
+      | null
+      | {
+          component_id?: string;
+          expr?: string;
+          field?: string;
+          hint?: string;
+          msg: string;
+          path: string;
+          [k: string]: unknown;
+        }[];
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+export interface DashboardApplyInput {
+  dashboard_id: string;
+  if_version?: number;
+  /**
+   * RFC6902 operations: a JSON array, or a string containing that array
+   */
+  ops:
+    | null
+    | boolean
+    | number
+    | string
+    | unknown[]
+    | {
+        [k: string]: unknown;
+      };
+  validate_only?: boolean;
+}
+export interface DashboardApplyOutput {
   component_id?: string;
   draft_version: number;
   event_id?: string;
@@ -1161,6 +1269,32 @@ export interface DashboardGetOutput {
   version: number;
   [k: string]: unknown;
 }
+export interface DashboardLintInput {
+  id: string;
+  version?:
+    | null
+    | boolean
+    | number
+    | string
+    | unknown[]
+    | {
+        [k: string]: unknown;
+      };
+}
+export interface DashboardLintOutput {
+  issues:
+    | null
+    | {
+        component_id?: string;
+        expr?: string;
+        field?: string;
+        hint?: string;
+        msg: string;
+        path: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
 export interface DashboardListInput {}
 export interface DashboardListOutput {
   items:
@@ -1245,7 +1379,7 @@ export interface DashboardPreviewInput {
         };
   };
   /**
-   * true omits html and preview links and returns only validation, per-component values and computed values
+   * deprecated: has no effect, kept so existing calls keep working
    */
   values_only?: boolean;
   version?:
@@ -1270,8 +1404,6 @@ export interface DashboardPreviewOutput {
           [k: string]: unknown;
         };
   };
-  html: string;
-  html_url?: string;
   pages?:
     | null
     | {
@@ -1291,7 +1423,6 @@ export interface DashboardPreviewOutput {
         title: string;
         [k: string]: unknown;
       }[];
-  png_url?: string;
   validation: {
     cost: number;
     errors:
@@ -1408,6 +1539,112 @@ export interface DashboardRemoveComponentOutput {
   };
   [k: string]: unknown;
 }
+export interface DashboardRenderInput {
+  id: string;
+  /**
+   * dashboard parameters, for example from, to or month
+   */
+  params?: {
+    [k: string]:
+      | null
+      | boolean
+      | number
+      | string
+      | unknown[]
+      | {
+          [k: string]: unknown;
+        };
+  };
+  version?:
+    | null
+    | boolean
+    | number
+    | string
+    | unknown[]
+    | {
+        [k: string]: unknown;
+      };
+  /**
+   * viewport width in CSS pixels, 320..3840; default 1440
+   */
+  width?: number;
+}
+export interface DashboardRenderOutput {
+  checks?: null | {
+    empty_panels: null | string[];
+    label_collisions: null | string[];
+    overflow: null | string[];
+    time_scope_applies: null | boolean;
+    [k: string]: unknown;
+  };
+  layout?:
+    | null
+    | {
+        component: string;
+        h: number;
+        w: number;
+        x: number;
+        y: number;
+        [k: string]: unknown;
+      }[];
+  lint:
+    | null
+    | {
+        component_id?: string;
+        expr?: string;
+        field?: string;
+        hint?: string;
+        msg: string;
+        path: string;
+        [k: string]: unknown;
+      }[];
+  message?: string;
+  /**
+   * the whole render including Chromium
+   */
+  render_ms?: number;
+  tests?:
+    | null
+    | boolean
+    | number
+    | string
+    | unknown[]
+    | {
+        [k: string]: unknown;
+      };
+  /**
+   * page load to settled, as the page reported it
+   */
+  timing_ms?: number;
+  validation: {
+    cost: number;
+    errors:
+      | null
+      | {
+          component_id?: string;
+          expr?: string;
+          field?: string;
+          hint?: string;
+          msg: string;
+          path: string;
+          [k: string]: unknown;
+        }[];
+    ok: boolean;
+    warnings:
+      | null
+      | {
+          component_id?: string;
+          expr?: string;
+          field?: string;
+          hint?: string;
+          msg: string;
+          path: string;
+          [k: string]: unknown;
+        }[];
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
 export interface DashboardRollbackInput {
   dashboard_id: string;
   to_version: number;
@@ -1483,6 +1720,43 @@ export interface DashboardSharesListOutput {
         sources: null | string[];
         [k: string]: unknown;
       }[];
+  [k: string]: unknown;
+}
+export interface DashboardSummaryInput {
+  id: string;
+  version?:
+    | null
+    | boolean
+    | number
+    | string
+    | unknown[]
+    | {
+        [k: string]: unknown;
+      };
+}
+export interface DashboardSummaryOutput {
+  components:
+    | null
+    | {
+        format?: string;
+        id: string;
+        title?: string;
+        type: string;
+        [k: string]: unknown;
+      }[];
+  id: string;
+  pages:
+    | null
+    | {
+        components: null | string[];
+        id: string;
+        title: string;
+        [k: string]: unknown;
+      }[];
+  sources: null | string[];
+  status: string;
+  title: string;
+  version: number;
   [k: string]: unknown;
 }
 export interface DashboardUnpublishInput {
@@ -3223,6 +3497,36 @@ export interface ReconcileSuggestOutput {
             }[];
         explains: string;
         kind: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
+export interface ReconcileVerifyInput {
+  account?: string;
+}
+export interface ReconcileVerifyOutput {
+  accounts:
+    | null
+    | {
+        account: string;
+        last_ok: string;
+        open_discrepancies:
+          | null
+          | {
+              account: string;
+              adjustment_id?: string;
+              assertion_id: string;
+              diff: {
+                c: string;
+                v: string;
+                [k: string]: unknown;
+              };
+              id: string;
+              reason?: string;
+              resolution?: string;
+              status: string;
+              [k: string]: unknown;
+            }[];
         [k: string]: unknown;
       }[];
   [k: string]: unknown;

@@ -11,7 +11,8 @@ Settings are read once at startup: typed defaults, optional Vault values, then e
 | `MONEYBAG_LOG_FORMAT` | `text` or `json` |
 | `MONEYBAG_SETUP_TOKEN` | Empty disables first-owner setup; remove after owner creation |
 | `MONEYBAG_SECRET_KEY` | Stable base64 encoding of exactly 32 bytes; encrypts feed credentials |
-| `MONEYBAG_CHROMIUM_BIN` | Chromium executable for PNG previews; blank disables PNG URLs |
+| `MONEYBAG_TAILNET_URL` | Empty; optional second browser origin such as `https://host.tailnet.ts.net:8443`. Sign-in and CSRF checks accept it. OAuth, connectors and share links always use `MONEYBAG_PUBLIC_URL` |
+| `MONEYBAG_CHROMIUM_BIN` | Chromium executable for `dashboard_render`, which opens the app on its own loopback listener; blank returns validation without an image |
 | `MONEYBAG_TOOLSETS` | Empty enables all; comma-separated `account,ledger,rates,budget,tables,model,dashboard,audit,classify,import,reconcile` |
 
 `bootstrap` is an optional noninteractive first-owner command using `MONEYBAG_OWNER_EMAIL`, `MONEYBAG_OWNER_NAME` and `MONEYBAG_OWNER_PASSWORD`. It refuses a second owner bootstrap. Never put passwords in command arguments or commit an environment file.

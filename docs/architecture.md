@@ -25,7 +25,7 @@ Every financial collection includes `user_id`. Logical IDs such as `assets:bank`
 
 Sharing fixes the owner principal and permits only the declared source set and optional CEL row filter. Viewers receive rendered output. Editors use the share ID through dashboard tools and cannot reshare or add sources beyond the grant. Grants support expiry and revocation.
 
-CEL has no network or filesystem access. Expressions are compiled and cached with length, recursion, cost, row, byte and wall-time limits. The same escaped HTML/SVG renderer serves the web UI and previews. Preview URLs require the authenticated requesting user and expire after ten minutes. Chromium reads a private local HTML file with scripts and network resources blocked.
+CEL has no network or filesystem access. Expressions are compiled and cached with length, recursion, cost, row, byte and wall-time limits. The server computes and formats values; the SPA is the only renderer. `dashboard_render` runs Chromium against the app's own loopback listener with a read-only token that expires after 60 seconds and is bound to one dashboard, version, set of parameters, principal and any grant.
 
 Money is encoded as decimal strings in public JSON and Decimal128 in MongoDB. Journal balance validation uses exact rational arithmetic. Valuation and forecast outputs are reporting values; forecasts never post journal entries.
 

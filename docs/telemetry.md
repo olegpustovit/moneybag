@@ -36,10 +36,10 @@ Verify tools: `dashboard_lint` returns `{rule,severity(error|warning),path,compo
 
 ## Browser reads
 
-All are session-authenticated `GET`s with gzip, `ETag` derived from the revision and params, and `304` support.
+All are session-authenticated `GET`s with gzip, a weak `ETag` over the response body (which changes with the revision, params and `as_of`), `Cache-Control: private, no-cache` and `304` support. Authentication and access checks run before any `304`.
 
-- `GET /api/bootstrap` → `{session,nav,dashboards,tables,counts:{imports,reconcile,feedback},labels}`. One round trip instead of session + discover + lists.
-- `GET /api/dashboards/{id}/view?version=&from=&to=&month=` → `{head,spec,values,computed,validation,as_of,stale}`. Rate-only writes serve the last render with `stale:true` and `as_of` while it refreshes. The page never uses MCP for this.
+- `GET /api/bootstrap` → `{session:{user,csrf,version,mcp_url},nav:[{id,label,icon,dashboard|route}],dashboards:[Head],tables:[Table],counts:{imports,reconcile,feedback},labels}`. One round trip instead of session + discover + lists. `/api/session` stays for the sign-in check.
+- `GET /api/dashboards/{id}/view?version=&from=&to=&month=` → `{head,spec,version,status,pages,values,computed,validation,as_of,stale}`, with `stale` always last. `version` is `draft`, `published` or a number; omitted means the draft if one exists, otherwise published, like `dashboard_get`. `pages` has resolved titles, `version` and `status` describe what is shown, and `as_of` is the RFC 3339 time of the render. `{id}` may be an editor grant id; viewer grants get 403 and revoked ones 404. Rate-only writes serve the last render with `stale:true` and its `as_of` while it refreshes; ledger and spec writes always answer fresh. The page never uses MCP for this.
 - `GET /api/cube` → columnar ledger cube, under 150 KB gzipped on 10k entries:
 ```json
 {"revision":1,"as_of":"2026-10-30","base":"EUR","start":"2023-01-01","end":"2026-10-30",
@@ -66,7 +66,15 @@ Audit events gain optional `summary`, `batch_id`, `routine`, excluded from the h
 
 ## Render
 
-`dashboard_render{id,version,width,params}` is the only preview. Chromium opens the real SPA at `/render/{token}` (in-memory, single dashboard, read-only, 60 s). The page posts its report to `/api/render/{token}/report`. Result: inline PNG plus `{layout:[…],checks:{overflow,label_collisions,empty_panels,time_scope_applies},lint,tests,timing_ms}`. The server HTML/SVG renderer and `html`/`png_url` output are removed.
+`dashboard_render{id,version,width,params}` is the only preview. Chromium opens the real SPA on the app's loopback listener at `/render/{token}` (in-memory, single dashboard, version and params, read-only, 60 s, bound to the principal and any grant). Result: inline PNG plus `{layout:[…],checks:{overflow,label_collisions,empty_panels,time_scope_applies},lint,tests,timing_ms,render_ms,validation}`. A page that never reports is an error, never a blank image. A page taller than 1200 px is captured again at its full height, up to 6000 px. The server HTML/SVG renderer and `html`/`png_url` output are removed.
+
+The SPA contract for `/render/{token}`, which needs no session and shows no app chrome:
+
+1. `GET /api/render/{token}/view` returns the same body as `/api/dashboards/{id}/view`, always fresh, for the token's version and params.
+2. `GET /api/render/{token}/cube` returns the same body as `/api/cube`. It is 404 until the cube ships and for grant tokens.
+3. When the page has settled, `POST /api/render/{token}/report` with exactly `{"layout":[{"component":"id","x":0,"y":0,"w":0,"h":0}],"checks":{"overflow":["id"],"label_collisions":["id"],"empty_panels":["id"],"time_scope_applies":true},"timing_ms":0}`. Coordinates are CSS pixels from the page top. `time_scope_applies` is `null` without a page clock. Unknown fields are rejected, and it answers 204.
+
+Chromium's virtual time runs page timers fast and waits for fetches, with an 8 second budget. The screenshot comes after the budget, so report once and do not animate afterwards. The publish gate is `preview.Service.Gate`; call it before entering a workflow.
 
 ## Speed
 
