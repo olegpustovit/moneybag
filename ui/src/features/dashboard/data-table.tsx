@@ -17,7 +17,7 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
  const [filter,setFilter]=useState('')
  const [focus,setFocus]=useState({row:0,col:0})
  const filterRef=useRef<HTMLInputElement>(null)
- const sorting=onSortChange ? (sort?.split(',').flatMap(item => {const desc=item.startsWith('-'),id=desc ? item.slice(1) : item;return value.columns.some(column => column.key===id) && !unsortable?.includes(id) ? [{id,desc}] : []}) ?? []) : localSorting
+ const sorting=useMemo(() => onSortChange ? (sort?.split(',').flatMap(item => {const desc=item.startsWith('-'),id=desc ? item.slice(1) : item;return value.columns.some(column => column.key===id) && !unsortable?.includes(id) ? [{id,desc}] : []}) ?? []) : localSorting,[onSortChange,sort,value.columns,unsortable,localSorting])
  const setSorting=(updater:SortingState | ((old:SortingState)=>SortingState)) => {const next=typeof updater==='function' ? updater(sorting) : updater;if(onSortChange)onSortChange(next.map(item => `${item.desc ? '-' : ''}${item.id}`).join(',') || undefined);else setLocalSorting(next);scroll.current?.scrollTo(0,0)}
  const [visibility,setVisibility]=useState<ColumnVisibilityState>(() => ({...initial.visibility,...Object.fromEntries([value.columns[0]?.key,...(requiredColumns ?? [])].filter(Boolean).map(id => [id,true]))}))
  const [sizing,setSizing]=useState<ColumnSizingState>(() => ({...initialSizing,...initial.sizing}))

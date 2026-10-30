@@ -6,6 +6,8 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM_BIN || 
 for(const width of [1440,390]) {
  const context=await browser.newContext({viewport:{width,height:900}})
  await context.route('**/api/session',route=>route.fulfill({json:{user:{id:'synthetic',name:'Test',email:'test@example.test'},csrf:'test',version:'test',mcp_url:'/api/mcp'}}))
+ await context.route('**/api/imports/count',route=>route.fulfill({json:{count:0}}))
+ await context.route('**/api/reconcile/count',route=>route.fulfill({json:{count:0}}))
  await context.route('**/api/mcp',route=>{const req=route.request().postDataJSON();let result
   if(req.method==='server/discover')return route.fulfill({json:{jsonrpc:'2.0',id:req.id,result:{supportedVersions:['2026-07-28']}}})
   const name=req.params.name
@@ -19,6 +21,8 @@ for(const width of [1440,390]) {
  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message))
  await page.goto('http://127.0.0.1:5173/dashboards/large')
  const region=page.getByRole('region',{name:'Large table table'});await region.getByText('Item 00000',{exact:true}).waitFor()
+ await region.getByRole('button',{name:'Name',exact:true}).click();await page.waitForURL(/sort=name/)
+ assert.equal(await region.getByRole('columnheader',{name:/Name/}).getAttribute('aria-sort'),'ascending')
  assert((await region.locator('tbody tr').count())<=60)
  assert((await region.locator('tfoot').textContent()).includes('49,995,000'))
  const result=await region.evaluate(async el=>{const samples=[];let maxRows=0,last=performance.now();for(let i=1;i<=120;i++){await new Promise(requestAnimationFrame);const now=performance.now();samples.push(now-last);last=now;el.scrollTop=(el.scrollHeight-el.clientHeight)*i/120;maxRows=Math.max(maxRows,el.querySelectorAll('tbody tr').length)}return {maxRows,frames:samples.length,slow:samples.filter(ms=>ms>25).length}})
