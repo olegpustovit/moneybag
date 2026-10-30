@@ -468,3 +468,19 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
 
 - Long page headers and font fallback: a synthetic maximum-length dashboard ID and long unbroken title exposed page-level overflow. Page headers now wrap their contents and long breadcrumbs; the dashboard actions remain within the viewport. The same review exposed that the shared root font declaration omitted the generated Geist fallback despite an earlier CSS-text check passing. The workspace and auth root stack now include it, and the build guard checks both actual root declarations. Tests verified that the guard rejects either missing fallback, the dashboard skeleton/action layout at desktop and mobile, the six light/dark shell combinations, fallback behavior when Geist fails to load, and the auth fallback against a disposable local server. `make check` passed. The synthetic mobile layout was visually inspected; temporary database, server and diagnostic files were removed.
   Deployment: release `432f774b751b-20261030092308` passed public health and all seven published previews validated. A signed-out production browser check confirmed the auth font stack and generated fallback with the main font both available and blocked; it did not authenticate or alter production data.
+
+## Telemetry redesign
+
+Contract: `docs/telemetry.md`. Implemented on 2026-10-30.
+
+- [x] Phase 0, trust and speed: chart folds, totals, alignment and units; estimates out of budget actuals; no revision bump for no-op rate syncs; rate-only writes serve the last render as stale; audit outcome batching, tool, actor and account indexes; `reconcile_status` read-only.
+- [x] Phase 1, agents can see and try: `dashboard_render` drives the real page and returns an image, layout tree and checks; `catalog_get`, `dashboard_summary`, `dashboard_apply`, repairable errors, capped responses, deterministic evals.
+- [x] Phase 2, metrics and lint: metrics, labels, payee aliases, annotations, facts, ten lint rules, `dashboard_test`, gated publish.
+- [x] Phase 3, time and charts: TimeBar, TimeChart on uPlot, Stat, RankedBars, Sankey, cached view and bootstrap endpoints. Recharts and the server HTML/SVG renderer are gone.
+- [x] Phase 4, exploring: ledger cube in IndexedDB, FilterBar, drill-through, saved views, Details drawer, flags, usage.
+- [x] Phase 5, agents take over: admin and feed tools, `nav_set`, emergency stop, web editing removed, Changes feed. Production dashboards rebuilt through MCP alone: Now, Spending, Income and Commitments published through the gate; the six replaced dashboards are archived and restorable with `undo`.
+- [ ] Tailnet route: `deploy/tailscale-serve.sh` is ready, but the VM needs `sudo tailscale set --operator=$USER` once, then `MONEYBAG_TAILNET_URL` in the environment file.
+
+Verified: `make test-integration` passes the whole Go suite in about 24 seconds on in-memory MongoDB; UI tests pass in about 3 seconds. `dashboard_render` of each published dashboard on production data reports no overflow, collisions or empty panels, with lint clean and `spec.tests` matching the ledger exactly. `consistency_check` passes every check.
+
+Not verified: an authenticated production browser session, so Budget, Future, Ledger, Data, Changes and Settings have only run against the synthetic ledger. Phone widths and dark mode were reviewed on synthetic data only. First view under 400 ms is unmeasured in production. Known limits: the Ledger amount filter covers loaded pages only; ratio metrics such as savings rate are not supported; `dashboard_get` and chart points in `dashboard_preview` have no response cap.
