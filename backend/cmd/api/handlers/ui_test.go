@@ -11,7 +11,7 @@ func TestUIRoutes(t *testing.T) {
 	if err := ValidateSPA(); err != nil {
 		t.Skip("run make ui to stage the SPA")
 	}
-	h := (&Handler{cfg: Config{UI: "spa"}}).Handler()
+	h := (&Handler{}).Handler()
 	for _, path := range []string{"/", "/dashboards/overview?version=draft"} {
 		req := httptest.NewRequest("GET", path, nil)
 		rec := httptest.NewRecorder()

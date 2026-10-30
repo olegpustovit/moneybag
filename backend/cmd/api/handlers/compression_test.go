@@ -15,7 +15,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
-func TestCompressionAndLegacyCacheHeaders(t *testing.T) {
+func TestCompressionAndAuthCacheHeaders(t *testing.T) {
 	wrap, err := Compression()
 	if err != nil {
 		t.Fatal(err)
@@ -30,8 +30,7 @@ func TestCompressionAndLegacyCacheHeaders(t *testing.T) {
 		method, path, cache string
 		status              int
 	}{
-		{"GET", "/assets/app.js", "no-store", 200},
-		{"GET", assetPaths["app.js"], "public, max-age=31536000, immutable", 200},
+		{"GET", "/assets/app.js", "no-store", 404},
 		{"GET", "/assets/style.css", "no-store", 200},
 		{"GET", assetPaths["style.css"], "public, max-age=31536000, immutable", 200},
 		{"GET", "/assets/missing.js", "no-store", 404},
@@ -46,7 +45,7 @@ func TestCompressionAndLegacyCacheHeaders(t *testing.T) {
 		if rec.Code != tc.status || rec.Header().Get("Cache-Control") != tc.cache {
 			t.Fatalf("%s: status %d cache %q", tc.path, rec.Code, rec.Header().Get("Cache-Control"))
 		}
-		if tc.path == "/assets/app.js" || tc.path == assetPaths["app.js"] {
+		if tc.path == "/assets/style.css" || tc.path == assetPaths["style.css"] {
 			if rec.Header().Get("Content-Encoding") != "gzip" || !strings.Contains(rec.Header().Get("Vary"), "Accept-Encoding") {
 				t.Fatalf("asset compression: %v", rec.Header())
 			}
@@ -59,7 +58,7 @@ func TestCompressionAndLegacyCacheHeaders(t *testing.T) {
 				t.Fatal(err)
 			}
 			_ = z.Close()
-			original, err := webFS.ReadFile("web/app.js")
+			original, err := webFS.ReadFile("web/preview-auth.css")
 			if err != nil || string(body) != string(original) {
 				t.Fatal("compressed asset changed", err)
 			}

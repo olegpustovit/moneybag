@@ -1,28 +1,29 @@
 package handlers
 
 import (
-	"io"
 	"strings"
 	"testing"
 )
 
-func TestApplicationTemplateStates(t *testing.T) {
-	templates, e := parseTemplates()
-	if e != nil {
-		t.Fatal(e)
+func TestAuthTemplates(t *testing.T) {
+	templates, err := parseTemplates()
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, data := range []pageData{{IsAccounts: true}, {IsDashboard: true, CanEditDashboard: true}, {IsDashboard: true, IsShared: true}, {IsImports: true, IsWorkflow: true}, {IsImportPreview: true, IsWorkflow: true}, {IsReconcile: true, IsWorkflow: true}, {IsSharedList: true, IsWorkflow: true}, {IsSettings: true}, {IsAudit: true}, {IsModel: true}} {
-		if e = templates.ExecuteTemplate(io.Discard, "app.html", data); e != nil {
-			t.Fatal(e)
+	for _, data := range []authPage{{}, {Setup: true}, {Register: true}, {Consent: true, Scopes: []string{"ledger:read"}}} {
+		var rendered strings.Builder
+		if err := templates.ExecuteTemplate(&rendered, "auth.html", data); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(rendered.String(), assetPaths["style.css"]) {
+			t.Fatal("auth page missing stylesheet")
 		}
 	}
-	var rendered strings.Builder
-	if e := templates.ExecuteTemplate(&rendered, "auth.html", authPage{}); e != nil {
-		t.Fatal(e)
+	var invite strings.Builder
+	if err := templates.ExecuteTemplate(&invite, "invitation.html", "https://example.test/register"); err != nil {
+		t.Fatal(err)
 	}
-	for _, path := range assetPaths {
-		if !strings.Contains(rendered.String(), path) {
-			t.Fatalf("missing fingerprinted asset %q", path)
-		}
+	if !strings.Contains(invite.String(), assetPaths["style.css"]) {
+		t.Fatal("invitation page missing stylesheet")
 	}
 }

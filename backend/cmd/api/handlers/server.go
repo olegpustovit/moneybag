@@ -27,17 +27,12 @@ import (
 var webFS embed.FS
 
 var assetPaths = func() map[string]string {
-	paths := map[string]string{}
-	for _, name := range []string{"app.js", "style.css"} {
-		data, err := webFS.ReadFile("web/" + name)
-		if err != nil {
-			panic(err)
-		}
-		sum := sha256.Sum256(data)
-		stem, ext, _ := strings.Cut(name, ".")
-		paths[name] = fmt.Sprintf("/assets/%s.%x.%s", stem, sum[:12], ext)
+	data, err := webFS.ReadFile("web/preview-auth.css")
+	if err != nil {
+		panic(err)
 	}
-	return paths
+	sum := sha256.Sum256(data)
+	return map[string]string{"style.css": fmt.Sprintf("/assets/style.%x.css", sum[:12])}
 }()
 
 func parseTemplates() (*template.Template, error) {
@@ -45,8 +40,8 @@ func parseTemplates() (*template.Template, error) {
 }
 
 type Config struct {
-	PublicURL, SetupToken, Version, UI string
-	Toolsets                           map[string]bool
+	PublicURL, SetupToken, Version string
+	Toolsets                       map[string]bool
 }
 type Handler struct {
 	authLimit      authLimiter
@@ -135,38 +130,25 @@ func (h *Handler) Handler() http.Handler {
 		respond(w, 200, map[string]string{"status": "ok", "version": h.cfg.Version})
 	})
 	mux.HandleFunc("GET /assets/{file}", func(w http.ResponseWriter, r *http.Request) {
-		if h.cfg.UI == "spa" && serveUIAsset(w, r) {
+		if serveUIAsset(w, r) {
 			return
 		}
 		requested := r.PathValue("file")
-		name := ""
-		immutable := false
-		for _, candidate := range []string{"app.js", "style.css"} {
-			if requested == candidate || "/assets/"+requested == assetPaths[candidate] {
-				name = candidate
-				immutable = requested != candidate
-				break
-			}
-		}
-		if name == "" {
+		if requested != "style.css" && "/assets/"+requested != assetPaths["style.css"] {
 			http.NotFound(w, r)
 			return
 		}
-		b, e := webFS.ReadFile("web/" + name)
+		b, e := webFS.ReadFile("web/preview-auth.css")
 		if e != nil {
 			http.NotFound(w, r)
 			return
 		}
-		if immutable {
+		if requested != "style.css" {
 			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		} else {
 			w.Header().Set("Cache-Control", "no-store")
 		}
-		if name == "app.js" {
-			w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		} else {
-			w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		}
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		_, _ = w.Write(b)
 	})
 	metadata := func(w http.ResponseWriter, _ *http.Request) { respond(w, 200, h.oauth.Metadata()) }
@@ -225,11 +207,7 @@ func (h *Handler) Handler() http.Handler {
 	for _, prefix := range []string{"GET /mcp", "GET /mcp/", "GET /oauth/", "GET /previews/"} {
 		mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) })
 	}
-	if h.cfg.UI == "spa" {
-		mux.HandleFunc("GET /", serveUI)
-	} else {
-		mux.HandleFunc("GET /", h.page)
-	}
+	mux.HandleFunc("GET /", serveUI)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.security(w)
 		w.Header().Set("Cache-Control", "no-store")
@@ -288,7 +266,7 @@ func decode(r *http.Request, v any) error {
 	return nil
 }
 
-func Stylesheet() string { b, _ := webFS.ReadFile("web/style.css"); return string(b) }
+func Stylesheet() string { b, _ := webFS.ReadFile("web/preview-auth.css"); return string(b) }
 
 // consistency is a read-only GET for the signed-in session, so no CSRF token is needed.
 func (h *Handler) consistency(w http.ResponseWriter, r *http.Request) {
