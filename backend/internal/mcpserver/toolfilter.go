@@ -67,6 +67,7 @@ func specEnums(s *jsonschema.Schema) {
 			set(s, "format", dashboard.Formats)
 			set(s, "type", dashboard.ComponentTypes)
 			set(s, "estimates", dashboard.Policies)
+			set(s, "bucket", dashboard.Buckets)
 			set(s, "compare", dashboard.Compares)
 		}
 		if s.Properties["label"] != nil && s.Properties["value"] != nil && s.Properties["total"] != nil {

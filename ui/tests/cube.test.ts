@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { months as monthCount, alignCompare, metricRows, rateOn, annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
+import { months as monthCount, periods, perPeriod, alignCompare, metricRows, rateOn, annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
 import { compareWindow, dayFromIso as d, parseRange, type Range } from '../src/features/telemetry/time-grammar'
 import { balanceField, cubeCanCompute, metricTotal, inCurrency } from '../src/features/telemetry/cube'
 import { money, moneyCompact, moneyExact, moneySigned, unitFormat } from '../src/features/telemetry/format'
@@ -147,6 +147,15 @@ const fxg=decodeCube({revision:1,as_of:'2026-01-06',base:'EUR',start:'2026-01-01
  balances:{d:[0,5],net:[10000,10000],assets:[10000,10000],liabilities:[0,0],gold:[4000,3000]},rates:{'EUR/USD':{d:[2,5],v:[1.1,1.2]}},metrics:[],annotations:[],labels:{}})
 const at=(c:typeof fxg,day:string) => metricTotal(c,{range:{from:c.startMs,to:d(day)}},noGoldMetric).total
 assert.equal(at(fxg,'2026-01-01'),6000);assert.equal(at(fxg,'2026-01-06'),7000);assert.equal(at(inCurrency(fxg,'USD'),'2026-01-01'),6600);assert.equal(at(inCurrency(fxg,'USD'),'2026-01-06'),8400)
+// Per-day and per-week averages: periods mirrors the server, and a part week at the edge is still a fair weekly rate.
+{const r:Range={from:d('2024-01-01'),to:d('2024-01-14')}
+ assert.equal(periods(r,'day'),14);assert.equal(periods(r,'week'),2);assert.equal(periods(r),monthCount(r));assert.equal(periods(r,'month'),monthCount(r))
+ const sp={id:'sp',label:'Spend',unit:'eur',kind:'flow',additivity:'avg',estimates:'include',accounts:['expenses:'],sign:1}
+ assert.ok(Math.abs(metricTotal(c,{range:all},{...sp,per:'day'}).total-metricTotal(c,{range:all},sp).total*monthCount(all)/91)<1e-9,'per day divides the same sum by days, not months')
+ // 2024-01-03 is a Wednesday: the first week bucket starts Monday 1 Jan but the range starts on the 3rd, so it covers 5 days.
+ const part:Range={from:d('2024-01-03'),to:d('2024-01-16')},ts={xs:[d('2024-01-01'),d('2024-01-08'),d('2024-01-15')],bucket:'week' as const,total:[500,700,200]}
+ assert.deepEqual(perPeriod(ts,part,'week'),[500/(5/7),700,200/(2/7)])
+ assert.deepEqual(perPeriod({...ts,bucket:'day'},part,'day'),[100,100,100])}
 console.log('cube ok')
 assert.deepEqual(alignCompare([0,5,6],2),[5,6])
 assert.deepEqual(alignCompare([5,6],3),[null,5,6])

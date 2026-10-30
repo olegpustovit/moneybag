@@ -4,7 +4,7 @@ import { readCachedView, writeCachedView } from './cube-store'
 import { isoDay, parseRange, type Bounds } from './time-grammar'
 
 export type SpecColumn={label?:string;value?:string;format?:string;type?:string;total?:boolean}
-export type SpecComponent={id:string;type:string;title?:string;metric?:string;split?:string;mark?:string;x?:{type:string};estimates?:string;annotate?:string;compare?:string;fixed?:{reason:string;range?:string};drill?:{to:string;filter?:string};value?:string;rows?:string;format?:string;columns?:SpecColumn[]}
+export type SpecComponent={id:string;type:string;title?:string;metric?:string;split?:string;mark?:string;x?:{type:string};estimates?:string;annotate?:string;bucket?:string;compare?:string;fixed?:{reason:string;range?:string};drill?:{to:string;filter?:string};value?:string;rows?:string;format?:string;columns?:SpecColumn[]}
 export type ViewPage={id:string;title:string;layout:{cols:{span:number;component:string}[]}[]}
 export type ViewSpec={id?:string;title?:string;question?:string;scope?:{time?:{default?:string;presets?:string[]};compare?:'previous_period'|'previous_year'|'none'};explore?:{dimensions?:string[]};answer?:{metric:string;facts?:string[]};components?:SpecComponent[];pages?:ViewPage[]}
 export type ViewBody={head:{id:string;title:string};spec:ViewSpec;version:number;status:string;pages:ViewPage[]|null;values:Record<string,unknown>|null;validation?:{ok:boolean;errors?:{path?:string;msg?:string}[]|null};as_of:string;stale:boolean}

@@ -23,18 +23,19 @@ import (
 type Metric struct {
 	Key         string   `json:"-" bson:"_id"`
 	UserID      string   `json:"-" bson:"user_id"`
-	ID          string   `json:"id" bson:"id" jsonschema:"stable id, lowercase letters, digits, _ or -"`
-	Label       string   `json:"label" bson:"label" jsonschema:"human name, used in sentences and titles"`
+	ID          string   `json:"id" bson:"id" jsonschema:"lowercase letters, digits, _ or -"`
+	Label       string   `json:"label" bson:"label" jsonschema:"human name for sentences and titles"`
 	Description string   `json:"description,omitempty" bson:"description,omitempty"`
-	Unit        string   `json:"unit" bson:"unit" jsonschema:"eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)"`
-	Kind        string   `json:"kind" bson:"kind" jsonschema:"flow (sum over the period), balance (holdings at the period end) or rate (flow per month)"`
-	Additivity  string   `json:"additivity" bson:"additivity" jsonschema:"sum, last, avg or none; how the total folds over time and whether a table may total it"`
+	Unit        string   `json:"unit" bson:"unit" jsonschema:"eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)"`
+	Kind        string   `json:"kind" bson:"kind" jsonschema:"flow (period sum), balance (holdings at period end) or rate (flow per month, or per)"`
+	Additivity  string   `json:"additivity" bson:"additivity" jsonschema:"sum, last, avg or none; how the total folds over time"`
+	Per         string   `json:"per,omitempty" bson:"per,omitempty" jsonschema:"day, week or month (default); unit a rate or avg averages over"`
 	Estimates   string   `json:"estimates" bson:"estimates" jsonschema:"include, exclude or split; how estimated accounts count"`
 	Accounts    []string `json:"accounts,omitempty" bson:"accounts,omitempty" jsonschema:"account id prefixes, such as expenses:"`
 	Exclude     []string `json:"exclude,omitempty" bson:"exclude,omitempty" jsonschema:"account id prefixes to leave out"`
 	Sign        int      `json:"sign,omitempty" bson:"sign,omitempty" jsonschema:"1 or -1; -1 shows income, stored as negative postings, as positive"`
 	Where       string   `json:"where,omitempty" bson:"where,omitempty" jsonschema:"escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)"`
-	Dimensions  []string `json:"dimensions,omitempty" bson:"dimensions,omitempty" jsonschema:"dimensions this metric may split by; the first is the default for contributors"`
+	Dimensions  []string `json:"dimensions,omitempty" bson:"dimensions,omitempty" jsonschema:"dimensions it splits by; the first is the default"`
 }
 type LabelInput struct {
 	Kind  string `json:"kind" jsonschema:"account, category, pot, tag, dimension or series"`
@@ -121,6 +122,12 @@ func (s *Service) validate(m *Metric) error {
 	}
 	if e := errors.Join(oneOf("unit", m.Unit, "eur", "usd", "int", "pct", "mo", "days"), oneOf("kind", m.Kind, "flow", "balance", "rate"), oneOf("additivity", m.Additivity, "sum", "last", "avg", "none"), oneOf("estimates", m.Estimates, "include", "exclude", "split")); e != nil {
 		return e
+	}
+	if e := oneOf("per", m.Per, "", "day", "week", "month"); e != nil {
+		return e
+	}
+	if m.Per != "" && m.Kind != "rate" && m.Additivity != "avg" {
+		return fmt.Errorf("per needs a rate kind or avg additivity")
 	}
 	if m.Sign == 0 {
 		m.Sign = 1

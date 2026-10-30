@@ -135,6 +135,8 @@ export function compareWindow(r:Range,mode:CompareMode,bounds:Bounds):CompareWin
  return {mode,from:available ? Math.max(bounds.start,from) : from,to,partial:available && from<bounds.start,available,label:mode==='previous_period' ? 'previous period' : 'same period last year'}
 }
 
+// The bucket sizes a viewer may pick for a range: not so fine it is unreadable, not so coarse it is a few bars.
+export function bucketChoices(r:Range):Bucket[] {const d=rangeDays(r);return [d<=400 && 'day',d>=14 && d<=1830 && 'week',d>=45 && 'month'].filter(Boolean) as Bucket[]}
 export function autoBucket(r:Range):Bucket {const d=rangeDays(r);return d<=45 ? 'day' : d<=120 ? 'week' : d<=1830 ? 'month' : 'quarter'}
 export function bucketStart(t:number,b:Bucket):number {
  if(b==='day')return t

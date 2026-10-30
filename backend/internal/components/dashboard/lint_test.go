@@ -131,11 +131,11 @@ func TestCheckSpecNamesAllowedValues(t *testing.T) {
 		Tests:  []SpecTest{{Ask: "q", Metric: "m", From: "2026-13-01", To: "2026-01-01"}},
 		Components: []Component{
 			{ID: "a", Type: "stat"},
-			{ID: "b", Type: "time_chart", Metric: "m", Mark: "pie", Estimates: "maybe", Compare: "x", X: &XAxis{Type: "log"}, Color: &ColorRule{By: "rank"}, Drill: &Drill{To: "moon"}, Fixed: &Fixed{}},
+			{ID: "b", Type: "time_chart", Metric: "m", Mark: "pie", Bucket: "hourly", Estimates: "maybe", Compare: "x", X: &XAxis{Type: "log"}, Color: &ColorRule{By: "rank"}, Drill: &Drill{To: "moon"}, Fixed: &Fixed{}},
 			{ID: "c", Type: "table", Columns: []Column{{Type: "euros"}}},
 		},
 	}
-	want := []string{"/scope/time/default", "/scope/time/presets/1", "/scope/compare", "/answer/facts/0", "/tests/0", "/tests/0/equals_ledger/accounts", "/components/0/metric", "/components/1/mark", "/components/1/estimates", "/components/1/compare", "/components/1/x/type", "/components/1/color/by", "/components/1/drill/to", "/components/1/fixed/reason", "/components/2/columns/0/type"}
+	want := []string{"/scope/time/default", "/scope/time/presets/1", "/scope/compare", "/answer/facts/0", "/tests/0", "/tests/0/equals_ledger/accounts", "/components/0/metric", "/components/1/mark", "/components/1/bucket", "/components/1/estimates", "/components/1/compare", "/components/1/x/type", "/components/1/color/by", "/components/1/drill/to", "/components/1/fixed/reason", "/components/2/columns/0/type"}
 	got := []string{}
 	for _, i := range checkSpec(spec) {
 		got = append(got, i.Path)

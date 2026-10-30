@@ -6,8 +6,8 @@ export const stringList=(value:unknown,max:number,each:number):string[]|undefine
 export type CompareParam='previous_period'|'previous_year'|'none'
 export type TelemetrySearch={t?:string;cmp?:CompareParam;f?:string}
 export const telemetrySearch=(raw:Record<string,unknown>):TelemetrySearch => ({t:text(raw.t,64),cmp:oneOf(raw.cmp,['previous_period','previous_year','none'] as const),f:text(raw.f,2000)})
-export type DashboardSearch=TelemetrySearch&{page?:string;table?:string}
-export const dashboardSearch=(raw:Record<string,unknown>):DashboardSearch => ({...telemetrySearch(raw),page:text(raw.page,200),table:text(raw.table,200)})
+export type DashboardSearch=TelemetrySearch&{page?:string;table?:string;b?:'day'|'week'|'month'}
+export const dashboardSearch=(raw:Record<string,unknown>):DashboardSearch => ({...telemetrySearch(raw),page:text(raw.page,200),table:text(raw.table,200),b:oneOf(raw.b,['day','week','month'] as const)})
 export type LedgerSort='date'|'-date'|'amount'|'-amount'
 export type LedgerSearch=TelemetrySearch&{q?:string;accounts?:string[];sort?:LedgerSort}
 export const ledgerSearch=(raw:Record<string,unknown>):LedgerSearch => ({...telemetrySearch(raw),q:text(raw.q,200),accounts:stringList(raw.accounts,1000,160),sort:oneOf(raw.sort,['date','-date','amount','-amount'] as const)})

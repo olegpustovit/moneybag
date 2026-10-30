@@ -84,14 +84,15 @@ type Component struct {
 	Rule      *Rule      `json:"rule,omitempty"`
 	MD        string     `json:"md,omitempty"`
 	Scenarios []string   `json:"scenarios,omitempty"`
-	Metric    string     `json:"metric,omitempty" jsonschema:"metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy"`
-	Split     string     `json:"split,omitempty" jsonschema:"dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key"`
+	Metric    string     `json:"metric,omitempty" jsonschema:"metric id from metric_list, on stat, time_chart, ranked_bars, sankey, entries"`
+	Split     string     `json:"split,omitempty" jsonschema:"dimension to split by: category, payee, account, trip, tag, type, source, pot, class or an account group key"`
 	X         *XAxis     `json:"x,omitempty" jsonschema:"x axis type on chart and time_chart"`
+	Bucket    string     `json:"bucket,omitempty" jsonschema:"time_chart bucket: auto (default), day, week or month"`
 	Estimates string     `json:"estimates,omitempty" jsonschema:"overrides the metric's estimate policy"`
 	Annotate  string     `json:"annotate,omitempty" jsonschema:"trips, or a tag rule such as trip:* or home-move"`
 	Color     *ColorRule `json:"color,omitempty"`
 	Drill     *Drill     `json:"drill,omitempty"`
-	Compare   string     `json:"compare,omitempty" jsonschema:"overrides scope.compare; none states that no comparison makes sense"`
+	Compare   string     `json:"compare,omitempty" jsonschema:"overrides scope.compare; none means no comparison makes sense"`
 	Fixed     *Fixed     `json:"fixed,omitempty"`
 }
 type Placement struct {
@@ -144,7 +145,7 @@ type Spec struct {
 	ID         string            `json:"id"`
 	Title      string            `json:"title"`
 	Version    int               `json:"version"`
-	Params     map[string]any    `json:"params,omitempty" jsonschema:"defaults CEL reads as params.*; with scope, params.from, to, compare_from and compare_to hold the page clock as YYYY-MM-DD"`
+	Params     map[string]any    `json:"params,omitempty" jsonschema:"defaults for params.*; with scope, params.from, to, compare_from, compare_to hold the page clock"`
 	Data       map[string]Query  `json:"data"`
 	Computed   map[string]string `json:"computed,omitempty"`
 	Pages      []Page            `json:"pages"`
@@ -154,7 +155,7 @@ type Spec struct {
 	Scope      *Scope            `json:"scope,omitempty"`
 	Explore    *Explore          `json:"explore,omitempty"`
 	Answer     *Answer           `json:"answer,omitempty"`
-	Tests      []SpecTest        `json:"tests,omitempty" jsonschema:"saved questions dashboard_test checks against the ledger; all must pass to publish"`
+	Tests      []SpecTest        `json:"tests,omitempty" jsonschema:"questions dashboard_test checks against the ledger; all must pass to publish"`
 }
 type Head struct {
 	PublishedBy      principal.Actor `json:"published_by,omitempty" bson:"published_by,omitempty"`

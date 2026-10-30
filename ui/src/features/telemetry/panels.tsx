@@ -2,8 +2,8 @@ import { CatchBoundary, Link, useNavigate } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { componentValue, type ComponentValue } from '../dashboard/values'
 import { tableTotal } from '../dashboard/table-total'
-import { annotationBands, balanceField, balanceSeries, colorOf, compareSeries, cubeCanCompute, goodWhen, label, metricRows, metricTotal, timeseries, whatMoved, type Cube, type CubeMetric, type Dimension, type EstimatePolicy, type Pill } from './cube'
-import { bucketLabel, compareWindow, dayFromIso, dayLabel, isoDay, rangeLabel, type Bounds, type Bucket, type CompareWindow, type Range, parseRange } from './time-grammar'
+import { annotationBands, balanceField, balanceSeries, colorOf, compareSeries, cubeCanCompute, goodWhen, label, metricRows, metricTotal, perPeriod, timeseries, whatMoved, type Cube, type CubeMetric, type Dimension, type EstimatePolicy, type Pill } from './cube'
+import { autoBucket, bucketChoices, bucketLabel, compareWindow, dayFromIso, dayLabel, isoDay, rangeLabel, type Bounds, type Bucket, type CompareWindow, type Range, parseRange } from './time-grammar'
 import { encodePills } from './filters'
 import { compactNumber, money, moneyExact, percent, unitFormat, type Unit } from './format'
 import { TimeChart, type ChartSeries } from './time-chart'
@@ -16,7 +16,7 @@ import type { SpecComponent } from './view-data'
 import type { DetailsContent } from './details-drawer'
 import './telemetry.css'
 
-export type PanelCtx={cube:Cube|null;range:Range;win:CompareWindow|null;compareMode:string;defaultCompare:string;pills:Pill[];filtering:boolean;dashboard:string;syncKey:string;bounds:Bounds;explore:string[];readOnly?:boolean;fresh?:boolean;syncing?:boolean;
+export type PanelCtx={cube:Cube|null;range:Range;win:CompareWindow|null;compareMode:string;defaultCompare:string;pills:Pill[];filtering:boolean;dashboard:string;syncKey:string;bounds:Bounds;explore:string[];readOnly?:boolean;fresh?:boolean;syncing?:boolean;bucket?:'day'|'week'|'month';setBucket?:(b:'day'|'week'|'month') => void;
  setRange:(range:Range,meta:{final:boolean}) => void;stepOut:() => void;addPill:(pill:Pill) => void;tableLink?:(id:string) => ReactNode}
 type Comparison={from?:string;to?:string;total?:string;text?:string;delta_pct?:number|null;direction?:string;good?:boolean}
 type Point={bucket?:string;name:string;value:string;text:string;estimated?:boolean}
@@ -57,12 +57,13 @@ function StatPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
   const fmt=(x:number) => metricText(ctx,m,x)
   if(!exact)text=fmt(now.total)
   change=changeBetween(now.total,prev,goodWhen(m),fmt);comparison=win?.label;share=now.total && m.unit!=='int' ? now.estimated/now.total : 0
-  const line=balanceField(m) ? {...balanceSeries(ctx.cube,q.range,{field:balanceField(m)!,maxPoints:60}),bucket:null} : (ts => ({xs:ts.xs,values:ts.total,bucket:ts.bucket}))(timeseries(ctx.cube,q,{measure:m,estimates:policyOf(c,m)}))
+  const line=balanceField(m) ? {...balanceSeries(ctx.cube,q.range,{field:balanceField(m)!,maxPoints:60}),bucket:null} : (ts => ({xs:ts.xs,values:m.per==='day' || m.per==='week' ? perPeriod(ts,q.range,m.per) : ts.total,bucket:ts.bucket}))(timeseries(ctx.cube,q,{measure:m,bucket:m.per==='week' && autoBucket(q.range)==='day' ? 'week' : undefined,estimates:policyOf(c,m)}))
   spark=line.values;sparkTip=i => `${line.bucket ? bucketLabel(line.xs[i],line.bucket) : dayLabel(line.xs[i])} · ${fmt(Number(line.values[i] ?? 0))}`
  } else if(v.compare && v.compare.direction){
   const pct=v.compare.delta_pct,dir=v.compare.direction==='up' ? 'up' as const : v.compare.direction==='down' ? 'down' as const : 'flat' as const
   change={direction:dir,good:dir==='flat' ? null : v.compare.good ?? null,text:pct===null || pct===undefined ? 'New' : `${dir==='up' ? '+' : dir==='down' ? '−' : ''}${percent(Math.abs(pct))}`,detail:v.compare.text ? `from ${v.compare.text}` : undefined};comparison=(c.compare ?? ctx.compareMode)==='previous_year' ? 'same period last year' : 'previous period'
  }
+ // shortcut: the server's sparkline is raw bucket totals, not the per-day or per-week rate, until the cube loads.
  // A fixed range or a CEL metric skips the cube above, so its tip reads the server's buckets.
  const buckets=v.sparkline_buckets
  if(!sparkTip && buckets?.length===spark.length){const bucket=bucketFromIso(buckets);sparkTip=i => `${bucketLabel(toMs(buckets[i]),bucket)} · ${m ? metricText(ctx,m,Number(spark[i] ?? 0)) : v.sparkline?.[i] ?? ''}`}
@@ -87,9 +88,9 @@ function ChartPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
    const s=balanceSeries(cube,range,{field}),sign=m.sign || 1,values=sign===1 ? s.values : s.values.map(x => x*sign),prev=win?.available ? balanceSeries(cube,win,{field}) : null
    return <TimeChart title={title} heading={<Head title={title} fixed={c.fixed?.reason} onDetails={details} note={ctx.filtering ? 'Balances are not affected by filters.' : undefined}/>} mark={mark==='stack' || mark==='bar' ? 'line' : mark} baseline="auto" format={unitFormat('eur',{minor:true,code:cube.base})} xs={s.xs} series={[{key:'v',label:m.label,color:'--c0',values}]} syncKey={ctx.syncKey} {...interactive} compare={prev ? {label:compareName,values:s.xs.map((_,i) => prev.values[i]===undefined ? null : prev.values[i]*sign)} : null} bands={band} bandLabel={band?.length ? 'Trips' : undefined} estimatedUntil={cube.balances.estimatedUntil}/>
   }
-  const split=c.split as Dimension|undefined,bucket=undefined as Bucket|undefined,ts=timeseries(cube,q,{measure:m,bucket,split,estimates:policy}),isInt=m.unit==='int'
+  const split=c.split as Dimension|undefined,choices=bucketChoices(range),wanted=ctx.bucket ?? (c.bucket && c.bucket!=='auto' ? c.bucket : undefined),bucket=(wanted && choices.includes(wanted as Bucket) ? wanted : undefined) as Bucket|undefined,ts=timeseries(cube,q,{measure:m,bucket,split,estimates:policy}),isInt=m.unit==='int'
   const cmp=compareSeries(cube,q,win,{measure:m,bucket:ts.bucket,estimates:policy==='split' ? 'include' : policy})
-  return <TimeChart title={title} heading={<Head title={title} fixed={c.fixed?.reason} onDetails={details} note={`By ${ts.bucket}. Bucket size follows the range.`}/>} mark={mark} format={isInt ? unitFormat('int') : unitFormat('eur',{minor:true,code:cube.base})} xs={ts.xs} bucket={ts.bucket} series={ts.series} syncKey={ctx.syncKey} {...interactive} compare={cmp ? {label:compareName,values:cmp} : null} bands={band} bandLabel={band?.length ? 'Trips' : undefined} onPick={i => {const from=Math.max(ts.xs[i],range.from),next=ts.xs[i+1] ?? range.to+864e5;void navigate({to:'/ledger',search:drillSearch(v.entries,{from,to:Math.min(next-864e5,range.to)})})}}/>
+  return <TimeChart title={title} heading={<Head title={title} fixed={c.fixed?.reason} onDetails={details} note={choices.length>1 && !ctx.readOnly ? undefined : `By ${ts.bucket}. Bucket size follows the range.`}>{choices.length>1 && !ctx.readOnly && <div className="tm-seg" role="group" aria-label="Group the chart by">{choices.map(b => <button key={b} type="button" className="tm-btn" aria-pressed={ts.bucket===b} onClick={() => ctx.setBucket?.(b as 'day'|'week'|'month')}>{b[0].toUpperCase()+b.slice(1)}</button>)}</div>}</Head>} mark={mark} format={isInt ? unitFormat('int') : unitFormat('eur',{minor:true,code:cube.base})} xs={ts.xs} bucket={ts.bucket} series={ts.series} syncKey={ctx.syncKey} {...interactive} compare={cmp ? {label:compareName,values:cmp} : null} bands={band} bandLabel={band?.length ? 'Trips' : undefined} onPick={i => {const from=Math.max(ts.xs[i],range.from),next=ts.xs[i+1] ?? range.to+864e5;void navigate({to:'/ledger',search:drillSearch(v.entries,{from,to:Math.min(next-864e5,range.to)})})}}/>
  }
  const unit=UNITS[v.unit ?? ''] ?? 'number',{xs,series,bucket}=serverSeries(v.series ?? []),format=unit==='eur' || unit==='usd' ? {...unitFormat(unit),full:(x:number) => money(Math.round(x*100),unit.toUpperCase())} : unitFormat(unit),isCategory=v.x?.type==='category'
  const bands=(v.annotations ?? []).map(a => ({from:dayFromIso(a.from),to:dayFromIso(a.to),label:a.label}))

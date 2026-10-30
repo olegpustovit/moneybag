@@ -36,7 +36,7 @@ type Catalog struct {
 }
 
 // Enums are the closed values of the spec; the schema resource and catalog_get both read them.
-var Enums = map[string][]string{"mark": Marks, "format": Formats, "tone": Tones, "column_type": ColumnTypes, "estimates": Policies, "compare": Compares, "x_type": {"time", "category"}, "drill_to": {"entries"}, "color_by": {"entity"}, "component_type": ComponentTypes}
+var Enums = map[string][]string{"mark": Marks, "format": Formats, "tone": Tones, "column_type": ColumnTypes, "estimates": Policies, "bucket": Buckets, "compare": Compares, "x_type": {"time", "category"}, "drill_to": {"entries"}, "color_by": {"entity"}, "component_type": ComponentTypes}
 
 var paramsDoc = map[string]string{
 	"from":         "Start of the page clock as YYYY-MM-DD, empty for all history. Set by scope.time; a date picker overrides it.",

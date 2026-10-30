@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
@@ -18,6 +19,7 @@ var (
 	Tones       = []string{"ok", "neg"}
 	ColumnTypes = []string{"text", "money", "number", "date", "pct", "days", "count"}
 	Policies    = []string{"include", "exclude", "split"}
+	Buckets     = []string{"auto", "day", "week", "month"}
 	Compares    = []string{"previous_period", "previous_year", "none"}
 )
 
@@ -34,7 +36,7 @@ var metricFields = []string{"metric", "title", "split", "estimates", "compare", 
 
 var ComponentCatalog = []ComponentDoc{
 	{"stat", "One number from a metric, with its change, comparison period and sparkline.", []string{"metric", "title", "compare", "estimates", "fixed", "drill"}, map[string]any{"id": "spend", "type": "stat", "metric": "spending", "title": "Spending", "compare": "previous_period", "drill": map[string]any{"to": "entries", "filter": "same_as_page"}}, []string{"kpi_compare", "estimates_declared", "no_raw_ids"}},
-	{"time_chart", "A metric over time on a real time axis with zoom, crosshair, annotations and estimate marking.", metricFields, map[string]any{"id": "trend", "type": "time_chart", "metric": "spending", "title": "Spending by category", "split": "category", "x": map[string]any{"type": "time"}, "mark": "stack", "annotate": "trips", "color": map[string]any{"by": "entity"}}, []string{"time_axis", "estimates_declared", "no_raw_ids"}},
+	{"time_chart", "A metric over time on a real time axis with zoom, crosshair, annotations and estimate marking.", append(slices.Clone(metricFields), "bucket"), map[string]any{"id": "trend", "type": "time_chart", "metric": "spending", "title": "Spending by category", "split": "category", "x": map[string]any{"type": "time"}, "mark": "stack", "annotate": "trips", "color": map[string]any{"by": "entity"}}, []string{"time_axis", "estimates_declared", "no_raw_ids"}},
 	{"ranked_bars", "A metric split by a dimension, sorted, with a comparison marker and click to filter. Replaces most donuts.", metricFields, map[string]any{"id": "where", "type": "ranked_bars", "metric": "spending", "title": "Where it went", "split": "category", "compare": "previous_period", "color": map[string]any{"by": "entity"}}, []string{"estimates_declared", "no_raw_ids"}},
 	{"sankey", "Flows through a metric split by a dimension: negative values flow in, positive values flow out.", metricFields, map[string]any{"id": "flow", "type": "sankey", "metric": "cash_flow", "title": "Money in and out", "split": "category"}, []string{"estimates_declared", "no_raw_ids"}},
 	{"entries", "The entries behind a metric, first page only, with a link to the rest in Ledger.", []string{"metric", "title", "estimates", "fixed", "drill"}, map[string]any{"id": "behind", "type": "entries", "metric": "spending", "title": "The entries behind these numbers", "drill": map[string]any{"to": "entries", "filter": "same_as_page"}}, []string{"estimates_declared", "no_raw_ids"}},
@@ -119,6 +121,11 @@ func checkSpec(spec Spec) []Issue {
 		}
 		if c.Mark != "" && !slices.Contains(Marks, c.Mark) {
 			i := enumIssue(base+"/mark", "mark", c.Mark, Marks)
+			i.ComponentID = c.ID
+			out = append(out, i)
+		}
+		if !validEnum(c.Bucket, Buckets) {
+			i := enumIssue(base+"/bucket", "bucket", c.Bucket, Buckets)
 			i.ComponentID = c.ID
 			out = append(out, i)
 		}
@@ -292,7 +299,7 @@ func (x *execution) renderMetric(c Component) (map[string]any, error) {
 	case "stat":
 		query.Bucket, query.Split = "auto", ""
 	case "time_chart":
-		query.Bucket = "auto"
+		query.Bucket = cmp.Or(c.Bucket, "auto")
 		mark, xType := c.Mark, "time"
 		if mark == "" {
 			mark = "line"

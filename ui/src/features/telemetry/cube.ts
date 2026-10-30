@@ -1,4 +1,4 @@
-import { DAY, autoBucket, bucketEdges, dayFromIso, rangeLabel, type Bounds, type Bucket, type CompareWindow, type Range } from './time-grammar'
+import { DAY, autoBucket, bucketEdges, dayFromIso, rangeDays, rangeLabel, type Bounds, type Bucket, type CompareWindow, type Range } from './time-grammar'
 import { money, percent } from './format'
 
 // Wire shape of GET /api/cube, from docs/telemetry.md.
@@ -8,7 +8,7 @@ export type CubeWire={revision:number;as_of:string;base:string;start:string;end:
  flows:{d:number[];a:number[];p:number[];t:number[];v:number[];n:number[]};
  balances:{d:number[];net:number[];assets:number[];liabilities:number[];gold?:number[];estimated_until?:string};
  rates:Record<string,{d:number[];v:number[]}>;metrics:CubeMetric[];annotations:Annotation[];labels:Record<string,string>;aliases?:{pattern:string;name:string}[];unvalued?:number}
-export type CubeMetric={id:string;label:string;description?:string;unit:string;kind:string;additivity:string;estimates:string;accounts?:string[]|null;exclude?:string[]|null;sign?:number;where?:string;dimensions?:string[]|null}
+export type CubeMetric={id:string;label:string;description?:string;unit:string;kind:string;additivity:string;estimates:string;accounts?:string[]|null;exclude?:string[]|null;sign?:number;where?:string;dimensions?:string[]|null;per?:'day'|'week'|'month'}
 export type Dimension='category'|'account'|'payee'|'trip'|'type'|'pot'|'source'|'class'|'estimate'
 export type Op='is'|'is not'|'contains'|'does not contain'|'over'|'under'
 export type Pill={field:Dimension|'amount';op:Op;values:string[]}
@@ -120,6 +120,12 @@ export function goodWhen(m:CubeMetric):'up'|'down'|'neutral' {
  const lower=(id:string) => (id.startsWith('expenses:') || id.startsWith('income:'))===((m.sign || 1)!==-1),first=lower(a[0])
  return a.every(id => lower(id)===first) ? (first ? 'down' : 'up') : 'neutral'
 }
+// Mirrors periodsBetween in semantic/query.go.
+export const periods=(r:Range,per?:CubeMetric['per']):number => per==='day' ? rangeDays(r) : per==='week' ? rangeDays(r)/7 : months(r)
+// Each bucket's total as a daily or weekly rate; a part bucket at the range's edge divides by its clipped length, so it stays a fair rate.
+export function perPeriod(ts:{xs:number[];bucket:Bucket;total:ArrayLike<number>},r:Range,per:'day'|'week'):number[] {
+ return ts.xs.map((x,i) => ts.total[i]/periods({from:Math.max(x,r.from),to:Math.min((ts.xs[i+1] ?? r.to+DAY)-DAY,r.to)},per))
+}
 // Sum of days covered over days in each month: whole months are exact integers (mirrors monthsBetween in semantic/query.go).
 export function months(r:Range):number {
  const a=r.from,b=r.to;if(!(b>=a))return 1
@@ -143,7 +149,7 @@ export function metricTotal(c:Cube,q:Query,m:CubeMetric,estimates?:EstimatePolic
   if(c.startMs+c.d[i]*DAY<lastMonth)continue
   const x=count ? n[i] : w[a[i]]*v[i];total+=x;entries+=n[i];if(est[a[i]])estimated+=x
  }
- if(m.kind==='rate' || m.additivity==='avg'){const k=months(q.range);total/=k;estimated/=k}
+ if(m.kind==='rate' || m.additivity==='avg'){const k=periods(q.range,m.per);total/=k;estimated/=k}
  return {total,estimated,entries}
 }
 

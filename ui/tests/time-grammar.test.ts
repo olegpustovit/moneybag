@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { addMonths, autoBucket, bucketEdges, bucketLabel, bucketNext, bucketStart, canonicalText, compareWindow, dayFromIso, isoDay, parseRange, parseTime, rangeDays, rangeLabel, stepRange, zoomAround, zoomOutRange, type Bounds, type Range } from '../src/features/telemetry/time-grammar'
+import { addMonths, autoBucket, bucketChoices, bucketEdges, bucketLabel, bucketNext, bucketStart, canonicalText, compareWindow, dayFromIso, isoDay, parseRange, parseTime, rangeDays, rangeLabel, stepRange, zoomAround, zoomOutRange, type Bounds, type Range } from '../src/features/telemetry/time-grammar'
 
 const d=dayFromIso,bounds=(today:string,start='2023-01-01'):Bounds => ({today:d(today),start:d(start)})
 const b=bounds('2026-10-30')
@@ -168,4 +168,6 @@ assert.equal(bucketLabel(d('2026-10-01'),'quarter'),'Q4 2026')
 assert.equal(bucketLabel(d('2026-10-01'),'month'),'Oct 2026')
 assert.deepEqual(bucketEdges(r('2024-01-31','2024-03-01'),'month').map(isoDay),['2024-01-01','2024-02-01','2024-03-01'])
 assert.equal(bucketEdges(r('2024-02-26','2024-03-03'),'week').length,1)
+for(const [days,want] of [[7,['day']],[30,['day','week']],[365,['day','week','month']],[1000,['week','month']],[2000,['month']]] as const)
+ assert.deepEqual(bucketChoices({from:d('2020-01-01'),to:d('2020-01-01')+(days-1)*864e5}),want,`${days} days`)
 console.log('time-grammar ok')

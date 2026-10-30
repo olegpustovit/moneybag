@@ -129,7 +129,7 @@ describe('TimeBar',() => {
  it('offers This month after 30 days, even when a page lists other presets',() => {
   expect(defaultPresets(bounds,['90d','30d','ytd']).map(p => p.label)).toEqual(['90D','30D','This month','YTD'])
   expect(defaultPresets(bounds,['30d','this month']).map(p => p.label)).toEqual(['30D','This month'])
-  render(<Bar/>);expect(screen.getAllByRole('button').map(b => b.textContent).slice(2,6)).toEqual(['30D','This month','90D','6M'])
+  render(<Bar/>);expect(screen.getAllByRole('button').map(b => b.textContent).slice(3,7)).toEqual(['30D','This month','90D','6M'])
   fireEvent.click(screen.getByRole('button',{name:'This month'}));expect(screen.getByTestId('t').textContent).toBe('this month');expect(dates()).toEqual(['1 Oct 2026','30 Oct 2026'])
  })
  it('names an unnamed range by its length and keeps the dates in the caption',() => {

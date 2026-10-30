@@ -104,3 +104,39 @@ func TestTidyPayee(t *testing.T) {
 		}
 	}
 }
+
+func TestPeriodsBetweenCountsDaysWeeksOrMonths(t *testing.T) {
+	for _, c := range []struct {
+		per, from, to string
+		want          *big.Rat
+	}{
+		{"day", "2026-09-01", "2026-09-30", big.NewRat(30, 1)},
+		{"week", "2026-09-01", "2026-09-30", big.NewRat(30, 7)},
+		{"month", "2026-09-01", "2026-09-30", big.NewRat(1, 1)},
+		{"", "2026-07-01", "2026-09-30", big.NewRat(3, 1)},
+		{"day", "bad", "2026-09-30", big.NewRat(1, 1)},
+		{"week", "2026-09-30", "2026-09-01", big.NewRat(1, 1)},
+	} {
+		if got := periodsBetween(Metric{Per: c.per}, c.from, c.to); got.Cmp(c.want) != 0 {
+			t.Errorf("%q %s..%s = %s, want %s", c.per, c.from, c.to, got.RatString(), c.want.RatString())
+		}
+	}
+}
+
+func TestValidateChecksPer(t *testing.T) {
+	s := &Service{}
+	base := Metric{ID: "m", Label: "M", Unit: "eur", Kind: "flow", Additivity: "sum", Estimates: "include", Accounts: []string{"expenses:"}}
+	for _, c := range []struct {
+		per, kind, add string
+		ok             bool
+	}{
+		{"", "flow", "sum", true}, {"day", "rate", "sum", true}, {"week", "flow", "avg", true},
+		{"day", "flow", "sum", false}, {"year", "rate", "sum", false},
+	} {
+		m := base
+		m.Per, m.Kind, m.Additivity = c.per, c.kind, c.add
+		if e := s.validate(&m); (e == nil) != c.ok {
+			t.Errorf("per %q kind %s additivity %s: err %v, want ok=%v", c.per, c.kind, c.add, e, c.ok)
+		}
+	}
+}

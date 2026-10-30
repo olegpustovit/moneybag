@@ -41,7 +41,7 @@ export function DashboardBody({view,cube:fullCube,search,onSearch,dashboardId,he
  const q={range,pills},metric=spec.answer ? cube?.metrics.find(m => m.id===spec.answer!.metric) : undefined
  const fresh=!search.t,exactAnswer=fresh && currency==='EUR' && !pills.length && time.compare===defaultCompare && (!search.t || isoDay(range.from)===firstFrom(view) && isoDay(range.to)===firstTo(view))
  const server=serverFacts(view.values?.answer),facts:Fact[]|null=!spec.answer ? null : exactAnswer && server ? server : cube ? localFacts(cube,q,win,metric) : server
- const ctx:PanelCtx={cube,range,win,compareMode:time.compare,defaultCompare,pills,filtering:pills.length>0,dashboard:dashboardId,syncKey:`dash-${dashboardId}`,bounds,explore:dims,readOnly:render,fresh,syncing:sync?.fetching,setRange:(r,{final}) => time.setRange(r,{final}),stepOut:time.zoomOut,addPill:p => setPills(addPill(pills,p)),
+ const ctx:PanelCtx={cube,range,win,compareMode:time.compare,defaultCompare,pills,filtering:pills.length>0,dashboard:dashboardId,syncKey:`dash-${dashboardId}`,bounds,explore:dims,readOnly:render,fresh,syncing:sync?.fetching,bucket:search.b,setBucket:b => onSearch({b},{push:false}),setRange:(r,{final}) => time.setRange(r,{final}),stepOut:time.zoomOut,addPill:p => setPills(addPill(pills,p)),
   tableLink:id => <button type="button" className="tm-details-link" onClick={() => onSearch({table:id},{push:true})}>See all rows</button>}
  const nav=cube ? {xs:netDays(cube).xs,values:netDays(cube).values,bands:cube.annotations.map(a => ({from:Date.parse(a.from),to:Date.parse(a.to),label:a.label})),label:'Net worth across all history'} : undefined
  const t=cube ? totals(cube,q) : null
@@ -75,4 +75,4 @@ const netDays=(c:Cube) => {const b=c.balances,xs=Array.from(b.d,d => c.startMs+d
 const firstValue=(view:ViewBody,key:'from'|'to') => {for(const v of Object.values(view.values ?? {})){const got=(v as Record<string,unknown>|null)?.[key];if(typeof got==='string' && !(v as {fixed?:unknown}).fixed)return got}return undefined}
 const firstFrom=(view:ViewBody) => firstValue(view,'from'),firstTo=(view:ViewBody) => firstValue(view,'to')
 function asOfLabel(iso:string):string {const d=new Date(iso),now=new Date();if(Number.isNaN(d.getTime()))return '';const time=d.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'});return d.toDateString()===now.toDateString() ? time : dayLabel(Math.floor(d.getTime()/DAY)*DAY)}
-const cleanState=(search:TelemetrySearch,t:string,pills:Pill[]):Record<string,string> => {const out:Record<string,string>={t};if(search.cmp)out.cmp=search.cmp;const f=encodePills(pills);if(f)out.f=f;return out}
+const cleanState=(search:TelemetrySearch&{b?:string},t:string,pills:Pill[]):Record<string,string> => {const out:Record<string,string>={t};if(search.cmp)out.cmp=search.cmp;if(search.b)out.b=search.b;const f=encodePills(pills);if(f)out.f=f;return out}

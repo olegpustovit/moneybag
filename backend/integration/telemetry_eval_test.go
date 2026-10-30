@@ -208,6 +208,15 @@ func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Princi
 		if income := must("metric_query", map[string]any{"metric": "income", "from": "2026-04-01", "to": "2026-06-30", "compare": "previous_period"}); income["total"] != "1000" || income["compare"].(map[string]any)["good"] != true {
 			t.Fatal("income", income)
 		}
+		// 2026-04-01..06-30 is 91 days: 1000 / 91 = 10.99, and per week is 1000 / 13 = 76.92.
+		must("metric_upsert", map[string]any{"id": "income_daily", "label": "Income per day", "unit": "eur", "kind": "rate", "additivity": "sum", "per": "day", "estimates": "include", "accounts": []string{"income:"}, "sign": -1})
+		if daily := must("metric_query", map[string]any{"metric": "income_daily", "from": "2026-04-01", "to": "2026-06-30"}); daily["total"] != "10.99" {
+			t.Fatal("income per day", daily)
+		}
+		must("metric_upsert", map[string]any{"id": "income_weekly", "label": "Income per week", "unit": "eur", "kind": "rate", "additivity": "sum", "per": "week", "estimates": "include", "accounts": []string{"income:"}, "sign": -1})
+		if weekly := must("metric_query", map[string]any{"metric": "income_weekly", "from": "2026-04-01", "to": "2026-06-30"}); weekly["total"] != "76.92" {
+			t.Fatal("income per week", weekly)
+		}
 		must("metric_upsert", map[string]any{"id": "bank", "label": "Bank balance", "unit": "eur", "kind": "balance", "additivity": "last", "estimates": "include", "accounts": []string{"assets:bank"}})
 		if bank := must("metric_query", map[string]any{"metric": "bank", "to": "2026-06-30"}); bank["total"] != "520" {
 			t.Fatal("balance values holdings at the period end", bank)

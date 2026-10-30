@@ -11,7 +11,7 @@ export function defaultPresets(bounds:Bounds,spec?:string[]):Preset[] {
  // This month is always offered, right after the 30-day preset, so a page that omits it still has it.
  if(spec?.length){const at=spec.indexOf('30d')+1,list=spec.includes('this month') ? spec : [...spec.slice(0,at),'this month',...spec.slice(at)];return list.map(text => ({label:presetName(text),text}))}
  const year=new Date(bounds.today).getUTCFullYear(),first=new Date(bounds.start).getUTCFullYear(),years=[year-1,year-2].filter(y => y>=first).map(y => String(y))
- return ['30d','this month','90d','6mo','12mo','ytd','last month','last quarter',...years,'all'].map(text => ({label:presetName(text),text}))
+ return ['7d','30d','this month','90d','6mo','12mo','ytd','last month','last quarter',...years,'all'].map(text => ({label:presetName(text),text}))
 }
 // What the field shows for a saved range. Anything else someone typed stays exactly as they typed it.
 const UNITS:Record<string,string>={d:'day',w:'week',mo:'month',y:'year'}

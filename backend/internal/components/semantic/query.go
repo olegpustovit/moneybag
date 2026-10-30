@@ -737,7 +737,7 @@ func FormatValue(unit string, r *big.Rat) string {
 }
 
 // monthsBetween counts calendar months as the sum of days covered over days in each month, so whole months are exact
-// integers and equal-length windows compare fairly. Mirrored by months() in ui/src/features/telemetry/cube.ts.
+// integers and equal-length windows compare fairly. Mirrored by months() (and its day and week siblings) in ui/src/features/telemetry/cube.ts.
 func monthsBetween(from, to string) *big.Rat {
 	a, e1 := time.Parse(day, from)
 	b, e2 := time.Parse(day, to)
@@ -753,13 +753,30 @@ func monthsBetween(from, to string) *big.Rat {
 	return sum
 }
 
+// periodsBetween counts the metric's averaging unit in the range: inclusive days, days over 7, or calendar months.
+func periodsBetween(m Metric, from, to string) *big.Rat {
+	if m.Per != "day" && m.Per != "week" {
+		return monthsBetween(from, to)
+	}
+	a, e1 := time.Parse(day, from)
+	b, e2 := time.Parse(day, to)
+	if e1 != nil || e2 != nil || b.Before(a) {
+		return big.NewRat(1, 1)
+	}
+	days := int64(b.Sub(a).Hours()/24) + 1
+	if m.Per == "week" {
+		return big.NewRat(days, 7)
+	}
+	return big.NewRat(days, 1)
+}
+
 // folded applies the metric's fold over time to a flow aggregate; balances already hold the period-end value.
 func folded(m Metric, a aggregate, from, to string) *big.Rat {
 	if m.Kind == "balance" {
 		return a.total
 	}
 	if m.Kind == "rate" || m.Additivity == "avg" {
-		return new(big.Rat).Quo(a.total, monthsBetween(from, to))
+		return new(big.Rat).Quo(a.total, periodsBetween(m, from, to))
 	}
 	if m.Additivity == "last" {
 		return a.lastMonth
@@ -880,6 +897,9 @@ func (s *Service) run(ctx context.Context, p principal.Principal, b *book, m Met
 	bucket := in.Bucket
 	if bucket == "auto" {
 		bucket = autoBucket(from, to)
+		if m.Per == "week" && bucket == "day" {
+			bucket = "week"
+		}
 	}
 	req := request{from: from, to: to, split: in.Split, bucket: bucket, policy: policy, filters: in.Filters, where: where}
 	a, e := s.aggregateMetric(ctx, p, b, m, req)
@@ -1001,6 +1021,9 @@ func formula(b *book, m Metric, policy string) string {
 		parts = append(parts, "Holdings at the period end")
 	case "rate":
 		parts = append(parts, "Sum per month")
+		if m.Per == "day" || m.Per == "week" {
+			parts[0] = "Average per " + m.Per
+		}
 	default:
 		parts = append(parts, "Sum over the period")
 	}
@@ -1042,7 +1065,7 @@ func (s *Service) LedgerCheck(ctx context.Context, p principal.Principal, metric
 	if e != nil {
 		return Result{}, Result{}, e
 	}
-	plain := Metric{ID: m.ID, Label: m.Label, Unit: m.Unit, Kind: m.Kind, Additivity: m.Additivity, Estimates: "include", Accounts: accounts, Exclude: exclude, Sign: m.Sign}
+	plain := Metric{ID: m.ID, Label: m.Label, Unit: m.Unit, Kind: m.Kind, Additivity: m.Additivity, Per: m.Per, Estimates: "include", Accounts: accounts, Exclude: exclude, Sign: m.Sign}
 	want, e := s.run(ctx, p, b, plain, QueryInput{From: from, To: to}, "")
 	return got, want, e
 }
