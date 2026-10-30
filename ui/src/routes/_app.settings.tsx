@@ -1,132 +1,65 @@
-import { useState, type FormEvent } from 'react'
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
-import { createFileRoute, useRouter } from '@tanstack/react-router'
-import { z } from 'zod'
+import { useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { RouteError } from '../features/telemetry/route-error'
+import { createFileRoute } from '@tanstack/react-router'
 import { Button } from '../components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
-import { Skeleton } from '../components/ui/skeleton'
-import { LoadingTable } from '../components/loading-table'
-import { FormulaInput } from '../components/formula/input'
-import { QueryEditor } from '../features/dashboard/query-editor'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
-import { invokeTool, listTools, settingsPost, tool, type Session, type ToolInfo } from '../lib/api'
-import { settingsQuery } from '../lib/queries'
+import { deleteView, savedViewsQuery, settingsPost, settingsQuery, type Session } from '../lib/api'
+import { clearCached } from '../features/telemetry/cube-store'
+import { describePage } from '../features/telemetry/shell-store'
+import { RowsSkeleton, humanKey } from '../features/telemetry/page-bits'
 
-export const Route = createFileRoute('/_app/settings')({
-  loader: ({ context }) => context.queryClient.query({ ...settingsQuery(context.session), staleTime: 'static' }),
-  pendingMs: 150,
-  pendingMinMs: 300,
-  pendingComponent: SettingsPending,
-  errorComponent: SettingsError,
-  component: Settings,
-})
-function SettingsPending() {const {session}=Route.useRouteContext();return <section role="status" aria-busy="true"><span className="sr-only">Loading settings…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SETTINGS</p><h1>Settings</h1><p className="description">Your account and connected agents.</p></div></header><div className="settings-layout" aria-hidden="true"><section className="settings-section"><h2>Appearance</h2><Skeleton className="skeleton-bar settings-loading-line"/></section><section className="settings-section"><h2>Connected agents</h2><p>Agents can work within the scopes you granted.</p><LoadingTable columns={['Agent','Access','Status','Action']}/></section><section className="settings-section"><h2>Statement feeds</h2><p>Connect a feed to stage statements for review.</p><LoadingTable columns={['Feed','Account','Format','Action']}/></section>{session.user.is_admin && <section className="settings-section"><h2>Invite a user</h2><Skeleton className="skeleton-bar settings-loading-line"/></section>}<section className="settings-section"><h2>Account</h2><Skeleton className="skeleton-bar settings-loading-line"/></section></div></section>}
-function SettingsError({ error, reset }: { error: unknown; reset: () => void }) {
-  const router = useRouter()
-  return <section className="dashboard-error"><h1>Could not load settings</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section>
-}
-function formFields(form: HTMLFormElement): Record<string,string> {
-  const fields: Record<string,string> = {}
-  for (const [name,value] of new FormData(form)) if (typeof value === 'string') fields[name] = value
-  return fields
-}
-function Message({ error, success }: { error: Error | null; success?: string }) {
-  return error ? <p className="form-message error" role="alert">{error.message}</p> : success ? <p className="form-message" role="status">{success}</p> : null
-}
+export const Route=createFileRoute('/_app/settings')({errorComponent:p => <RouteError {...p}/>,component:Settings})
+const fieldsOf=(form:HTMLFormElement) => {const out:Record<string,string>={};for(const [k,v] of new FormData(form))if(typeof v==='string')out[k]=v;return out}
+function Message({error,success}:{error:Error|null;success?:string}) {return error ? <p className="form-message error" role="alert">{error.message}</p> : success ? <p className="form-message" role="status">{success}</p> : null}
 function Theme() {
-  const [theme, setTheme] = useState(() => { try { const value = localStorage.getItem('moneybag-theme'); return value === 'light' || value === 'dark' ? value : 'system' } catch { return 'system' } })
-  return <div className="setting-inline"><div><h2>Appearance</h2><p>Choose a theme or follow your device.</p></div><ToggleGroup aria-label="Appearance" value={[theme]} onValueChange={(values) => { const next = values[0]; if (!next) return; setTheme(next); try { localStorage.setItem('moneybag-theme', next) } catch { /* The choice still applies for this visit. */ } document.documentElement.classList.toggle('dark', next === 'dark' || next === 'system' && matchMedia('(prefers-color-scheme: dark)').matches) }} variant="outline" size="sm" spacing={0}><ToggleGroupItem value="system">System</ToggleGroupItem><ToggleGroupItem value="light">Light</ToggleGroupItem><ToggleGroupItem value="dark">Dark</ToggleGroupItem></ToggleGroup></div>
+ const [theme,setTheme]=useState(() => {try {const v=localStorage.getItem('moneybag-theme');return v==='light' || v==='dark' ? v : 'system'} catch {return 'system'}})
+ return <div className="setting-inline"><div><h2>Appearance</h2><p>Choose a theme or follow your device.</p></div><ToggleGroup aria-label="Appearance" value={[theme]} onValueChange={values => {const next=values[0];if(!next)return;setTheme(next);try {localStorage.setItem('moneybag-theme',next)} catch {/* The choice still applies for this visit. */}document.documentElement.classList.toggle('dark',next==='dark' || (next==='system' && matchMedia('(prefers-color-scheme: dark)').matches))}} variant="outline" size="sm" spacing={0}><ToggleGroupItem value="system">System</ToggleGroupItem><ToggleGroupItem value="light">Light</ToggleGroupItem><ToggleGroupItem value="dark">Dark</ToggleGroupItem></ToggleGroup></div>
+}
+const ACCESS:Record<string,string>={'ledger:read':'Read the ledger','ledger:write':'Post entries','dash:read':'Read dashboards','dash:write':'Build dashboards','import:write':'Import statements','model:write':'Change plans','admin:users':'Manage people'}
+function Agents({session,data}:{session:Session;data:NonNullable<ReturnType<typeof useQuery<import('../lib/api').SettingsData>>['data']>}) {
+ const client=useQueryClient(),[confirm,setConfirm]=useState(''),[copied,setCopied]=useState(false),endpoint=new URL('/mcp',location.origin).href,agents=(data.agents ?? []).filter(a => !a.revoked)
+ const revoke=useMutation({mutationFn:(id:string) => settingsPost<{ok:boolean}>(session,'/settings/revoke',{id}),onSuccess:async () => {setConfirm('');await client.invalidateQueries({queryKey:settingsQuery(session).queryKey})}})
+ const toggle=useMutation({mutationFn:(stop:boolean) => settingsPost<{agents_suspended:boolean}>(session,stop ? '/settings/agents/stop' : '/settings/agents/resume',{}),onSuccess:async () => {setConfirm('');await client.invalidateQueries({queryKey:settingsQuery(session).queryKey})}})
+ return <section className="settings-section"><h2>Connected agents</h2><p>Agents build and run everything here, within the access you granted.</p>
+  {agents.length ? <ul className="tm-list static">{agents.map(a => <li key={a.id}><div><span className="n">{a.client_name || 'An agent'}<small>{(a.scopes ?? []).map(s => ACCESS[s] ?? humanKey(s.replace(':',' '))).join(' · ') || 'No access'}</small></span>{confirm===a.id ? <span className="tm-row"><Button size="sm" variant="destructive" disabled={revoke.isPending} onClick={() => revoke.mutate(a.id)}>Disconnect</Button><Button size="sm" variant="outline" onClick={() => setConfirm('')}>Cancel</Button></span> : <Button size="sm" variant="outline" onClick={() => setConfirm(a.id)}>Disconnect</Button>}</div></li>)}</ul> : <p className="settings-empty">No agents connected yet. Add this address to one to get started.</p>}
+  <Message error={revoke.error ?? toggle.error}/>
+  <div className="endpoint"><div><span className="setting-label">Address for agents</span><code>{endpoint}</code></div><Button variant="outline" size="sm" onClick={async () => {try {await navigator.clipboard.writeText(endpoint);setCopied(true)} catch {setCopied(false)}}}>{copied ? 'Copied' : 'Copy'}</Button></div>
+  {data.is_admin!==false && <div className={`tm-stop${data.agents_suspended ? ' on' : ''}`}><div><strong>{data.agents_suspended ? 'All agents are stopped' : 'Emergency stop'}</strong><p>{data.agents_suspended ? 'No agent can read or change anything until you resume them.' : 'Suspends every agent at once, until you resume them.'}</p></div>{data.agents_suspended ? <Button size="sm" disabled={toggle.isPending} onClick={() => toggle.mutate(false)}>Resume agents</Button> : confirm==='stop' ? <span className="tm-row"><Button size="sm" variant="destructive" disabled={toggle.isPending} onClick={() => toggle.mutate(true)}>Stop all agents</Button><Button size="sm" variant="outline" onClick={() => setConfirm('')}>Cancel</Button></span> : <Button size="sm" variant="destructive" onClick={() => setConfirm('stop')}>Stop all agents</Button>}</div>}
+ </section>
+}
+function Feeds({data}:{data:{feeds:{id:string;account:string;format:string}[]|null}}) {
+ const feeds=data.feeds ?? []
+ return <section className="settings-section"><h2>Statement feeds</h2><p>Agents set feeds up. The bank’s secret only ever goes in here, on its own secure page.</p>{feeds.length ? <ul className="tm-list static">{feeds.map(f => <li key={f.id}><div><span className="n">{humanKey(f.id)}<small>{humanKey(f.format)}</small></span><a className="tm-btn small" href={`/secure/feed/${encodeURIComponent(f.id)}`}>Enter or replace secret</a></div></li>)}</ul> : <p className="settings-empty">No feeds yet. Ask an agent to connect your bank.</p>}</section>
+}
+function Invite({session}:{session:Session}) {
+ const invite=useMutation({mutationFn:(fields:Record<string,string>) => settingsPost<{invitation_url:string}>(session,'/settings/invite',fields)}),[copied,setCopied]=useState(false)
+ return <section className="settings-section"><h2>Invite someone</h2><p>Each person has private records. Sharing a dashboard is always explicit.</p><form className="settings-form" onSubmit={e => {e.preventDefault();invite.mutate(fieldsOf(e.currentTarget))}}><FieldGroup><Field><FieldLabel htmlFor="invite-email">Email</FieldLabel><Input id="invite-email" name="email" type="email" autoComplete="email" required/></Field></FieldGroup><Button type="submit" size="sm" disabled={invite.isPending}>Create invitation</Button></form><Message error={invite.error}/>{invite.data && <div className="invitation"><Input readOnly aria-label="Invitation link" value={invite.data.invitation_url}/><Button variant="outline" size="sm" onClick={async () => {try {await navigator.clipboard.writeText(invite.data.invitation_url);setCopied(true)} catch {setCopied(false)}}}>{copied ? 'Copied' : 'Copy'}</Button></div>}</section>
+}
+function Account({session}:{session:Session}) {
+ const change=useMutation({mutationFn:(fields:Record<string,string>) => settingsPost<{ok:boolean;redirect:string}>(session,'/settings/password',fields),onSuccess:async result => {await clearCached();location.assign(result.redirect)}})
+ return <section className="settings-section"><h2>Account</h2><p>{session.user.name} · {session.user.email}</p>
+  <details className="setting-details"><summary>Change password</summary><form className="settings-form vertical" onSubmit={e => {e.preventDefault();change.mutate(fieldsOf(e.currentTarget))}}><FieldGroup><Field><FieldLabel htmlFor="current-password">Current password</FieldLabel><Input id="current-password" name="current" type="password" autoComplete="current-password" required/></Field><Field><FieldLabel htmlFor="new-password">New password</FieldLabel><Input id="new-password" name="password" type="password" autoComplete="new-password" required minLength={8}/></Field></FieldGroup><Button type="submit" size="sm" disabled={change.isPending}>Change password</Button><Message error={change.error}/></form></details>
+  {/* The cached ledger goes before the session does, so nothing stays on a shared browser. */}
+  <form action="/logout" method="post" onSubmit={e => {e.preventDefault();const form=e.currentTarget;void clearCached().finally(() => form.submit())}}><input type="hidden" name="csrf" value={session.csrf}/><Button type="submit" variant="outline" size="sm">Sign out</Button></form>
+ </section>
+}
+function SavedViews({session}:{session:Session}) {
+ const client=useQueryClient(),views=useQuery(savedViewsQuery(session)),remove=useMutation({mutationFn:(id:string) => deleteView(session,id),onSuccess:() => client.invalidateQueries({queryKey:savedViewsQuery(session).queryKey})})
+ if(!views.data?.length)return null
+ return <section className="settings-section"><h2>Saved views</h2><p>Yours alone. Open them from search with ⌘K.</p><ul className="tm-list static">{views.data.map(v => <li key={v.id}><div><a className="n" href={`${v.page}?${new URLSearchParams(v.state ?? {})}`}>{v.name}</a><Button size="sm" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate(v.id)}>Delete</Button></div></li>)}</ul></section>
 }
 function Settings() {
-  const { session } = Route.useRouteContext()
-  const { data } = useSuspenseQuery(settingsQuery(session))
-  const queryClient = useQueryClient()
-  const navigate = Route.useNavigate()
-  const [confirm, setConfirm] = useState('')
-  const [copied, setCopied] = useState(false)
-  const [consoleOpen, setConsoleOpen] = useState(false)
-  const revoke = useMutation({ mutationFn: (id: string) => settingsPost<{ ok: boolean }>(session, '/settings/revoke', { id }), onSuccess: async () => { setConfirm(''); await queryClient.invalidateQueries({ queryKey: settingsQuery(session).queryKey }) } })
-  const sync = useMutation({ mutationFn: (feed: string) => tool(session, 'feeds_sync', { feed }), onSuccess: async (result) => { await queryClient.invalidateQueries({queryKey:['imports',session.user.id]}); void navigate({to:'/imports/$batch',params:{batch:result.batch_id}}) } })
-  const agents = data.agents ?? []
-  const feeds = data.feeds ?? []
-  return <><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SETTINGS</p><h1>Settings</h1><p className="description">Your account and connected agents.</p></div></header>
-    <div className="settings-layout">
-      <section className="settings-section"><Theme /></section>
-      <section className="settings-section"><h2>Connected agents</h2><p>Agents can work within the scopes you granted.</p>
-        {agents.length === 0 ? <p className="settings-empty">No agents connected yet.</p> : <div className="table-scroll" tabIndex={0} role="region" aria-label="Connected agents"><table><thead><tr><th>Agent</th><th>Access</th><th>Status</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{agents.map((agent) => <tr key={agent.id}><td>{agent.client_name || agent.id}</td><td>{(agent.scopes ?? []).join(', ') || '—'}</td><td>{agent.revoked ? 'Revoked' : 'Connected'}</td><td>{!agent.revoked && (confirm === agent.id ? <span className="setting-actions"><Button variant="destructive" size="xs" disabled={revoke.isPending} onClick={() => revoke.mutate(agent.id)}>Confirm revoke</Button><Button variant="ghost" size="xs" onClick={() => setConfirm('')}>Cancel</Button></span> : <Button variant="outline" size="xs" onClick={() => setConfirm(agent.id)}>Revoke</Button>)}</td></tr>)}</tbody></table></div>}
-        <Message error={revoke.error}/>
-        <div className="endpoint"><div><span className="setting-label">MCP endpoint</span><code>{new URL('/mcp', window.location.origin).href}</code></div><Button variant="outline" size="sm" onClick={async () => { try { await navigator.clipboard.writeText(new URL('/mcp', window.location.origin).href); setCopied(true) } catch { setCopied(false) } }}>{copied ? 'Copied' : 'Copy'}</Button></div>
-      </section>
-      <section className="settings-section"><h2>Statement feeds</h2><p>Connect a feed to stage statements for review.</p>
-        {feeds.length === 0 ? <p className="settings-empty">No feeds connected yet.</p> : <div className="table-scroll" tabIndex={0} role="region" aria-label="Statement feeds"><table><thead><tr><th>Feed</th><th>Account</th><th>Format</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{feeds.map((feed) => <tr key={feed.id}><td>{feed.id}</td><td>{feed.account}</td><td>{feed.format}</td><td><Button variant="outline" size="xs" disabled={sync.isPending} onClick={() => sync.mutate(feed.id)}>Sync</Button></td></tr>)}</tbody></table></div>}
-        <Message error={sync.error}/><FeedForm session={session}/>
-      </section>
-      {session.user.is_admin && <section className="settings-section"><InviteForm session={session}/></section>}
-      <section className="settings-section"><h2>Account</h2><p>{session.user.name} · {session.user.email}</p><PasswordForm session={session}/><form action="/logout" method="post"><input type="hidden" name="csrf" value={session.csrf}/><Button type="submit" variant="outline" size="sm">Sign out</Button></form></section>
-      <section className="settings-section"><details onToggle={(event) => setConsoleOpen(event.currentTarget.open)}><summary>MCP console <span>Run a tool against your workspace</span></summary>{consoleOpen && <ToolConsole session={session}/>}</details></section>
-    </div>
-  </>
-}
-function InviteForm({ session }: { session: Session }) {
-  const invite = useMutation({ mutationFn: (fields: Record<string,string>) => settingsPost<{ invitation_url: string }>(session, '/settings/invite', fields) })
-  const [copied, setCopied] = useState(false)
-  return <><h2>Invite a user</h2><p>Each user has private records. Share dashboards explicitly.</p><form className="settings-form" onSubmit={(event) => { event.preventDefault(); invite.mutate(formFields(event.currentTarget)) }}><FieldGroup><Field><FieldLabel htmlFor="invite-email">Email</FieldLabel><Input id="invite-email" name="email" type="email" autoComplete="email" required/></Field></FieldGroup><Button type="submit" size="sm" disabled={invite.isPending}>Create invitation</Button></form><Message error={invite.error}/>{invite.data && <div className="invitation"><label htmlFor="invitation-url">Invitation link</label><Input id="invitation-url" readOnly value={invite.data.invitation_url}/><Button variant="outline" size="sm" onClick={async () => { try { await navigator.clipboard.writeText(invite.data.invitation_url); setCopied(true) } catch { setCopied(false) } }}>{copied ? 'Copied' : 'Copy link'}</Button></div>}</>
-}
-function FeedForm({ session }: { session: Session }) {
-  const queryClient = useQueryClient()
-  const [feed, setFeed] = useState('wise')
-  const [format, setFormat] = useState('wise_csv')
-  const [dateFormat, setDateFormat] = useState('auto')
-  const [saved, setSaved] = useState(false)
-  const save = useMutation({ mutationFn: (fields: Record<string,string>) => settingsPost<{ok:boolean}>(session, '/settings/feed', fields), onSuccess: async () => { await queryClient.invalidateQueries({queryKey:settingsQuery(session).queryKey}) } })
-  const submit = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = event.currentTarget; setSaved(false); save.mutate({ ...formFields(form), id:feed, format, date_format:dateFormat === 'auto' ? '' : dateFormat }, { onSuccess: () => { form.reset(); save.reset(); setSaved(true) } }) }
-  return <details className="setting-details"><summary>Connect or update a feed</summary><form className="settings-form vertical" onSubmit={submit}><FieldGroup>
-    <Field><FieldLabel htmlFor="feed-kind">Feed</FieldLabel><Select value={feed} onValueChange={(v) => { if(v) setFeed(v) }}><SelectTrigger id="feed-kind"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="wise">Wise</SelectItem><SelectItem value="finance_connector">Finance connector</SelectItem></SelectGroup></SelectContent></Select></Field>
-    <Field><FieldLabel htmlFor="feed-url">Public HTTPS feed URL</FieldLabel><Input id="feed-url" name="url" type="url" required placeholder="https://example.com/statement" /></Field>
-    <Field><FieldLabel htmlFor="feed-account">Account ID</FieldLabel><Input id="feed-account" name="account" required placeholder="assets:bank" /></Field>
-    <Field><FieldLabel htmlFor="feed-format">Format</FieldLabel><Select value={format} onValueChange={(v) => { if(v) setFormat(v) }}><SelectTrigger id="feed-format"><SelectValue /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="wise_csv">Wise CSV</SelectItem><SelectItem value="generic_csv">Generic CSV</SelectItem><SelectItem value="plaid">Plaid</SelectItem></SelectGroup></SelectContent></Select></Field>
-    <Field><FieldLabel htmlFor="date-format">Date format</FieldLabel><Select value={dateFormat} onValueChange={(v) => setDateFormat(v ?? 'auto')}><SelectTrigger id="date-format"><SelectValue placeholder="Automatic" /></SelectTrigger><SelectContent><SelectGroup><SelectItem value="auto">Automatic</SelectItem><SelectItem value="iso">Year-month-day</SelectItem><SelectItem value="dmy">Day-month-year</SelectItem><SelectItem value="mdy">Month-day-year</SelectItem></SelectGroup></SelectContent></Select></Field>
-    <Field><FieldLabel htmlFor="feed-token">Access token <span className="muted">(optional)</span></FieldLabel><Input id="feed-token" name="token" type="password" autoComplete="new-password" /></Field>
-  </FieldGroup><Button type="submit" size="sm" disabled={save.isPending}>Save feed</Button><Message error={save.error} success={saved ? 'Feed saved.' : undefined}/></form></details>
-}
-function PasswordForm({ session }: { session: Session }) {
-  const change = useMutation({ mutationFn: (fields: Record<string,string>) => settingsPost<{ok:boolean;redirect:string}>(session, '/settings/password', fields), onSuccess: (result) => { window.location.assign(result.redirect) } })
-  return <details className="setting-details"><summary>Change password</summary><form className="settings-form vertical" onSubmit={(event) => { event.preventDefault(); change.mutate(formFields(event.currentTarget)) }}><FieldGroup><Field><FieldLabel htmlFor="current-password">Current password</FieldLabel><Input id="current-password" name="current" type="password" autoComplete="current-password" required/></Field><Field><FieldLabel htmlFor="new-password">New password</FieldLabel><Input id="new-password" name="next" type="password" autoComplete="new-password" minLength={12} maxLength={256} required/></Field></FieldGroup><Button type="submit" size="sm" disabled={change.isPending}>Change password and sign out</Button><Message error={change.error}/></form></details>
-}
-function textType(type: string | string[] | undefined) {
-  return type === 'string' || Array.isArray(type) && type.length === 2 && type.includes('null') && type.includes('string')
-}
-const viewQuerySchema=z.object({from:z.string(),where:z.string().optional(),derive:z.record(z.string(),z.string()).optional(),group:z.array(z.string()).nullable().optional(),agg:z.record(z.string(),z.string()).optional(),sort:z.array(z.string()).nullable().optional(),limit:z.number().optional(),as:z.string().optional(),key:z.string().optional(),value:z.string().optional(),n:z.string().optional(),hide_zero:z.boolean().optional()}).passthrough()
-function viewQuery(text:string) {try {const result=viewQuerySchema.safeParse(JSON.parse(text));return result.success ? result.data : undefined} catch {return undefined}}
-function ToolConsole({ session }: { session: Session }) {
-  const client = useQueryClient()
-  const catalog = useQuery({ queryKey: ['tool-catalog', session.user.id], queryFn: () => listTools(session) })
-  const [name, setName] = useState('')
-  const [parseError, setParseError] = useState('')
-  const [expression, setExpression] = useState('')
-  const [database, setDatabase] = useState('')
-  const [queryText, setQueryText] = useState('')
-  const run = useMutation({ mutationFn: ({toolName,args}: {toolName:string;args:Record<string,unknown>;readOnly:boolean}) => invokeTool(session, toolName, args), onSettled: async (_result,_error,variables) => { if(!variables.readOnly) await client.invalidateQueries({predicate:query => query.queryKey[1]===session.user.id && query.queryKey[0]!=='tool-catalog'}) } })
-  const selected: ToolInfo | undefined = catalog.data?.find((item) => item.name === name)
-  const formulaKey = name === 'expr_eval' ? 'expr' : ['db_query', 'db_delete_rows', 'tags_set'].includes(name) ? 'where' : ''
-  const view = name==='view_upsert' ? viewQuery(queryText) : undefined
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const data = new FormData(event.currentTarget)
-    const args: Record<string, unknown> = {}
-    try {
-      for (const [key, schema] of Object.entries(selected?.inputSchema.properties ?? {})) {
-        const value = key === formulaKey ? expression : data.get(key)
-        if (value === null || value === '') continue
-        if (textType(schema.type)) args[key] = value
-        else args[key] = JSON.parse(String(value)) as unknown
-      }
-      if (name === 'expr_eval' && !expression.trim()) { setParseError('Enter an expression.'); return }
-      setParseError('')
-      run.mutate({toolName:name,args,readOnly:selected?.annotations?.readOnlyHint===true})
-    } catch { setParseError('Enter valid JSON for non-text values.') }
-  }
-  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setExpression(''); setDatabase(''); setQueryText(''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={key === formulaKey ? undefined : `tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel>{key === formulaKey ? <FormulaInput session={session} label={key} role={key === 'where' ? 'where' : 'value'} from={name === 'tags_set' ? 'journal' : database ? `table:${database}` : undefined} value={expression} onChange={setExpression}/> : <Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={textType(schema.type) ? undefined : 'JSON value'} value={name==='view_upsert' && key==='query' ? queryText : undefined} onChange={name==='view_upsert' && key==='query' ? event => setQueryText(event.target.value) : key === 'db' && formulaKey === 'where' ? event => setDatabase(event.target.value) : undefined} />}{name==='view_upsert' && key==='query' && <details onToggle={event => {if(event.currentTarget.open && !queryText) setQueryText('{"from":"journal"}')}}><summary>Edit view query</summary>{view ? <QueryEditor fixed session={session} spec={{id:'view',title:'View',version:1,data:{view},pages:[],components:[]}} onChange={spec => setQueryText(JSON.stringify(spec.data.view))}/> : <p>Enter a valid query object to edit its expressions.</p>}</details>}<p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
+ const {session}=Route.useRouteContext(),data=useQuery(settingsQuery(session))
+ describePage({title:'Settings',lines:[]})
+ return <><header className="page-header"><div><h1>Settings</h1><p className="description">Your account and the agents working for you.</p></div></header>
+  <div className="settings-layout">
+   <section className="settings-section"><Theme/></section>
+   {data.error ? <RouteError error={data.error} reset={() => void data.refetch()} title="Settings didn’t load"/> : !data.data ? <RowsSkeleton rows={6}/> : <><Agents session={session} data={data.data}/><Feeds data={data.data}/>{session.user.is_admin && <Invite session={session}/>}</>}
+   <SavedViews session={session}/>
+   <Account session={session}/>
+  </div>
+ </>
 }

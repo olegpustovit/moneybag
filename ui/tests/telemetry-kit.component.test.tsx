@@ -64,7 +64,7 @@ describe('LegacyChart keeps what tests/chart.component.test.tsx pins down',() =>
  it('sorts a categorical bar into ranked bars and drills to the journal',() => {
   render(<LegacyChart drilldown value={{type:'chart',title:'Cats',mark:'bar',x:{field:'account',kind:'category'},y_format:'int',series:[{name:'',color_index:0}],points:[{x:'expenses:small',series:'',y:1},{x:'expenses:big',series:'',y:9}]}}/>)
   const buttons=screen.getAllByRole('button').filter(b => b.getAttribute('aria-label')?.startsWith('See entries'));expect(buttons[0].getAttribute('aria-label')).toContain('expenses:big')
-  fireEvent.click(buttons[0]);expect(navigate).toHaveBeenCalledWith({to:'/journal',search:{account:'expenses:big'}})
+  fireEvent.click(buttons[0]);expect(navigate).toHaveBeenCalledWith({to:'/ledger',search:{t:undefined,accounts:['expenses:big']}})
  })
  it('uses a category axis when x is not a date and states an empty chart',async () => {
   const {unmount}=render(<LegacyChart value={{type:'chart',title:'Plans',mark:'line',x:{field:'month',kind:'number'},y_format:'mo',series:[{name:'',color_index:0}],points:[{x:'0',series:'',y:1},{x:'1',series:'',y:2}]}}/>)

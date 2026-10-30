@@ -1,12 +1,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
-import { DashboardList } from '../features/dashboard/dashboard-list'
-import { dashboardsQuery } from '../lib/queries'
+import { homeDashboard } from '../features/telemetry/nav'
 
-export const Route = createFileRoute('/_app/')({
-  beforeLoad: async ({context}) => {
-    const dashboards=await context.queryClient.query({...dashboardsQuery(context.session),staleTime:'static'})
-    const first=dashboards.items?.[0]
-    if(first)throw redirect({to:'/dashboards/$id',params:{id:first.id},replace:true})
-  },
-  component: DashboardList,
+export const Route=createFileRoute('/_app/')({
+ beforeLoad:({context}) => {const home=homeDashboard(context.bootstrap.dashboards);if(home)throw redirect({to:'/dashboards/$id',params:{id:home.id},replace:true})},
+ component:() => <div className="empty"><h1>Nothing here yet</h1><p>Agents build your pages. Connect one from Settings and ask it to set up a dashboard, and it will appear here.</p></div>,
 })

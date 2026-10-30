@@ -39,6 +39,10 @@ type CubeBalances struct {
 	Liabilities    []int64 `json:"liabilities"`
 	EstimatedUntil string  `json:"estimated_until,omitempty"`
 }
+type CubeAlias struct {
+	Pattern string `json:"pattern"`
+	Name    string `json:"name"`
+}
 type CubeRate struct {
 	D []int     `json:"d"`
 	V []float64 `json:"v"`
@@ -58,6 +62,8 @@ type Cube struct {
 	Metrics     []Metric            `json:"metrics"`
 	Annotations []Annotation        `json:"annotations"`
 	Labels      map[string]string   `json:"labels"`
+	// Aliases let the browser show a bank's payee text under its readable name wherever it lists raw entries.
+	Aliases []CubeAlias `json:"aliases,omitempty"`
 	// Unvalued counts postings in a commodity with no quote; they carry v=0, and exact figures come from metric_query.
 	Unvalued int `json:"unvalued,omitempty"`
 }
@@ -151,6 +157,13 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 	}
 	if out.Annotations, e = s.Annotations(ctx, p, "trips", "", ""); e != nil {
 		return Cube{}, e
+	}
+	aliases, e := list[PayeeAlias](ctx, s.repo.db.Collection("payee_aliases"), p.UserID, "pattern")
+	if e != nil {
+		return Cube{}, e
+	}
+	for _, alias := range aliases {
+		out.Aliases = append(out.Aliases, CubeAlias{alias.Pattern, alias.Name})
 	}
 	return out, nil
 }

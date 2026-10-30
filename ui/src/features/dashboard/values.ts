@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 const tone = z.string().optional()
 const cell = z.object({ v: z.unknown(), t: z.string(), tone })
-const column = z.object({ key: z.string(), label: z.string(), format: z.string(), align: z.string() })
+const column = z.object({ key: z.string(), label: z.string(), format: z.string(), align: z.string(), type: z.string().optional(), total: z.boolean().optional() })
 const base = { title: z.string().optional() }
 export const componentValue = z.discriminatedUnion('type', [
   z.object({ ...base, type: z.literal('kpi'), value: z.unknown(), text: z.string(), tone: z.string(), sub: z.string(), sub_text: z.string().optional(), delta: z.object({ text: z.string(), direction: z.enum(['up','down','unchanged','neutral']) }).optional(), sparkline: z.array(z.number().finite()).max(600).optional(), sparkline_text: z.array(z.string()).max(600).optional() }),
