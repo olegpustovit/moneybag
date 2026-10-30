@@ -7,7 +7,7 @@
     "dev": "vite",
     "lint": "oxlint",
     "typecheck": "tsc -b --noEmit",
-    "test": "bun run tests/date-range.test.ts && bun run tests/chart-data.test.ts && bun run tests/table-total.test.ts && bun run tests/decimal-sort.test.ts && bun run tests/journal-totals.test.ts && bun run tests/format.test.ts",
+    "test": "bun run tests/date-range.test.ts && bun run tests/date-params.test.ts && bun run tests/chart-data.test.ts && bun run tests/table-total.test.ts && bun run tests/decimal-sort.test.ts && bun run tests/journal-totals.test.ts && bun run tests/format.test.ts",
     "build": "vite build && tsc -b --noEmit && bun scripts/check-size.ts && bun scripts/precompress.ts",
     "preview": "vite preview",
     "tools": "bash scripts/generate-tools.sh"

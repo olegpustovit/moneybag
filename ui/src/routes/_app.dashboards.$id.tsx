@@ -7,6 +7,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { DashboardActions } from '../features/dashboard/actions'
 import { DashboardEditor } from '../features/dashboard/editor'
 import { DateRange } from '../features/dashboard/date-range'
+import { dateParams } from '../features/dashboard/date-params'
 import { componentValue } from '../features/dashboard/values'
 import { Component } from '../features/dashboard/component'
 import { DashboardSkeleton } from '../features/dashboard/skeleton'
@@ -17,7 +18,6 @@ import { agentsQuery, dashboardPreviewQuery, dashboardSpecQuery, dashboardsQuery
 
 const validDate=(value:string) => /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) && new Date(`${value}T00:00:00Z`).toISOString().slice(0,10)===value
 const date = z.string().refine(value => value==='' || validDate(value)).optional().catch(undefined)
-function readsParam(value:unknown,key:'from'|'to'|'month'):boolean {if(typeof value==='string')return new RegExp(`\\bparams\\s*(?:\\.\\s*${key}\\b|\\[\\s*['"]${key}['"]\\s*\\])`).test(value);if(Array.isArray(value))return value.some(item => readsParam(item,key));if(value && typeof value==='object')return Object.values(value).some(item => readsParam(item,key));return false}
 const searchSchema = z.object({ sort:tableSort, sort_table:z.string().max(200).optional().catch(undefined), version: z.enum(['draft','published']).optional().catch(undefined), edit: z.union([z.literal('1'),z.literal(1)]).transform(() => '1' as const).optional().catch(undefined), page: z.string().optional().catch(undefined), from: date, to: date, all: z.boolean().optional().catch(undefined), month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/).optional().catch(undefined) })
 export const Route = createFileRoute('/_app/dashboards/$id')({
   validateSearch: searchSchema,
@@ -70,9 +70,7 @@ function Dashboard() {
   const page = pages.find((item) => item.id === search.page) ?? pages[0]
   const components = new Map((dashboard.spec.components ?? []).map((item) => [item.id, item]))
   const tableCount=(page?.layout ?? []).flatMap(row => row.cols ?? []).filter(item => {const type=components.get(item.component)?.type;return type==='table' || type==='scenario_compare' || type==='chart'}).length
-  const reads={data:dashboard.spec.data,computed:dashboard.spec.computed,components:dashboard.spec.components}
-  const range = readsParam(reads,'from') || readsParam(reads,'to')
-  const month = readsParam(reads,'month')
+  const {range,month} = dateParams(dashboard.spec)
   return <>
     <header className="page-header"><div><p className="breadcrumb"><Link to="/">DASHBOARDS</Link> / {id}</p><h1>{dashboard.spec.title}</h1><p className="description"><span className="version-badge">{dashboard.status === 'published' ? 'Published' : 'Draft'} v{dashboard.version}</span>{dashboard.author.id && <> · {dashboard.status==='published' ? 'Published' : 'Edited'} by {author}</>}{publishedAt && <> · <time dateTime={dashboard.published_at || undefined} title={new Date(dashboard.published_at!).toLocaleString()}>{publishedAt}</time></>}</p></div>
       <div className="dashboard-toolbar">{head && head.published_version > 0 && head.draft_version > 0 && <label>Version <select value={version} onChange={(event) => void navigate({ search: (old) => ({ ...old, version: event.target.value === 'draft' ? 'draft' : 'published' }) })}><option value="published">Published</option><option value="draft">Draft</option></select></label>}<Button size="sm" onClick={() => {setSelected(undefined);void navigate({search:(old) => ({...old,edit:'1',version:head?.draft_version ? 'draft' : 'published'})})}}>Edit</Button><DashboardActions session={session} id={id} head={head} onPublished={() => {void navigate({search:(old) => ({...old,version:'published',edit:undefined})});void router.invalidate()}} onUndoPublication={() => {void navigate({search:(old) => ({...old,version:'draft',edit:undefined})});void router.invalidate()}}/></div>
