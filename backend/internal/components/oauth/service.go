@@ -418,7 +418,9 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 		{{Key: "$match", Value: bson.M{"grant.revoked": false, "grant.expires_at": bson.M{"$gt": now}}}},
 		// Authentication needs the current user existence check as well as the current grant.
 		{{Key: "$lookup", Value: bson.M{"from": "users", "localField": "grant.user_id", "foreignField": "_id", "pipeline": mongo.Pipeline{{{Key: "$project", Value: bson.M{"_id": 1, "is_admin": 1, "disabled": 1}}}}, "as": "users"}}},
-		{{Key: "$project", Value: bson.M{"token": 1, "grant": 1, "users": 1}}},
+		// The emergency stop travels in the same read, so a token check stays one command.
+		{{Key: "$lookup", Value: bson.M{"from": "settings", "pipeline": mongo.Pipeline{{{Key: "$match", Value: bson.M{"_id": "agents_suspended"}}}, {{Key: "$project", Value: bson.M{"_id": 1}}}}, "as": "suspension"}}},
+		{{Key: "$project", Value: bson.M{"token": 1, "grant": 1, "users": 1, "suspension": 1}}},
 	}
 	// The unique token lookup returns at most one row; a two-row batch exhausts the cursor.
 	cursor, err := s.repo.db.Collection("oauth_tokens").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(2))
@@ -434,6 +436,7 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 			Admin    bool   `bson:"is_admin"`
 			Disabled bool   `bson:"disabled"`
 		} `bson:"users"`
+		Suspension []bson.M `bson:"suspension"`
 	}
 	if !cursor.Next(ctx) || cursor.Decode(&result) != nil || result.Grant.Resource != resource {
 		return principal.Principal{}, principal.ErrForbidden
@@ -444,11 +447,7 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 	if result.Users[0].Disabled {
 		return principal.Principal{}, principal.ErrForbidden
 	}
-	suspended, err := s.Suspended(ctx)
-	if err != nil {
-		return principal.Principal{}, principal.ErrForbidden
-	}
-	if suspended {
+	if len(result.Suspension) > 0 {
 		return principal.Principal{}, ErrAgentsSuspended
 	}
 	scopes := result.Grant.Scopes

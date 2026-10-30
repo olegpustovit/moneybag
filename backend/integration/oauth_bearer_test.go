@@ -75,6 +75,15 @@ func TestBearerOneRead(t *testing.T) {
 	}
 	check("wrong", resource, principal.ErrForbidden)
 	check("token", resource+"/readonly", principal.ErrForbidden)
+	if err := service.SetSuspended(ctx, user, true); err != nil {
+		t.Fatal(err)
+	}
+	check("token", resource, oauth.ErrAgentsSuspended)
+	check("wrong", resource, principal.ErrForbidden) // A bad token learns nothing about the stop.
+	if err := service.SetSuspended(ctx, user, false); err != nil {
+		t.Fatal(err)
+	}
+	check("token", resource, nil)
 	update := func(collection string, filter bson.M, update bson.M) {
 		t.Helper()
 		if _, err := db.Collection(collection).UpdateOne(ctx, filter, update); err != nil {
