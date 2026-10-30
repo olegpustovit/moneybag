@@ -494,8 +494,7 @@ func New(s Services, opts Options) *mcp.Server {
 			if e != nil {
 				return dashboard.EditResult{}, e
 			}
-			v, e := access.Dashboard.PatchPreview(ctx, access.Principal, access.ID, ops)
-			return dashboard.EditResult{Validation: v}, e
+			return access.Dashboard.PatchPreview(ctx, access.Principal, access.ID, ops)
 		}
 		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
 			return access.Dashboard.Patch(tx, access.Principal, access.ID, ops)

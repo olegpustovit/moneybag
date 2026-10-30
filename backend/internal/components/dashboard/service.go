@@ -427,28 +427,29 @@ func (s *Service) Patch(ctx context.Context, p principal.Principal, id string, o
 }
 
 // PatchPreview applies ops to the current draft in memory and validates the result without writing.
-func (s *Service) PatchPreview(ctx context.Context, p principal.Principal, id string, ops json.RawMessage) (Validation, error) {
+func (s *Service) PatchPreview(ctx context.Context, p principal.Principal, id string, ops json.RawMessage) (EditResult, error) {
 	patch, e := decodePatch(ops)
 	if e != nil {
-		return Validation{}, e
+		return EditResult{}, e
 	}
 	old, e := s.Get(ctx, p, id, "")
 	if e != nil {
-		return Validation{}, e
+		return EditResult{}, e
 	}
 	encoded, e := json.Marshal(old.Spec)
 	if e != nil {
-		return Validation{}, e
+		return EditResult{}, e
 	}
 	var spec Spec
 	if e = json.Unmarshal(encoded, &spec); e != nil {
-		return Validation{}, e
+		return EditResult{}, e
 	}
 	if e = applyPatch(&spec, patch); e != nil {
-		return Validation{}, e
+		return EditResult{}, e
 	}
 	spec.ID = id
-	return s.ValidateSpec(ctx, p, spec)
+	v, e := s.ValidateSpec(ctx, p, spec)
+	return EditResult{DraftVersion: old.Version, Validation: v}, e
 }
 
 func decodePatch(ops json.RawMessage) (jsonpatch.Patch, error) {
