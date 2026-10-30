@@ -165,6 +165,9 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 			}
 			return nil, zero, e
 		}
+		if c, ok := any(out).(contentOutput); ok {
+			return &mcp.CallToolResult{Content: c.content()}, out, nil
+		}
 		return nil, out, nil
 	})
 }
@@ -503,6 +506,39 @@ func New(s Services, opts Options) *mcp.Server {
 			result.EventID = ""
 		}
 		return result, err
+	})
+	add(r, "dashboard_render", "dashboard", "ledger:read", "Use this to see a published or draft dashboard as an image of the real page, with its validation. Fix validation errors first; the image appears once the renderer is configured.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (renderOutput, error) {
+		v, e := versionRef(in.Version)
+		if e != nil {
+			return renderOutput{}, e
+		}
+		access, e := s.Sharing.Access(ctx, p, in.ID, false)
+		if e != nil {
+			return renderOutput{}, e
+		}
+		rendered, e := access.Dashboard.Preview(ctx, access.Principal, access.ID, v, nil)
+		if e == nil && access.Grant != nil {
+			e = s.Sharing.RecordEditorRead(ctx, p, access)
+		}
+		if e != nil {
+			return renderOutput{}, e
+		}
+		out := renderOutput{Validation: rendered.Validation}
+		if !rendered.Validation.OK {
+			out.Message = "fix validation errors before rendering"
+			return out, nil
+		}
+		if s.Previews == nil {
+			out.Message = "image unavailable: renderer not configured"
+			return out, nil
+		}
+		png, e := s.Previews.PNG(ctx, rendered.HTML)
+		if e != nil {
+			out.Message = "image unavailable: " + e.Error()
+			return out, nil
+		}
+		out.PNG = png
+		return out, nil
 	})
 	add(r, "dashboard_validate", "dashboard", "ledger:read", "Use this before preview or publish. Compiles every CEL expression, evaluates all rows, checks layout references and renders every component within the server budget.", true, false, func(ctx context.Context, p principal.Principal, in DashboardInput) (dashboard.Validation, error) {
 		v, e := versionRef(in.Version)

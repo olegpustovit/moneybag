@@ -61,6 +61,12 @@ func (s *Service) Create(p principal.Principal, body string, grant *sharing.Gran
 	}
 	return s.url + "/previews/" + id + ".html", png, nil
 }
+func (s *Service) PNG(ctx context.Context, html string) ([]byte, error) {
+	if s.renderer == nil {
+		return nil, fmt.Errorf("PNG renderer is unavailable")
+	}
+	return s.renderer.PNG(ctx, html)
+}
 func (s *Service) Read(ctx context.Context, p principal.Principal, id string, png bool) ([]byte, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
