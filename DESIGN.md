@@ -13,7 +13,7 @@ colors:
   hover: "#f1f2f4"
   ink: "#111214"
   c0: "#2f6bff"
-  c1: "#c48a00"
+  c1: "#a87700"
   c2: "#0f97ad"
   c3: "#8b5ad6"
   c4: "#dc6327"
@@ -186,7 +186,8 @@ Neutral paper and recessed surfaces carry most of the interface; color identifie
 
 ### Tertiary
 
-- **Cyan, violet and orange** (`c2`, `c3`, `c4`): subsequent chart series. The renderer cycles through `c0` to `c4`; legends preserve the series names.
+- **Cyan, violet and orange** (`c2`, `c3`, `c4`): subsequent chart series. A category keeps one colour across every chart, range and filter; legends preserve the series names.
+- **Other and estimate marks** (`--series-other`, `--hatch`): folded series use a chart gray that holds 3:1, and estimates use a hatch of `--hatch`, so modeled numbers never read as recorded ones.
 
 ### Neutral
 

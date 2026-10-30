@@ -12,6 +12,9 @@
   --color-destructive: var(--neg); --color-border: var(--bd); --color-input: var(--bd); --color-ring: var(--focus);
   --color-chart-1: var(--c0); --color-chart-2: var(--c1); --color-chart-3: var(--c2); --color-chart-4: var(--c3); --color-chart-5: var(--c4);
 }
+/* Chart marks need 3:1 on paper and on the recessed surface; tests/palette.test.ts reads these values. --other stays the lighter scrollbar gray. */
+:root { --series-other:#858a93; --hatch:#858a93; }
+.dark { --series-other:#7d838d; --hatch:#8f95a0; }
 * { box-sizing:border-box; }
 body { margin:0; min-width:320px; }
 ::selection { background:var(--sel); }

@@ -42,7 +42,8 @@ function point(raw:string,end:boolean,today:number):Point|null {
  if(s==='yesterday')return fixed(today-DAY)
  if((m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)))return fixed(validDay(+m[1],+m[2]-1,+m[3]) ? utc(+m[1],+m[2]-1,+m[3]) : null)
  if((m=s.match(/^(\d{4})-(\d{1,2})$/))){const y=+m[1],i=+m[2]-1;return i<0 || i>11 ? null : fixed(end ? eom(y,i) : utc(y,i,1))}
- if((m=s.match(/^(\d{4})[- ]?q([1-4])$/) ?? s.match(/^q([1-4])[- ](\d{4})$/)?.map((_,i,a) => i===1 ? a[2] : i===2 ? a[1] : a[0]) ?? null)){const y=+m[1],i=(+m[2]-1)*3;return fixed(end ? eom(y,i+2) : utc(y,i,1))}
+ if((m=s.match(/^(\d{4})[- ]?q([1-4])$/))){const y=+m[1],i=(+m[2]-1)*3;return fixed(end ? eom(y,i+2) : utc(y,i,1))}
+ if((m=s.match(/^q([1-4])[- ](\d{4})$/))){const y=+m[2],i=(+m[1]-1)*3;return fixed(end ? eom(y,i+2) : utc(y,i,1))}
  if((m=s.match(/^(\d{4})$/)))return fixed(end ? utc(+m[1],11,31) : utc(+m[1],0,1))
  const dayMonth=s.match(/^(\d{1,2})\s+([a-z]+)(?:,?\s+(\d{4}))?$/),monthDay=s.match(/^([a-z]+)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/)
  if(dayMonth || monthDay){const day=+(dayMonth ? dayMonth[1] : monthDay![2]),i=monthIndex(dayMonth ? dayMonth[2] : monthDay![1]),y=dayMonth ? dayMonth[3] : monthDay![3];if(i<0)return null

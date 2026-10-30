@@ -23,7 +23,7 @@ export type Cube={revision:number;asOf:string;base:string;startMs:number;endMs:n
 export type Totals={in:number;out:number;net:number;estimated:number;entries:number}
 export type SeriesOut={key:string;label:string;color:string;values:Float64Array;estimated?:boolean}
 export type Timeseries={bucket:Bucket;xs:number[];series:SeriesOut[];total:Float64Array}
-export type Contributor={key:string;label:string;now:number;then:number;delta:number;share:number}
+export type Contributor={key:string;label:string;now:number;before:number;delta:number;share:number}
 export type Suggestion={value:string;label:string;count:number;total:number}
 export type Fact={kind:string;sentence:string;value?:number;text?:string;direction?:'up'|'down'|'flat';good?:boolean|null;contributors?:{name:string;key?:string;delta:number;text:string;share:number}[]}
 
@@ -152,7 +152,7 @@ const groupSum=(c:Cube,q:Query,row:Int32Array,size:number,measure:Measure) => {
 export function whatMoved(c:Cube,q:Query,win:CompareWindow|null,{by='category',measure='spending',limit=7}:{by?:Dimension;measure?:Measure;limit?:number}={}):Contributor[] {
  const {values,row}=dim(c,by),now=groupSum(c,q,row,values.length,measure),then=win?.available ? groupSum(c,{range:win,pills:q.pills},row,values.length,measure) : null
  let moved=0;const rows:Contributor[]=[]
- values.forEach((value,i) => {const b=then ? then[i] : 0,delta=now[i]-b;if(now[i]===0 && b===0)return;moved+=Math.abs(then ? delta : now[i]);rows.push({key:value,label:label(c,value),now:now[i],then:b,delta,share:0})})
+ values.forEach((value,i) => {const b=then ? then[i] : 0,delta=now[i]-b;if(now[i]===0 && b===0)return;moved+=Math.abs(then ? delta : now[i]);rows.push({key:value,label:label(c,value),now:now[i],before:b,delta,share:0})})
  for(const r of rows)r.share=moved ? Math.abs(then ? r.delta : r.now)/moved : 0
  return rows.sort((x,y) => then ? Math.abs(y.delta)-Math.abs(x.delta) : y.now-x.now).slice(0,limit)
 }

@@ -36,7 +36,7 @@ export function unitFormat(unit:Unit,{minor=false,code}:{minor?:boolean;code?:st
 }
 // Legacy `y_format` strings keep their server-matching tooltip text and gain a unit-aware axis.
 export function legacyFormat(format:string):ValueFormat {
- const base=/^usd/.test(format) ? 'usd' : /^eur/.test(format) ? 'eur' : /^pct/.test(format) ? 'pct' : format==='mo' ? 'mo' : format==='int' ? 'int' : format==='days' ? 'days' : format==='rate' ? 'rate' : 'number'
+ const base=format.startsWith('usd') ? 'usd' : format.startsWith('eur') ? 'eur' : format.startsWith('pct') ? 'pct' : format==='mo' ? 'mo' : format==='int' ? 'int' : format==='days' ? 'days' : format==='rate' ? 'rate' : 'number'
  return {...unitFormat(base),full:value => chartNumber(value,format)}
 }
 const SHORT_MONTH=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']

@@ -66,7 +66,7 @@ assert.equal(compareTotals(c,{range:jan},compareWindow(jan,'previous_period',c.b
 assert.deepEqual(compareSeries(c,{range:feb},win,{bucket:'month'}),[1400])
 assert.equal(compareSeries(c,{range:jan},compareWindow(jan,'previous_period',c.bounds)),null)
 const moved=whatMoved(c,{range:feb},win)
-assert.deepEqual(moved.map(x => [x.key,x.now,x.then,x.delta]),[['Food',2500,1000,1500],['Fun',0,400,-400],['Salary',0,0,0]].filter(x => x[0]!=='Salary'))
+assert.deepEqual(moved.map(x => [x.key,x.now,x.before,x.delta]),[['Food',2500,1000,1500],['Fun',0,400,-400],['Salary',0,0,0]].filter(x => x[0]!=='Salary'))
 assert.equal(moved[0].share,1500/1900)
 assert.deepEqual(whatMoved(c,{range:all},null,{limit:1}).map(x => x.key),['Estimated'])
 assert.deepEqual(whatMoved(c,{range:all},null,{by:'payee',limit:1}).map(x => [x.key,x.now]),[['Lidl',5700]])
