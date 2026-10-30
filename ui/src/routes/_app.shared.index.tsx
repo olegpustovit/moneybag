@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { useMutation, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { Button } from '../components/ui/button'
+import { LoadingTable } from '../components/loading-table'
 import { ownedQuery, receivedQuery } from '../features/sharing/queries'
 import { tool, type Session } from '../lib/api'
 import type { DashboardSharesListOutput } from '../lib/tools'
 
 type Share=NonNullable<DashboardSharesListOutput['items']>[number]
-export const Route=createFileRoute('/_app/shared/')({loader:async ({context}) => {await Promise.all([context.queryClient.query({...receivedQuery(context.session),staleTime:'static'}),context.queryClient.query({...ownedQuery(context.session),staleTime:'static'})])},pendingComponent:() => <section aria-busy="true"><h1>Shared dashboards</h1><p>Loading shares…</p></section>,errorComponent:SharedError,component:Shared})
-function SharedError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Could not load shared dashboards</h1><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
+export const Route=createFileRoute('/_app/shared/')({loader:async ({context}) => {await Promise.all([context.queryClient.query({...receivedQuery(context.session),staleTime:'static'}),context.queryClient.query({...ownedQuery(context.session),staleTime:'static'})])},pendingMs:150,pendingMinMs:300,pendingComponent:SharedPending,errorComponent:SharedError,component:Shared})
+function SharedPending() {return <section role="status" aria-busy="true"><span className="sr-only">Loading shares…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SHARED</p><h1>Shared dashboards</h1><p className="description">Dashboards shared with you and access you have granted.</p></div></header><div aria-hidden="true"><section className="import-panel"><h2>Shared with you</h2><LoadingTable columns={['Dashboard','Owner','Access','Expires','Status']}/></section><section className="import-panel"><h2>Shared by you</h2><LoadingTable columns={['Dashboard','Recipient','Access','Expires','Status','Actions']}/></section></div></section>}
+function SharedError({error,reset}:{error:unknown;reset:() => void}) {const router=useRouter();return <section className="dashboard-error" role="alert"><h1>Could not load shared dashboards</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button></section>}
 function status(share:Share) {return share.revoked_at ? 'Revoked' : share.expires_at && Date.parse(share.expires_at)<=Date.now() ? 'Expired' : 'Active'}
 function Shared() {
  const {session}=Route.useRouteContext(),{data:received}=useSuspenseQuery(receivedQuery(session)),{data:owned}=useSuspenseQuery(ownedQuery(session))
