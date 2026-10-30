@@ -19,11 +19,12 @@ type snapshotKey struct {
 	generation                    uint64
 }
 type snapshotFlight struct {
-	done     chan struct{}
-	value    any
-	err      error
-	volatile bool
-	expires  time.Time
+	done      chan struct{}
+	value     any
+	err       error
+	volatile  bool
+	abandoned bool
+	expires   time.Time
 }
 type snapshotItem struct {
 	value   any
@@ -129,6 +130,12 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-flight.done:
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if flight.abandoned {
+				return s.read(ctx, p, kind, name, params, build, cacheable)
+			}
 			if flight.err == nil && !flight.expires.IsZero() && !time.Now().Before(flight.expires) {
 				return s.read(ctx, p, kind, name, params, build, cacheable)
 			}
@@ -153,6 +160,7 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 		}
 	}()
 	flight.value, flight.err = build()
+	flight.abandoned = ctx.Err() != nil
 	flight.volatile = expressions.Volatile(ctx)
 	flight.expires = expressions.Expiry(ctx)
 	canStore := cacheable == nil || flight.err == nil && cacheable(flight.value)

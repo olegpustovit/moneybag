@@ -2,6 +2,8 @@ package dashboard
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -136,6 +138,79 @@ func TestSnapshotsCoalesceConcurrentReads(t *testing.T) {
 	wg.Wait()
 	if builds.Load() != 1 {
 		t.Fatalf("concurrent builds: %d", builds.Load())
+	}
+}
+
+type observingContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *observingContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func TestSnapshotWaiterRetriesCancelledLeader(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	leader, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := cache.read(leader, p, "source", "rows", nil, func() (any, error) { close(started); <-leader.Done(); return nil, leader.Err() }, nil)
+		leaderDone <- err
+	}()
+	<-started
+	waiterCtx := &observingContext{Context: context.Background(), observed: make(chan struct{})}
+	waiterDone := make(chan error, 1)
+	go func() {
+		value, err := cache.read(waiterCtx, p, "source", "rows", nil, func() (any, error) { return 42, nil }, nil)
+		if err == nil && value != 42 {
+			err = fmt.Errorf("unexpected value: %v", value)
+		}
+		waiterDone <- err
+	}()
+	<-waiterCtx.observed
+	cancel()
+	if err := <-leaderDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("leader: %v", err)
+	}
+	if err := <-waiterDone; err != nil {
+		t.Fatalf("waiter: %v", err)
+	}
+}
+
+func TestSnapshotCancelledWaiterDoesNotCancelLeader(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	started, release := make(chan struct{}), make(chan struct{})
+	leaderDone := make(chan error, 1)
+	go func() {
+		_, err := cache.read(context.Background(), p, "source", "rows", nil, func() (any, error) { close(started); <-release; return 42, nil }, nil)
+		leaderDone <- err
+	}()
+	<-started
+	waiter, cancel := context.WithCancel(context.Background())
+	waiterCtx := &observingContext{Context: waiter, observed: make(chan struct{})}
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, err := cache.read(waiterCtx, p, "source", "rows", nil, func() (any, error) { return nil, fmt.Errorf("unexpected rebuild") }, nil)
+		waiterDone <- err
+	}()
+	<-waiterCtx.observed
+	cancel()
+	if err := <-waiterDone; !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiter: %v", err)
+	}
+	close(release)
+	if err := <-leaderDone; err != nil {
+		t.Fatalf("leader: %v", err)
+	}
+	value, err := cache.read(context.Background(), p, "source", "rows", nil, func() (any, error) { return nil, fmt.Errorf("unexpected rebuild") }, nil)
+	if err != nil || value != 42 {
+		t.Fatalf("cached: %v, %v", value, err)
 	}
 }
 
