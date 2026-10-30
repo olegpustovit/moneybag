@@ -115,8 +115,8 @@ func (s *Service) computeStart(ctx context.Context, p principal.Principal, asOf 
 		pr.RatesUsed = append(pr.RatesUsed, rateOf(gq[0]))
 		live["gold_usd_g"] = gq[0].Value.Float()
 	}
-	if head, e := s.Ledger.Entries(ctx, p, ledger.EntriesInput{Limit: 1}); e == nil && len(head.Items) > 0 {
-		pr.JournalSeq = head.Items[0].Seq
+	if seq, e := s.Ledger.LatestSequence(ctx, p); e == nil {
+		pr.JournalSeq = seq
 	}
 	pr.StartSource = "ledger"
 	return live, pr, nil

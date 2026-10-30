@@ -537,6 +537,14 @@ func TestCombinedJournalParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "latest-draft", Seq: 30000, Date: "2026-03-01", Status: "draft", Kind: "entry"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, err := sources.Ledger.Entries(ctx, p, ledger.EntriesInput{Limit: 1})
+	if err != nil || len(head.Items) != 1 || head.Items[0].Seq != 30000 {
+		t.Fatal("synthetic draft head missing")
+	}
 	dates := []string{"2025-12-31", "2026-01-01", "2026-02-28"}
 	expected, err := sources.Ledger.BalanceSeries(ctx, p, dates, historyValuer{})
 	if err != nil {
@@ -556,22 +564,24 @@ func TestCombinedJournalParity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shared := ledger.WithBalanceSeries(ledger.WithCombinedJournal(reqcache.With(ctx), dates), dates)
+	shared := ledger.WithCombinedHead(ledger.WithBalanceSeries(ledger.WithCombinedJournal(reqcache.With(ctx), dates), dates))
 	var got []ledger.BalancesResult
 	var fullShared, filteredShared string
-	var errs [3]error
+	var errs [4]error
+	var sequence int64
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(4)
 	go func() {
 		defer wg.Done()
 		got, errs[0] = sources.Ledger.BalanceSeries(shared, p, dates, historyValuer{})
 	}()
 	go func() { defer wg.Done(); fullShared, errs[1] = digest(shared, "", "", false) }()
 	go func() { defer wg.Done(); filteredShared, errs[2] = digest(shared, "2026-01-01", "2026-01-31", true) }()
+	go func() { defer wg.Done(); sequence, errs[3] = sources.Ledger.LatestSequence(shared, p) }()
 	wg.Wait()
 	a, _ := json.Marshal(expected)
 	b, _ := json.Marshal(got)
-	if errs[0] != nil || errs[1] != nil || errs[2] != nil || string(a) != string(b) || full != fullShared || filtered != filteredShared {
+	if errs[0] != nil || errs[1] != nil || errs[2] != nil || errs[3] != nil || sequence != head.Items[0].Seq || string(a) != string(b) || full != fullShared || filtered != filteredShared {
 		t.Fatalf("combined results differ: %v", errs)
 	}
 	current, err := sources.Ledger.Balances(shared, p, ledger.BalancesInput{At: dates[2]}, nil)
@@ -612,6 +622,27 @@ func TestCombinedJournalParity(t *testing.T) {
 	if err != nil || count != 0 || historyErr != nil || len(emptyHistory) != len(dates) {
 		t.Fatal("empty combined result failed")
 	}
+	if seq, err := sources.Ledger.LatestSequence(shared, empty); err != nil || seq != 0 {
+		t.Fatal("empty combined sequence failed")
+	}
+	if _, err := sources.Ledger.LatestSequence(shared, denied); err == nil {
+		t.Fatal("combined head bypassed authorization")
+	}
+	_, err = db.Collection("entry_tags").InsertOne(ctx, bson.M{"_id": p.UserID + ":later", "user_id": p.UserID, "tags": 123})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sources.Ledger.LatestSequence(ctx, p); err == nil {
+		t.Fatal("malformed second head fixture did not fail")
+	}
+	badCtx := ledger.WithCombinedHead(ledger.WithCombinedJournal(reqcache.With(ctx), dates))
+	if _, err := sources.Ledger.LatestSequence(badCtx, p); err == nil {
+		t.Fatal("combined head hid malformed overlay")
+	}
+	if _, err := db.Collection("entry_tags").DeleteOne(ctx, bson.M{"_id": p.UserID + ":later"}); err != nil {
+		t.Fatal(err)
+	}
+
 	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "duplicate-reversal", Seq: 20040, Date: "2026-01-01", Status: "posted", Kind: "reversal", Links: []ledger.Link{{Rel: "reverses", ID: "entry-00001"}}})
 	if err != nil {
 		t.Fatal(err)

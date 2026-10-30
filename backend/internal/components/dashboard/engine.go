@@ -548,19 +548,24 @@ func shareJournalSources(ctx context.Context, data map[string]Query, params map[
 	hasPosted, hasScenario := false, false
 	for _, q := range data {
 		hasPosted = hasPosted || q.From == "journal" || q.From == "effective_entries" || q.From == "postings"
-		hasScenario = hasScenario || strings.HasPrefix(q.From, "scenario:") || strings.HasPrefix(q.From, "forecast_series:")
+		hasScenario = hasScenario || q.From == "scenarios" || strings.HasPrefix(q.From, "scenario:") || strings.HasPrefix(q.From, "forecast_series:")
 	}
-	if !hasPosted {
+	fromBudget, toBudget, hasBudget := budget.MonthReadWindow(ctx)
+	dates, hasHistory := ctx.Value(balanceDatesKey{}).([]string)
+	if !hasPosted && !(hasScenario && (hasBudget || hasHistory)) {
 		return ctx
 	}
-	if from, to, ok := budget.MonthReadWindow(ctx); ok {
-		ctx = ledger.WithCombinedBudget(ctx, from, to)
+	if hasBudget {
+		ctx = ledger.WithCombinedBudget(ctx, fromBudget, toBudget)
 	}
-	if dates, ok := ctx.Value(balanceDatesKey{}).([]string); ok {
+	if hasScenario {
+		ctx = ledger.WithCombinedHead(ctx)
+	}
+	if hasHistory {
 		return ledger.WithCombinedJournal(ctx, dates)
 	}
 	if hasScenario {
-		dates := []string{time.Now().Format("2006-01-02")}
+		dates = []string{time.Now().Format("2006-01-02")}
 		return ledger.WithCombinedJournal(ledger.WithBalanceSeries(ctx, dates), dates)
 	}
 	return ctx
@@ -585,12 +590,13 @@ func sharePostedSources(ctx context.Context, data map[string]Query, params map[s
 }
 
 func shareBalanceHistory(ctx context.Context, data map[string]Query) context.Context {
-	var hasAccounts, hasHistory bool
+	var hasAccounts, hasHistory, hasScenario bool
 	for _, q := range data {
 		hasAccounts = hasAccounts || q.From == "accounts"
 		hasHistory = hasHistory || q.From == "balance_history"
+		hasScenario = hasScenario || q.From == "scenarios" || strings.HasPrefix(q.From, "scenario:") || strings.HasPrefix(q.From, "forecast_series:")
 	}
-	if !hasAccounts || !hasHistory {
+	if !hasHistory || !(hasAccounts || hasScenario) {
 		return ctx
 	}
 	dates := balanceHistoryDates(time.Now())
@@ -598,13 +604,14 @@ func shareBalanceHistory(ctx context.Context, data map[string]Query) context.Con
 }
 
 func shareBudgetMonths(ctx context.Context, data map[string]Query, params map[string]any) context.Context {
-	var hasLines, hasMonths, hasPosted bool
+	var hasLines, hasMonths, hasPosted, hasScenario bool
 	for _, q := range data {
 		hasLines = hasLines || q.From == "budget_lines"
 		hasMonths = hasMonths || q.From == "months"
 		hasPosted = hasPosted || q.From == "journal" || q.From == "effective_entries" || q.From == "postings"
+		hasScenario = hasScenario || q.From == "scenarios" || strings.HasPrefix(q.From, "scenario:") || strings.HasPrefix(q.From, "forecast_series:")
 	}
-	if !(hasLines && hasMonths || hasPosted && (hasLines || hasMonths)) {
+	if !(hasLines && hasMonths || (hasPosted || hasScenario) && (hasLines || hasMonths)) {
 		return ctx
 	}
 	month, _ := params["month"].(string)

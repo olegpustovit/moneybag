@@ -17,6 +17,7 @@ import (
 
 type combinedJournalKey struct{}
 type combinedBudgetKey struct{}
+type combinedHeadKey struct{}
 type combinedBudgetRange struct{ from, to string }
 
 // JournalMonthRow is a grouped expense amount for a date, account, currency and price.
@@ -34,6 +35,7 @@ type combinedJournal struct {
 	entries  []bson.Raw
 	balances [][]rawBalance
 	months   []JournalMonthRow
+	head     *Entry
 }
 
 // WithCombinedJournal lets journal and balance sources share a bounded database read.
@@ -58,6 +60,11 @@ func WithCombinedBudget(ctx context.Context, from, to string) context.Context {
 		return ctx
 	}
 	return context.WithValue(ctx, combinedBudgetKey{}, combinedBudgetRange{from, to})
+}
+
+// WithCombinedHead includes the latest journal sequence, including drafts, in a combined read.
+func WithCombinedHead(ctx context.Context) context.Context {
+	return context.WithValue(ctx, combinedHeadKey{}, true)
 }
 
 func combinedDates(ctx context.Context) ([]string, bool) {
@@ -99,16 +106,32 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 		return combinedJournal{}, err
 	}
 	window, _ := ctx.Value(combinedBudgetKey{}).(combinedBudgetRange)
-	key := fmt.Sprintf("combined-journal|%p|%d:%s|%s|%s|%s", db, len(p.UserID), p.UserID, strings.Join(dates, ","), window.from, window.to)
+	includeHead, _ := ctx.Value(combinedHeadKey{}).(bool)
+	key := fmt.Sprintf("combined-journal|%p|%d:%s|%s|%s|%s|%t", db, len(p.UserID), p.UserID, strings.Join(dates, ","), window.from, window.to, includeHead)
 	return reqcache.Do(ctx, key, func() (combinedJournal, error) {
 		projection := bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}
-		facets := bson.D{{Key: "entries", Value: bson.A{bson.M{"$project": projection}, bson.M{"$limit": 250001}, bson.M{"$replaceWith": bson.M{"kind": "entry", "data": "$$ROOT"}}}}}
+		entryStages := bson.A{}
+		if includeHead {
+			entryStages = append(entryStages, bson.M{"$match": bson.M{"status": "posted"}})
+		}
+		entryStages = append(entryStages, bson.M{"$project": projection}, bson.M{"$limit": 250001}, bson.M{"$replaceWith": bson.M{"kind": "entry", "data": "$$ROOT"}})
+		facets := bson.D{{Key: "entries", Value: entryStages}}
 		arrays := bson.A{"$entries"}
+		if includeHead {
+			arrays = append(arrays, "$head")
+			// Match Entries' two-row decode and tag overlay, including drafts and malformed records.
+			facets = append(facets, bson.E{Key: "head", Value: bson.A{
+				bson.M{"$sort": bson.M{"seq": -1}}, bson.M{"$limit": 2},
+				bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}},
+				bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"},
+				bson.M{"$replaceWith": bson.M{"kind": "head", "data": "$$ROOT"}},
+			}})
+		}
 		for i, date := range dates {
 			name := "d" + strconv.Itoa(i)
 			arrays = append(arrays, "$"+name)
 			facets = append(facets, bson.E{Key: name, Value: bson.A{
-				bson.M{"$match": bson.M{"date": bson.M{"$lte": date}}}, bson.M{"$unwind": "$postings"},
+				bson.M{"$match": bson.M{"status": "posted", "date": bson.M{"$lte": date}}}, bson.M{"$unwind": "$postings"},
 				bson.M{"$group": bson.M{"_id": bson.M{"account": "$postings.account", "commodity": "$postings.amount.c"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
 				bson.M{"$sort": bson.M{"_id.account": 1, "_id.commodity": 1}}, bson.M{"$limit": 5001},
 				bson.M{"$replaceWith": bson.M{"kind": "balance", "index": i, "data": "$$ROOT"}},
@@ -117,13 +140,17 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 		if window.from != "" {
 			arrays = append(arrays, "$months")
 			facets = append(facets, bson.E{Key: "months", Value: bson.A{
-				bson.M{"$match": bson.M{"date": bson.M{"$gte": window.from, "$lte": window.to}}},
+				bson.M{"$match": bson.M{"status": "posted", "date": bson.M{"$gte": window.from, "$lte": window.to}}},
 				bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:"}}},
 				bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
 				bson.M{"$limit": 5001}, bson.M{"$replaceWith": bson.M{"kind": "month", "data": "$$ROOT"}},
 			}})
 		}
-		pipeline := bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "status": "posted"}}, bson.M{"$facet": facets}, bson.M{"$project": bson.M{"_id": 0, "events": bson.M{"$concatArrays": arrays}}}, bson.M{"$unwind": "$events"}, bson.M{"$replaceWith": "$events"}}
+		match := bson.M{"user_id": p.UserID}
+		if !includeHead {
+			match["status"] = "posted"
+		}
+		pipeline := bson.A{bson.M{"$match": match}, bson.M{"$facet": facets}, bson.M{"$project": bson.M{"_id": 0, "events": bson.M{"$concatArrays": arrays}}}, bson.M{"$unwind": "$events"}, bson.M{"$replaceWith": "$events"}}
 		cur, err := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(250000))
 		if err != nil {
 			return combinedJournal{}, err
@@ -141,6 +168,14 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 				return combinedJournal{}, err
 			}
 			switch frame.Kind {
+			case "head":
+				var head Entry
+				if err := bson.Unmarshal(frame.Data, &head); err != nil {
+					return combinedJournal{}, err
+				}
+				if out.head == nil {
+					out.head = &head
+				}
 			case "entry":
 				size += len(frame.Data)
 				// shortcut: fall back to separate streaming reads above 32 MiB or 250,000 entries.

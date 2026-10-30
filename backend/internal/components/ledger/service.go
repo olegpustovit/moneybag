@@ -257,6 +257,33 @@ func (s *Service) PostedStream(ctx context.Context, p principal.Principal, from,
 		return fn(entry)
 	})
 }
+
+// LatestSequence reports the latest journal sequence, including drafts.
+func (s *Service) LatestSequence(ctx context.Context, p principal.Principal) (int64, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return 0, err
+	}
+	if include, _ := ctx.Value(combinedHeadKey{}).(bool); include {
+		if dates, ok := combinedDates(ctx); ok {
+			combined, err := s.repo.combinedJournal(ctx, p, dates)
+			if err == nil {
+				if combined.head == nil {
+					return 0, nil
+				}
+				return combined.head.Seq, nil
+			}
+			if ctx.Err() != nil {
+				return 0, err
+			}
+		}
+	}
+	page, err := s.Entries(ctx, p, EntriesInput{Limit: 1})
+	if err != nil || len(page.Items) == 0 {
+		return 0, err
+	}
+	return page.Items[0].Seq, nil
+}
+
 func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Entry, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return Entry{}, e
