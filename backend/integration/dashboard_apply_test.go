@@ -60,8 +60,9 @@ func TestDashboardPatchPreviewWritesNothing(t *testing.T) {
 		t.Fatalf("preview wrote the draft: %+v %v", draft, err)
 	}
 	missing, _ := json.Marshal([]map[string]any{{"op": "replace", "path": "/nope", "value": 1}})
-	if _, err := service.PatchPreview(ctx, p, "apply", missing); err == nil || !strings.Contains(err.Error(), "read valid paths") {
-		t.Fatalf("missing path: %v", err)
+	bad, err := service.PatchPreview(ctx, p, "apply", missing)
+	if err != nil || bad.Validation.OK || len(bad.Validation.Errors) != 1 || bad.Validation.Errors[0].Path != "/ops/0" || bad.Validation.Errors[0].Field != "/nope" || !strings.Contains(bad.Validation.Errors[0].Hint, "read valid paths") {
+		t.Fatalf("missing path: %+v %v", bad.Validation, err)
 	}
 	stale, _ := json.Marshal([]map[string]any{{"op": "test", "path": "/version", "value": 1}, {"op": "replace", "path": "/title", "value": "Stale"}})
 	if _, err := service.Patch(ctx, p, "apply", stale); err == nil || !strings.Contains(err.Error(), "the draft changed") {

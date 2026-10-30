@@ -445,6 +445,10 @@ func (s *Service) PatchPreview(ctx context.Context, p principal.Principal, id st
 		return EditResult{}, e
 	}
 	if e = applyPatch(&spec, patch); e != nil {
+		var pe *patchError
+		if errors.As(e, &pe) {
+			return EditResult{DraftVersion: old.Version, Validation: Validation{Errors: []Issue{{Path: fmt.Sprintf("/ops/%d", pe.Op), Msg: pe.Msg, Field: pe.Path, Hint: pe.Hint}}}}, nil
+		}
 		return EditResult{}, e
 	}
 	spec.ID = id
@@ -471,6 +475,17 @@ func decodePatch(ops json.RawMessage) (jsonpatch.Patch, error) {
 	return patch, nil
 }
 
+// patchError names the failing op and what to do about it; Error keeps the text the write path returns.
+type patchError struct {
+	Op        int
+	Path, Msg string
+	Hint      string
+}
+
+func (e *patchError) Error() string {
+	return fmt.Sprintf("op %d: %s; %s", e.Op, e.Msg, e.Hint)
+}
+
 func applyPatch(spec *Spec, patch jsonpatch.Patch) error {
 	b, _ := json.Marshal(spec)
 	next := b
@@ -481,12 +496,12 @@ func applyPatch(spec *Spec, patch jsonpatch.Patch) error {
 			continue
 		}
 		if errors.Is(e, jsonpatch.ErrMissing) {
-			return fmt.Errorf("op %d: path %s not found; read valid paths with dashboard_summary or dashboard_get", i, path)
+			return &patchError{Op: i, Path: path, Msg: fmt.Sprintf("path %s not found", path), Hint: "read valid paths with dashboard_summary or dashboard_get"}
 		}
 		if op.Kind() == "test" {
-			return fmt.Errorf("op %d: test %s failed; the draft changed, so re-read it with dashboard_summary and retry", i, path)
+			return &patchError{Op: i, Path: path, Msg: fmt.Sprintf("test %s failed", path), Hint: "the draft changed, so re-read it with dashboard_summary and retry"}
 		}
-		return fmt.Errorf("op %d (%s %s): %w; check the value type against dashboard_get", i, op.Kind(), path, e)
+		return &patchError{Op: i, Path: path, Msg: fmt.Sprintf("%s %s: %v", op.Kind(), path, e), Hint: "check the value type against dashboard_get"}
 	}
 	// Decode into a fresh Spec: decoding into the old one merges maps, so removed queries would survive.
 	var patched Spec
