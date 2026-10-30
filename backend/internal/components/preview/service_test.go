@@ -98,3 +98,35 @@ func TestRenderRequiresReportAndRetakesTallPages(t *testing.T) {
 		t.Fatal("gate without a renderer", failures, err)
 	}
 }
+
+func TestValidRoute(t *testing.T) {
+	for _, ok := range []string{"/budget", "/ledger?q=a", "/data/rates", "/settings", "/loginx"} {
+		if _, err := ValidRoute(ok); err != nil {
+			t.Errorf("%s: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "budget", "//evil.test", "/a//b", "https://evil.test/", `/\evil`, "/login", "/Login?x=1", "/logout", "/setup", "/register", "/oauth/authorize", "/confirm/x", "/secure/feed/a", "/api/mcp", "/render/x", "/budget/../login", "/x\n"} {
+		if _, err := ValidRoute(bad); err == nil {
+			t.Errorf("%q was accepted", bad)
+		}
+	}
+}
+
+func TestRouteTokenExpiresAndRedirects(t *testing.T) {
+	s := New("http://127.0.0.1:1", nil)
+	token, err := s.Issue(testPrincipal(), "", Target{Route: "/ledger?q=a", Theme: "dark"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ := s.Resolve(token)
+	if got.Target.Redirect() != "/ledger?q=a&theme=dark" {
+		t.Fatal(got.Target.Redirect())
+	}
+	s.sessions[token].Expires = time.Now().Add(-time.Second)
+	if _, err = s.Resolve(token); err == nil {
+		t.Fatal("expired token resolved")
+	}
+	if _, err = s.Issue(testPrincipal(), "", Target{Route: "/login"}); err == nil {
+		t.Fatal("blocked route issued")
+	}
+}

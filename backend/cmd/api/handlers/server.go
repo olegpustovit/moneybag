@@ -12,6 +12,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
+	"github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -211,6 +212,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /api/bootstrap", h.apiBootstrap)
 	mux.HandleFunc("GET /api/dashboards/{id}/view", h.apiDashboardView)
 	mux.HandleFunc("GET /render/{token}", h.renderShell)
+	mux.HandleFunc("GET /render/{token}/page", h.renderPage)
 	mux.HandleFunc("GET /api/render/{token}/view", h.apiRenderView)
 	mux.HandleFunc("GET /api/render/{token}/cube", h.apiRenderCube)
 	mux.HandleFunc("POST /api/render/{token}/report", h.apiRenderReport)
@@ -250,9 +252,28 @@ func (h *Handler) Handler() http.Handler {
 func (h *Handler) session(r *http.Request) (principal.Principal, identity.Session, error) {
 	c, e := r.Cookie("moneybag_session")
 	if e != nil {
+		if _, session, ok := h.renderCookie(r); ok {
+			// Reads only, and only ledger:read: every POST, PUT and DELETE under /api and /settings fails here, before any handler or CSRF check.
+			p := session.Principal
+			p.Scopes, p.Admin = []string{"ledger:read"}, false
+			return p, identity.Session{UserID: p.UserID, CSRF: renderCSRF}, nil
+		}
 		return principal.Principal{}, identity.Session{}, principal.ErrForbidden
 	}
 	return h.services.Identity.Session(r.Context(), c.Value)
+}
+
+// renderCSRF is not a secret: the render principal can only read, so it never needs to prove a form came from the page.
+const renderCSRF = "render"
+
+// renderCookie returns the live route token a headless capture carries; dashboard and grant tokens grant nothing.
+func (h *Handler) renderCookie(r *http.Request) (string, preview.Session, bool) {
+	c, e := r.Cookie("moneybag_render")
+	if e != nil || h.services.Previews == nil || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
+		return "", preview.Session{}, false
+	}
+	session, e := h.services.Previews.Resolve(c.Value)
+	return c.Value, session, e == nil && session.Target.Route != "" && session.GrantHash == ""
 }
 func (h *Handler) csrf(r *http.Request, session identity.Session) bool {
 	if origin := r.Header.Get("Origin"); origin != "" && !h.browserOrigin(origin) {

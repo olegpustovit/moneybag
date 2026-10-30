@@ -560,7 +560,20 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, err
 	})
-	add(r, "dashboard_render", "dashboard", "ledger:read", "Use this to see a published or draft dashboard as an image of the real page in the browser, at width (default 1440) with optional params. Returns the PNG plus layout, checks (overflow, label_collisions, empty_panels, time_scope_applies), lint, tests, timing_ms and validation. Fix validation errors first; the image appears once the renderer is configured. An error means the page failed to load or report, never a blank image.", true, false, func(ctx context.Context, p principal.Principal, in renderInput) (renderOutput, error) {
+	add(r, "dashboard_render", "dashboard", "ledger:read", "Use this to see a published or draft dashboard as an image of the real page in the browser, at width (default 1440) with optional params. Returns the PNG plus layout, checks (overflow, label_collisions, empty_panels, time_scope_applies), lint, tests, timing_ms and validation. Fix validation errors first. An error means the page failed to load or report. With route, renders that app page (read-only, with the shell) instead.", true, false, func(ctx context.Context, p principal.Principal, in renderInput) (renderOutput, error) {
+		if in.Route != "" {
+			if e := in.validate(); e != nil {
+				return renderOutput{}, e
+			}
+			if !s.Previews.Available() {
+				return renderOutput{Message: "image unavailable: renderer not configured"}, nil
+			}
+			shot, e := s.Previews.Render(ctx, p, "", preview.Target{Route: in.Route, Width: in.Width, Theme: in.Theme})
+			if e != nil {
+				return renderOutput{}, fmt.Errorf("page render failed: %w", e)
+			}
+			return renderOutput{Layout: shot.Report.Layout, Checks: &shot.Report.Checks, TimingMS: shot.Report.TimingMS, RenderMS: shot.RenderMS, PNG: shot.PNG}, nil
+		}
 		v, e := versionRef(in.Version)
 		if e != nil {
 			return renderOutput{}, e

@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
@@ -32,6 +34,40 @@ type Target struct {
 	Params    map[string]any
 	Width     int
 	Theme     string
+	// Route, when set, makes this a route token: the real app page at that path, read-only, instead of a dashboard.
+	Route string
+}
+
+var blockedRoutes = []string{"/login", "/logout", "/setup", "/register", "/oauth", "/confirm", "/secure", "/api", "/render"}
+
+// ValidRoute accepts only a same-origin app page path.
+func ValidRoute(route string) (string, error) {
+	bad := fmt.Errorf("route must be an app page path such as /budget, not an external URL, an auth page or /api")
+	if !strings.HasPrefix(route, "/") || strings.Contains(route, "//") || strings.ContainsAny(route, "\\\x00\r\n\t ") {
+		return "", bad
+	}
+	u, err := url.Parse(route)
+	if err != nil || u.Scheme != "" || u.Host != "" {
+		return "", bad
+	}
+	clean := strings.ToLower(path.Clean(u.Path))
+	for _, blocked := range blockedRoutes {
+		if clean == blocked || strings.HasPrefix(clean, blocked+"/") {
+			return "", bad
+		}
+	}
+	return route, nil
+}
+
+// Redirect is where a route token's capture lands, carrying the theme for the page to apply.
+func (t Target) Redirect() string {
+	u, _ := url.Parse(t.Route)
+	if t.Theme == "dark" {
+		q := u.Query()
+		q.Set("theme", "dark")
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
 }
 
 type Box struct {
@@ -105,6 +141,14 @@ func (s *Service) Issue(p principal.Principal, grantHash string, t Target) (stri
 	if err := p.Require("ledger:read"); err != nil {
 		return "", err
 	}
+	if t.Route != "" {
+		if _, err := ValidRoute(t.Route); err != nil {
+			return "", err
+		}
+		if grantHash != "" {
+			return "", fmt.Errorf("routes are only for the owner")
+		}
+	}
 	now := time.Now()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -157,7 +201,7 @@ func (s *Service) take(token string) (Report, bool) {
 	return *session.report, true
 }
 
-func (s *Service) revoke(token string) {
+func (s *Service) Revoke(token string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, token)
@@ -183,9 +227,11 @@ func (s *Service) Render(ctx context.Context, p principal.Principal, grantHash s
 	if err != nil {
 		return Result{}, err
 	}
-	defer s.revoke(token)
+	defer s.Revoke(token)
 	url := s.base + "/render/" + token
-	if t.Theme == "dark" {
+	if t.Route != "" {
+		url += "/page"
+	} else if t.Theme == "dark" {
 		url += "?theme=dark"
 	}
 	png, err := s.capture(ctx, url, t.Width, firstHeight)

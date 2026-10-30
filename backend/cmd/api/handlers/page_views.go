@@ -166,9 +166,17 @@ func (h *Handler) apiBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := reqcache.With(r.Context())
-	body, err := h.services.Dashboard.Cached(ctx, p, "bootstrap", "", session.CSRF, func() (dashboard.Encoded, error) {
-		return h.bootstrap(ctx, p, session)
-	})
+	renderToken, _, rendering := h.renderCookie(r)
+	if _, e := r.Cookie("moneybag_session"); e == nil {
+		renderToken, rendering = "", false // a normal session always wins
+	}
+	build := func() (dashboard.Encoded, error) { return h.bootstrap(ctx, p, session, renderToken) }
+	body, err := dashboard.Encoded{}, error(nil)
+	if rendering {
+		body, err = build() // the token is per render, so these bytes must never enter the per-user cache
+	} else {
+		body, err = h.services.Dashboard.Cached(ctx, p, "bootstrap", "", session.CSRF, build)
+	}
 	if err != nil {
 		if r.Context().Err() == nil {
 			slog.Error("bootstrap failed", "error", err)
@@ -179,7 +187,7 @@ func (h *Handler) apiBootstrap(w http.ResponseWriter, r *http.Request) {
 	writeEncoded(w, r, body)
 }
 
-func (h *Handler) bootstrap(ctx context.Context, p principal.Principal, session identity.Session) (dashboard.Encoded, error) {
+func (h *Handler) bootstrap(ctx context.Context, p principal.Principal, session identity.Session, renderToken string) (dashboard.Encoded, error) {
 	user, err := h.services.Identity.User(ctx, p.UserID)
 	if err != nil {
 		return dashboard.Encoded{}, err
@@ -204,14 +212,18 @@ func (h *Handler) bootstrap(ctx context.Context, p principal.Principal, session 
 	if err != nil {
 		return dashboard.Encoded{}, err
 	}
-	return dashboard.Encode(map[string]any{
+	out := map[string]any{
 		"session":    map[string]any{"user": user, "csrf": session.CSRF, "version": h.cfg.Version, "mcp_url": "/api/mcp"},
 		"nav":        nav,
 		"dashboards": dashboards,
 		"tables":     tables,
 		"counts":     map[string]int64{"imports": imports, "reconcile": reconcile, "feedback": feedback},
 		"labels":     labels,
-	})
+	}
+	if renderToken != "" {
+		out["render_token"] = renderToken
+	}
+	return dashboard.Encode(out)
 }
 
 // renderAccess re-checks the token's principal and grant on every read, so a revoked or changed grant stops it at once.
@@ -252,6 +264,22 @@ func (h *Handler) renderShell(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	serveUI(w, r)
+}
+
+// renderPage trades a route token for a 60 second read-only cookie and sends the capture to the real page.
+func (h *Handler) renderPage(w http.ResponseWriter, r *http.Request) {
+	if h.services.Previews == nil {
+		http.NotFound(w, r)
+		return
+	}
+	token := r.PathValue("token")
+	session, err := h.services.Previews.Resolve(token)
+	if err != nil || session.Target.Route == "" || session.GrantHash != "" {
+		http.NotFound(w, r)
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: "moneybag_render", Value: token, Path: "/", MaxAge: 60, HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https"})
+	http.Redirect(w, r, session.Target.Redirect(), http.StatusFound)
 }
 
 func (h *Handler) apiRenderView(w http.ResponseWriter, r *http.Request) {
