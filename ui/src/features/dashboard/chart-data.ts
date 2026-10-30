@@ -33,12 +33,20 @@ export function chartNumber(value:number,format:string):string {
  return `${format==='usd' || format==='usd0' ? '$' : format==='eur' || format==='eur0' ? '€' : ''}${number}${format==='pct' || format==='pct0' ? '%' : format==='mo' ? ' mo' : ''}`
 }
 
-// Fold overflow series or donut categories into a single additive Other mark.
+// Keep the five largest series/categories. Additive marks fold the rest into Other; line/area drop overflow.
 export function foldChart(value:ChartValue):ChartValue {
- const donut=value.mark==='donut'
+ const donut=value.mark==='donut', additive=donut || value.mark==='bar' || value.mark==='stack'
  const names=donut ? [...new Set(value.points.map(point => point.x))] : value.series.map(item => item.name)
  if(names.length<=5)return value
- const kept=new Set(names.slice(0,5).filter(name => name!=='Other'))
+ const weight=new Map<string,number>()
+ for(const point of value.points){const name=donut ? point.x : point.series;if(name==='Other')continue;weight.set(name,(weight.get(name) ?? 0)+Math.abs(point.y))}
+ const ranked=[...names].filter(name => name!=='Other').sort((a,b) => (weight.get(b) ?? 0)-(weight.get(a) ?? 0) || names.indexOf(a)-names.indexOf(b))
+ const kept=new Set(ranked.slice(0,5))
+ if(!additive) {
+  const points=value.points.filter(point => kept.has(donut ? point.x : point.series))
+  const keptSeries=ranked.slice(0,5).map(name => value.series.find(item => item.name===name)).filter((item):item is ChartValue['series'][number] => !!item)
+  return {...value,points,series:keptSeries}
+ }
  const points:ChartValue['points']=[],groups=new Map<string,ChartValue['points']>(),counts=new Map<string,Map<string,number>>()
  for(const point of value.points) {
   const name=donut ? point.x : point.series
@@ -52,5 +60,6 @@ export function foldChart(value:ChartValue):ChartValue {
   // shortcut: unrepresentable sums keep the original chart; use decimal chart values if extreme values matter.
   if(!Number.isFinite(group[index].y))return value
  }
- return {...value,points,series:donut ? value.series : [...value.series.slice(0,5).filter(item => item.name!=='Other'),{name:'Other',color_index:5}]}
+ const keptSeries=ranked.slice(0,5).map(name => value.series.find(item => item.name===name)).filter((item):item is ChartValue['series'][number] => !!item)
+ return {...value,points,series:donut ? value.series : [...keptSeries,{name:'Other',color_index:5}]}
 }

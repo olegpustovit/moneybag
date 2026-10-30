@@ -31,7 +31,7 @@ export function DataTable({ value, storageKey, sort, onSortChange, regionLabel, 
   cell:({row}) => renderCell ? renderCell(row.original,column.key) : row.original[column.key]?.t ?? '—',
  })),[value.columns,renderCell,sorters,requiredColumns,unsortable])
  const filtered=useMemo(() => {const query=filter.trim().toLocaleLowerCase();return query ? value.rows.filter(row => Object.values(row).some(cell => cell.t.toLocaleLowerCase().includes(query))) : value.rows},[value.rows,filter])
- const totals=useMemo(() => new Map(value.columns.map(column => {const values=filtered.map(row => row[column.key]?.v);return [column.key,{total:tableTotal(values,column.format),numeric:values.some(value => typeof value==='number')}] })),[filtered,value.columns])
+ const totals=useMemo(() => new Map(value.columns.map(column => {const values=filtered.map(row => row[column.key]?.v),total=tableTotal(values,column.format);return [column.key,{total,numeric:total!==undefined || /^(usd0?|eur0?|USD|EUR)$/.test(column.format) && values.some(value => typeof value==='number')}] })),[filtered,value.columns])
  const table=useTable({features,columns,data:filtered,state:{sorting,columnVisibility:visibility,columnSizing:sizing},onSortingChange:setSorting,onColumnVisibilityChange:setVisibility,onColumnSizingChange:setSizing,columnResizeMode:'onEnd'})
  const rows=table.getRowModel().rows
  const virtualized=forceVirtual || rows.length>200

@@ -1,5 +1,7 @@
 // Totals use the decimal representations delivered to the browser, not binary floating-point addition.
+// Only money formats are additive by default — runway months, rates, percents and bare numbers stay untotalled.
 export function tableTotal(values:unknown[],format:string):string|undefined {
+ if(!/^(usd0?|eur0?|USD|EUR)$/.test(format))return undefined
  const numbers=values.filter(value => value!==null && value!==undefined)
  if(!numbers.length || numbers.some(value => typeof value!=='number' || !Number.isFinite(value) || Math.abs(value)>Number.MAX_SAFE_INTEGER))return undefined
  const parts=(numbers as number[]).map(value => {

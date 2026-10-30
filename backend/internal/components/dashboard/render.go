@@ -285,22 +285,21 @@ func (x *execution) render(c Component) (string, any, error) {
 		}
 		var b strings.Builder
 		b.WriteString(`<div class="tbl" tabindex="0" role="region" aria-label="` + escape(c.Title+" table") + `"><table><thead><tr>`)
+		columns := []map[string]any{}
 		for i, col := range c.Columns {
-			if i > 0 {
+			align := "left"
+			switch col.Format {
+			case "usd", "usd0", "eur", "eur0", "int", "number", "pct", "pct0", "mo":
+				align = "right"
+			}
+			if align == "right" {
 				b.WriteString(`<th class="r">` + escape(col.Label) + `</th>`)
 			} else {
 				b.WriteString(`<th>` + escape(col.Label) + `</th>`)
 			}
-		}
-		b.WriteString(`</tr></thead><tbody>`)
-		columns := []map[string]any{}
-		for i, col := range c.Columns {
-			align := "left"
-			if i > 0 {
-				align = "right"
-			}
 			columns = append(columns, map[string]any{"key": fmt.Sprintf("c%d", i), "label": col.Label, "format": col.Format, "align": align})
 		}
+		b.WriteString(`</tr></thead><tbody>`)
 		values := []map[string]any{}
 		for _, r := range rows {
 			b.WriteString(`<tr>`)
@@ -315,7 +314,7 @@ func (x *execution) render(c Component) (string, any, error) {
 					return "", nil, e
 				}
 				class := t
-				if i > 0 {
+				if columns[i]["align"] == "right" {
 					class += " r"
 				}
 				b.WriteString(`<td class="` + class + `">` + escape(format(v, col.Format)) + `</td>`)
