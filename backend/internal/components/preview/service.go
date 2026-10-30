@@ -31,6 +31,7 @@ type Target struct {
 	Version   string
 	Params    map[string]any
 	Width     int
+	Theme     string
 }
 
 type Box struct {
@@ -184,6 +185,9 @@ func (s *Service) Render(ctx context.Context, p principal.Principal, grantHash s
 	}
 	defer s.revoke(token)
 	url := s.base + "/render/" + token
+	if t.Theme == "dark" {
+		url += "?theme=dark"
+	}
 	png, err := s.capture(ctx, url, t.Width, firstHeight)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {

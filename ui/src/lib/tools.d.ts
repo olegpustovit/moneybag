@@ -2293,6 +2293,10 @@ export interface DashboardRenderInput {
           [k: string]: unknown;
         };
   };
+  /**
+   * light or dark; default light
+   */
+  theme?: string;
   version?:
     | null
     | boolean

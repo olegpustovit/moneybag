@@ -18,6 +18,7 @@ type renderInput struct {
 	ID      string         `json:"id"`
 	Version any            `json:"version,omitempty"`
 	Width   int            `json:"width,omitempty" jsonschema:"viewport width in CSS pixels, 320..3840; default 1440"`
+	Theme   string         `json:"theme,omitempty" jsonschema:"light or dark; default light"`
 	Params  map[string]any `json:"params,omitempty" jsonschema:"dashboard parameters, for example from, to or month"`
 }
 

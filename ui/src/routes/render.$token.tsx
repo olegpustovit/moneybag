@@ -13,6 +13,7 @@ const SETTLE_MS=4500
 function RenderRoute() {
  const {token}=Route.useParams(),started=useRef(performance.now()),sent=useRef(false),[view,setView]=useState<ViewBody|null>(null),[cube,setCube]=useState<Cube|null>(null),[cubeDone,setCubeDone]=useState(false),[failed,setFailed]=useState(''),[search,setSearch]=useState<TelemetrySearch>({})
  const report=(body:ReturnType<typeof emptyReport>) => {if(sent.current)return;sent.current=true;void sendReport(token,{...body,timing_ms:Math.round(performance.now()-started.current)})}
+ useEffect(() => {document.documentElement.classList.toggle('dark',new URLSearchParams(location.search).get('theme')==='dark')},[])
  useEffect(() => {
   let alive=true
   void fetchRenderView(token).then(body => {

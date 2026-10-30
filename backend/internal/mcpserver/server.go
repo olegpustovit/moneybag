@@ -602,7 +602,7 @@ func New(s Services, opts Options) *mcp.Server {
 		if access.Grant != nil {
 			hash = sharing.PermissionHash(*access.Grant)
 		}
-		shot, e := s.Previews.Render(ctx, p, hash, preview.Target{Dashboard: in.ID, Version: v, Params: in.Params, Width: in.Width})
+		shot, e := s.Previews.Render(ctx, p, hash, preview.Target{Dashboard: in.ID, Version: v, Params: in.Params, Width: in.Width, Theme: in.Theme})
 		if e != nil {
 			return renderOutput{}, fmt.Errorf("dashboard render failed: %w", e)
 		}
