@@ -366,6 +366,9 @@ func New(s Services, opts Options) *mcp.Server {
 			Items []dashboard.Head `json:"items"`
 		}{v}, e
 	})
+	add(r, "catalog_get", "dashboard", "ledger:read", "Use this before writing dashboard CEL. Returns the sources with their fields, functions, aggregates and variables you can reference, plus a revision.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (dashboard.Catalog, error) {
+		return s.Dashboard.Catalog(ctx, p, s.Tables)
+	})
 	add(r, "dashboard_get", "dashboard", "ledger:read", "Use this when reading a dashboard spec. version is a number, draft or published; omitted selects the current draft, otherwise published.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (dashboard.GetResult, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
