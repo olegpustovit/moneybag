@@ -92,7 +92,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
  const isCanonical=/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/.test(state.text),activePreset=list.find(p => {const r=parseRange(p.text,bounds);return r && r.from===state.range.from && r.to===state.range.to})
  const shown=draft ?? (activePreset && isCanonical ? friendlyTime(activePreset.text) : isCanonical ? rangeLabel(state.range) : friendlyTime(state.text))
  const parsed=draft===null ? null : parseTime(draft,bounds)
- const settled=`${rangeLabel(state.range)} · ${rangeDays(state.range).toLocaleString('en-US')} ${rangeDays(state.range)===1 ? 'day' : 'days'}`
+ const settled=rangeLabel(state.range)
  const status=!parsed ? settled : parsed.ok ? `${rangeLabel(parsed.range)} · ${rangeDays(parsed.range).toLocaleString('en-US')} ${rangeDays(parsed.range)===1 ? 'day' : 'days'} · press Enter` : parsed.message
  const invalid=!!parsed && !parsed.ok && parsed.reason!=='empty'
  const latest=useRef(state);latest.current=state
@@ -111,7 +111,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
     <input id={fieldId} ref={input} value={shown} autoComplete="off" spellCheck={false} enterKeyHint="go" aria-invalid={invalid} aria-describedby={statusId}
      onFocus={e => e.currentTarget.select()} onChange={e => setDraft(e.target.value)} onBlur={() => setDraft(null)}
      onKeyDown={e => {if(e.key==='Enter'){if(parsed?.ok){state.setText(draft!);setDraft(null);e.currentTarget.blur()}else if(draft===null)e.currentTarget.blur()}else if(e.key==='Escape'){setDraft(null);e.currentTarget.blur()}}}/>
-    <div id={statusId} className={`tm-time-status${invalid ? ' err' : ''}`} aria-live="polite">{status}</div>
+    <div id={statusId} className={`tm-time-status${invalid ? ' err' : ''}`} aria-live="polite" title={status}>{status}</div>
    </div>
    <div className="tm-arrows">
     <button type="button" className="tm-btn square" aria-label="Previous period" title="Previous period ( [ )" onClick={() => state.step(-1)}>←</button>
