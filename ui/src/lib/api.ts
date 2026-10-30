@@ -6,7 +6,7 @@ export class ApiError extends Error { readonly status: number; constructor(messa
 export type NavItem = { id:string; label:string; icon:string; dashboard?:string; route?:string }
 export type DashboardHead = { id:string; title:string; published_version:number; draft_version:number; revision:number; home?:boolean; published_at?:string; published_by?:{id:string;kind:string} }
 export type TableHead = { id:string; name:string; archived?:boolean; columns:{id:string;type:string;formula?:string}[]|null }
-export type Bootstrap = { session:Session; nav:NavItem[]; dashboards:DashboardHead[]; tables:TableHead[]; counts:{imports:number;reconcile:number;feedback:number}; labels:Record<string,string> }
+export type Bootstrap = { session:Session; nav:NavItem[]; dashboards:DashboardHead[]; tables:TableHead[]; counts:{imports:number;reconcile:number;feedback:number}; labels:Record<string,string>; render_token?:string }
 
 async function getJson<T>(path:string,failure:string):Promise<T> {
  const response=await fetch(path,{credentials:'same-origin'})

@@ -2280,7 +2280,7 @@ export interface DashboardRemoveComponentOutput {
 export interface DashboardRenderInput {
   id: string;
   /**
-   * dashboard parameters, for example from, to or month
+   * from, to or month
    */
   params?: {
     [k: string]:
@@ -2294,7 +2294,11 @@ export interface DashboardRenderInput {
         };
   };
   /**
-   * light or dark; default light
+   * app page such as /budget; id is ignored
+   */
+  route?: string;
+  /**
+   * light or dark
    */
   theme?: string;
   version?:
@@ -2307,7 +2311,7 @@ export interface DashboardRenderInput {
         [k: string]: unknown;
       };
   /**
-   * viewport width in CSS pixels, 320..3840; default 1440
+   * CSS pixels 320..3840, default 1440
    */
   width?: number;
 }

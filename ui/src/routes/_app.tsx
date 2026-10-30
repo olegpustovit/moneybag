@@ -54,9 +54,17 @@ function Workspace() {
  const {data}=useSuspenseQuery(bootstrapQuery),session=data.session,router=useRouter(),navigate=useNavigate(),cube=useCube(session.user.id),[mobileOpen,setMobileOpen]=useState(false),[commandOpen,setCommandOpen]=useState(false)
  const views=useQuery({...savedViewsQuery(session),staleTime:60_000,enabled:commandOpen})
  useEffect(() => {
+  // A headless capture only looks: no usage beacons, and the report goes out once the page settles.
+  if(data.render_token){
+   const token=data.render_token
+   document.documentElement.classList.toggle('dark',new URLSearchParams(location.search).get('theme')==='dark')
+   let stop=() => {},alive=true
+   void import('../features/telemetry/render-page').then(m => {if(alive)stop=m.startPageReport(token)})
+   return () => {alive=false;stop()}
+  }
   const send=() => {const {pathname}=router.state.location,dashboard=pathname.match(/^\/dashboards\/([^/]+)/)?.[1];usageBeacon(session,pathname,dashboard ? decodeURIComponent(dashboard) : undefined)}
   send();return router.subscribe('onResolved',event => {if(event.pathChanged)send()})
- },[router,session])
+ },[router,session,data.render_token])
  const groups:CommandGroup[]=[
   {heading:'Pages',items:[...usableNav(data).map(i => ({id:i.to,label:i.label})),{id:'/ledger/accounts',label:'Accounts'},{id:'/data/rates',label:'Rates'},{id:'/data/imports',label:'Imports'},{id:'/data/reconcile',label:'Reconcile'},{id:'/settings',label:'Settings'},...data.dashboards.map(d => ({id:`/dashboards/${d.id}`,label:d.title,hint:'Dashboard'}))].filter((item,i,all) => all.findIndex(x => x.id===item.id)===i)},
   {heading:'Saved views',items:(views.data ?? []).map(v => ({id:v.id,label:v.name,hint:'Saved view'}))},
