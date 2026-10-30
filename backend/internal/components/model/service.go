@@ -524,7 +524,7 @@ func Project(sc Scenario, a map[string]float64, streams []Income, horizon int, s
 		if math.IsInf(net, 0) || math.IsNaN(net) {
 			return Projection{}, fmt.Errorf("forecast produced a non-finite number")
 		}
-		point := Point{M: m, Net: round(net), Cash: round(net - gold), Gold: round(gold), Wise: round(wise), Kyiv: round(kyiv)}
+		point := Point{M: m, Net: round(net), Cash: round(wise + kyiv), Gold: round(gold), Wise: round(wise), Kyiv: round(kyiv)}
 		if spend > 0 {
 			point.Runway = ptr(round(net / spend))
 		}
