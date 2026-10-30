@@ -131,7 +131,7 @@ async function main(){
  const existing=await call('accounts_list',{limit:500});const have=new Set((existing.items ?? []).map(a => a.id))
  for(const [aid,name,type,cls,pot,kind,commodity,extra] of ACCOUNTS)if(!have.has(aid))await call('account_create',{id:aid,name,type,class:cls,pot,commodities:extra.commodities ?? [commodity],...extra,groups:{...(extra.groups ?? {}),...(cls==='bank' || cls==='cash' || cls==='metal_holding' || cls==='liability' ? {source:kind} : {})}})
  console.log(`accounts ${ACCOUNTS.length}`)
- const end=Date.now()-Date.now()%DAY,start=utc(new Date(end).getUTCFullYear()-3,new Date(end).getUTCMonth(),1)
+ const end=Date.now()-Date.now()%DAY,start=process.env.SEED_MONTHS ? utc(new Date(end).getUTCFullYear(),new Date(end).getUTCMonth()-Number(process.env.SEED_MONTHS),1) : utc(new Date(end).getUTCFullYear()-3,new Date(end).getUTCMonth(),1)
  if(!have.has('assets:bank:everyday')){
   const open=iso(start-DAY)
   await call('entry_post',{date:open,payee:'Opening balance',commit:true,postings:[{account:'assets:bank:everyday',amount:{c:'EUR',v:'4200.00'}},{account:'assets:bank:online',amount:{c:'EUR',v:'9800.00'}},{account:'assets:bank:savings',amount:{c:'EUR',v:'26000.00'}},{account:'assets:cash:home',amount:{c:'EUR',v:'12000.00'}},{account:'equity:opening',amount:{c:'EUR',v:'-52000.00'}}]})

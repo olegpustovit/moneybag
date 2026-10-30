@@ -2,7 +2,10 @@ package integration
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"math/big"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,7 +16,9 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
+	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -439,6 +444,8 @@ func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Princi
 		}
 	})
 
+	testEvalTasks(t, ctx, admin, s, db)
+
 	t.Run("keeps one user's meaning from another", func(t *testing.T) {
 		if _, e := s.Semantic.Metric(ctx, admin, "spending"); e == nil {
 			t.Fatal("metric crossed users")
@@ -448,5 +455,385 @@ func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Princi
 		if e != nil || !result.IsError {
 			t.Fatal("cross-user query accepted", result, e)
 		}
+	})
+}
+
+// evalCaller wraps a session so every tool answer is measured and the largest one is remembered for the response budget.
+func evalCaller(t *testing.T, ctx context.Context, cs *mcp.ClientSession, largest *int) (func(string, map[string]any) (map[string]any, string, bool), func(string, map[string]any) map[string]any) {
+	call := func(name string, args map[string]any) (map[string]any, string, bool) {
+		t.Helper()
+		result, e := cs.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+		if e != nil { // an unknown or unlisted tool is a refusal the agent sees
+			return nil, e.Error(), true
+		}
+		raw, _ := json.Marshal(result)
+		*largest = max(*largest, len(raw))
+		var out map[string]any
+		if b, _ := json.Marshal(result.StructuredContent); len(b) > 0 {
+			_ = json.Unmarshal(b, &out)
+		}
+		text := ""
+		for _, c := range result.Content {
+			if tc, ok := c.(*mcp.TextContent); ok {
+				text += tc.Text
+			}
+		}
+		return out, text, result.IsError
+	}
+	must := func(name string, args map[string]any) map[string]any {
+		t.Helper()
+		out, text, failed := call(name, args)
+		if failed {
+			t.Fatal(name, text)
+		}
+		return out
+	}
+	return call, must
+}
+
+func evalJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
+
+// testEvalTasks is the table of jobs a fresh agent does through MCP alone, on its own user and ledger. Each ends by checking state.
+func testEvalTasks(t *testing.T, ctx context.Context, admin principal.Principal, s mcpserver.Services, db *mongo.Database) {
+	t.Helper()
+	token, e := s.Identity.Invite(ctx, admin, "eval-tasks@example.test")
+	if e != nil {
+		t.Fatal(e)
+	}
+	user, e := s.Identity.Register(ctx, token, "Eval tasks", "synthetic-test-password")
+	if e != nil {
+		t.Fatal(e)
+	}
+	owner := identity.Principal(user)
+	if e = ledger.NewMongoRepository(db).Init(ctx, owner); e != nil {
+		t.Fatal(e)
+	}
+	evalLedger(t, ctx, owner, s)
+	actor := principal.Actor{Kind: "agent", ID: "https://eval-tasks.example.test/client.json"}
+	largest := 0
+	call, must := evalCaller(t, ctx, mcpSession(t, ctx, principal.Principal{UserID: user.ID, Scopes: principal.Scopes, Actor: actor}, s, false), &largest)
+	adminScopes := append(slices.Clone(principal.Scopes), principal.ScopeAdminUsers)
+	post := func(date, payee, account, amount string) {
+		t.Helper()
+		must("entry_post", map[string]any{"date": date, "payee": payee, "commit": true, "postings": []map[string]any{{"account": account, "amount": map[string]any{"c": "EUR", "v": amount}}, {"account": "assets:bank", "amount": map[string]any{"c": "EUR", "v": "-" + amount}}}})
+	}
+	must("rate_set", map[string]any{"at": "2019-12-31T12:00:00Z", "pair": "EUR/USD", "value": "1.10", "source": "Synthetic example quote"}) // postings rows convert every date they touch
+	post("2025-05-10", "LIDL 789 ZAGREB", "expenses:food", "140.00")
+	for i := range 30 { // enough 2020 postings to overflow an inline table, outside every window below
+		post(fmt.Sprintf("2020-01-%02d", i%28+1), "Filler", "expenses:food", "1.00")
+	}
+	must("metric_upsert", map[string]any{"id": "spending", "label": "Spending", "unit": "eur", "kind": "flow", "additivity": "sum", "estimates": "split", "accounts": []string{"expenses:"}, "dimensions": []string{"category", "payee", "trip"}})
+	must("metric_upsert", map[string]any{"id": "burn", "label": "Monthly burn", "unit": "eur", "kind": "rate", "additivity": "avg", "estimates": "include", "accounts": []string{"expenses:"}})
+	query := func(extra map[string]any) map[string]any {
+		t.Helper()
+		args := map[string]any{"metric": "spending", "from": "2026-04-01", "to": "2026-06-30"}
+		for k, v := range extra {
+			args[k] = v
+		}
+		return must("metric_query", args)
+	}
+	sum := func(series any) *big.Rat {
+		total := new(big.Rat)
+		for _, p := range series.([]any) {
+			total.Add(total, ledger.MustDecimal(p.(map[string]any)["value"].(string)).Rat())
+		}
+		return total
+	}
+
+	// A lab dashboard whose lint verdicts are the table below; the base spec is clean.
+	lab := func(components ...map[string]any) map[string]any {
+		comps := append([]map[string]any{{"id": "spend", "type": "stat", "metric": "spending", "title": "Spending"}}, components...)
+		rows := []map[string]any{}
+		for _, c := range comps {
+			rows = append(rows, map[string]any{"cols": []map[string]any{{"span": 12, "component": c["id"]}}})
+		}
+		return map[string]any{"id": "lab", "title": "Lab", "version": 1, "question": "Is the lab clean?",
+			"scope": map[string]any{"time": map[string]any{"default": "2026-Q2", "presets": []string{"30d"}}, "compare": "previous_period"},
+			"data":  map[string]any{}, "pages": []map[string]any{{"id": "main", "title": "Main", "layout": rows}}, "components": comps}
+	}
+	replace := func(v any) []map[string]any { return []map[string]any{{"op": "replace", "path": "", "value": v}} }
+	rowsQuery := func(limit int) map[string]any {
+		return map[string]any{"a": map[string]any{"from": "postings", "where": `row.date < "2021-01-01" && !row.account.startsWith("expenses:estimated:")`, "limit": limit}}
+	}
+	table := func(total bool, colType string) map[string]any {
+		return map[string]any{"id": "t", "type": "table", "title": "Rows", "rows": "a", "columns": []map[string]any{{"label": "Day", "value": "row.date", "type": colType, "total": total}}}
+	}
+	withData := func(spec map[string]any, data map[string]any) map[string]any {
+		spec["data"] = data
+		spec["scope"].(map[string]any)["time"].(map[string]any)["default"] = "all" // postings rows follow the page clock
+		return spec
+	}
+	must("dashboard_create", map[string]any{"id": "lab", "title": "Lab"})
+	lintOf := func(spec map[string]any) []map[string]any {
+		t.Helper()
+		must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(spec)})
+		out := must("dashboard_lint", map[string]any{"id": "lab"})
+		issues := []map[string]any{}
+		for _, i := range out["issues"].([]any) {
+			issues = append(issues, i.(map[string]any))
+		}
+		return issues
+	}
+	has := func(issues []map[string]any, rule string) bool {
+		for _, i := range issues {
+			if i["rule"] == rule {
+				return true
+			}
+		}
+		return false
+	}
+	unscoped := lab()
+	delete(unscoped, "scope")
+	unscoped["components"].([]map[string]any)[0]["compare"] = "none"
+	twelve := []map[string]any{}
+	for i := range 12 {
+		twelve = append(twelve, map[string]any{"id": fmt.Sprintf("p%d", i), "type": "stat", "metric": "spending", "title": "Spending again", "compare": "none"})
+	}
+	kpi := func(extra map[string]any) map[string]any {
+		c := map[string]any{"id": "k", "type": "kpi", "title": "Count", "value": "1"}
+		for k, v := range extra {
+			c[k] = v
+		}
+		return c
+	}
+	trend := func(axis string) map[string]any {
+		return map[string]any{"id": "c", "type": "time_chart", "metric": "spending", "title": "Trend", "x": map[string]any{"type": axis}}
+	}
+	named := func(title string) map[string]any {
+		return map[string]any{"id": "w", "type": "stat", "metric": "spending", "title": title}
+	}
+	copied := func(from string) map[string]any {
+		return map[string]any{"from": "postings", "where": `row.account.startsWith("expenses:") && row.date >= "` + from + `"`, "agg": map[string]any{"t": "sum(row.value_eur)"}}
+	}
+
+	for _, tc := range []struct {
+		name, rule string
+		bad, good  map[string]any
+	}{
+		{"scope the page to a clock", "time_scope", unscoped, lab()},
+		{"give a KPI a unit", "chart_unit", lab(kpi(map[string]any{"compare": "none"})), lab(kpi(map[string]any{"compare": "none", "format": "eur"}))},
+		{"give a KPI a comparison", "kpi_compare", lab(kpi(map[string]any{"format": "eur"})), lab(kpi(map[string]any{"format": "eur", "compare": "none"}))},
+		{"put time on a time axis", "time_axis", lab(trend("category")), lab(trend("time"))},
+		{"keep to twelve panels", "max_panels", lab(twelve...), lab(twelve[:11]...)},
+		{"keep inline tables short", "inline_table_rows", withData(lab(table(false, "date")), rowsQuery(100)), withData(lab(table(false, "date")), rowsQuery(10))},
+		{"write plain words", "no_raw_ids", lab(named("Spending (card_core_median)")), lab(named("Spending"))},
+		{"total only additive columns", "additive_totals", withData(lab(table(true, "text")), rowsQuery(5)), withData(lab(table(false, "text")), rowsQuery(5))},
+		{"say how estimates are treated", "estimates_declared", withData(lab(table(false, "date")), map[string]any{"a": map[string]any{"from": "postings", "where": `row.date < "2021-01-01"`, "limit": 5}}), withData(lab(table(false, "date")), rowsQuery(5))},
+		{"name logic once", "metric_logic_copied", withData(lab(), map[string]any{"a": copied("2026-01-01"), "b": copied("2025-01-01")}), lab()},
+	} {
+		t.Run("lint: "+tc.name, func(t *testing.T) {
+			if bad := lintOf(tc.bad); !has(bad, tc.rule) {
+				t.Fatalf("%s not caught: %v", tc.rule, bad)
+			}
+			if good := lintOf(tc.good); has(good, tc.rule) {
+				t.Fatalf("%s still reported after the fix: %v", tc.rule, good)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{"spending in a period equals the ledger", func(t *testing.T) {
+			spec := lab()
+			spec["tests"] = []map[string]any{{"ask": "Spending in Q2", "metric": "spending", "from": "2026-04-01", "to": "2026-06-30", "equals_ledger": map[string]any{"accounts": []string{"expenses:"}}}}
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(spec)})
+			if report := must("dashboard_test", map[string]any{"id": "lab"}); report["passed"].(float64) != 1 || report["failed"].(float64) != 0 {
+				t.Fatal(report)
+			}
+			if query(nil)["total"] != "280" {
+				t.Fatal("total")
+			}
+		}},
+		{"a wrong definition fails dashboard_test", func(t *testing.T) {
+			must("metric_upsert", map[string]any{"id": "food_only", "label": "Food only", "unit": "eur", "kind": "flow", "additivity": "sum", "estimates": "include", "accounts": []string{"expenses:food"}})
+			spec := lab()
+			spec["tests"] = []map[string]any{{"ask": "Spending in Q2", "metric": "food_only", "from": "2026-04-01", "to": "2026-06-30", "equals_ledger": map[string]any{"accounts": []string{"expenses:"}}}}
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(spec)})
+			report := must("dashboard_test", map[string]any{"id": "lab"})
+			if report["failed"].(float64) != 1 || !strings.Contains(evalJSON(report["results"]), "€280.00") {
+				t.Fatal(report)
+			}
+			spec["tests"].([]map[string]any)[0]["metric"] = "spending"
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(spec)})
+			if fixed := must("dashboard_test", map[string]any{"id": "lab"}); fixed["failed"].(float64) != 0 {
+				t.Fatal("fixing the metric should pass", fixed)
+			}
+		}},
+		{"a split by category sums to the total", func(t *testing.T) {
+			out := query(map[string]any{"split": "category"})
+			if got := sum(out["series"]); got.Cmp(big.NewRat(280, 1)) != 0 || out["total"] != "280" {
+				t.Fatal(got, out["total"])
+			}
+		}},
+		{"estimates include, exclude and split differ correctly", func(t *testing.T) {
+			include, exclude, split := query(map[string]any{"estimates": "include"}), query(map[string]any{"estimates": "exclude"}), query(map[string]any{"estimates": "split"})
+			if include["total"] != "280" || exclude["total"] != "250" || split["estimates"].(map[string]any)["total"] != "30" {
+				t.Fatal(include["total"], exclude["total"], split["estimates"])
+			}
+		}},
+		{"an average metric compares equal windows fairly", func(t *testing.T) {
+			// Q2 holds three whole months of spending (280.00); the 91 days before it reach one day into December, so the earlier 200.00 is spread over 3 1/31 months.
+			out := must("metric_query", map[string]any{"metric": "burn", "from": "2026-04-01", "to": "2026-06-30", "compare": "previous_period"})
+			if cmp := out["compare"].(map[string]any); out["total"] != "93.33" || cmp["total"] != "65.96" || cmp["delta_pct"] != 41.5 {
+				t.Fatal("an average is a rate per calendar month on both sides", out["total"], cmp)
+			}
+		}},
+		{"previous_period and previous_year compare different windows", func(t *testing.T) {
+			period, year := query(map[string]any{"compare": "previous_period"})["compare"].(map[string]any), query(map[string]any{"compare": "previous_year"})["compare"].(map[string]any)
+			if period["total"] != "200" || period["delta_pct"] != 40.0 || year["total"] != "140" || year["delta_pct"] != 100.0 || year["from"] != "2025-04-01" {
+				t.Fatal(period, year)
+			}
+		}},
+		{"a label appears in a value", func(t *testing.T) {
+			must("label_set", map[string]any{"kind": "category", "key": "groceries_home", "label": "Groceries"})
+			if out := query(map[string]any{"split": "category"}); !strings.Contains(evalJSON(out["series"]), `"name":"Groceries"`) {
+				t.Fatal(out["series"])
+			}
+		}},
+		{"an alias changes the displayed payee, not the entry", func(t *testing.T) {
+			must("payee_alias_upsert", map[string]any{"pattern": "^LIDL", "name": "Lidl"})
+			if out := query(map[string]any{"split": "payee"}); !strings.Contains(evalJSON(out["series"]), `"name":"Lidl"`) {
+				t.Fatal(out["series"])
+			}
+			if entries := must("entries_list", map[string]any{"limit": 500}); !strings.Contains(evalJSON(entries), "LIDL 456 ZAGREB") {
+				t.Fatal("the bank text must stay in the entry")
+			}
+		}},
+		{"an annotation appears as a band value", func(t *testing.T) {
+			must("annotation_upsert", map[string]any{"id": "move", "label": "Moved flat", "from": "2026-05-01", "to": "2026-05-03"})
+			spec := lab(trend("time"))
+			spec["components"].([]map[string]any)[1]["annotate"] = "trips"
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(spec)})
+			values := must("dashboard_preview", map[string]any{"dashboard_id": "lab", "values_only": true})["values"].(map[string]any)
+			if !strings.Contains(evalJSON(values["c"].(map[string]any)["annotations"]), "Moved flat") {
+				t.Fatal(values["c"])
+			}
+		}},
+		{"field_values counts what the ledger holds", func(t *testing.T) {
+			out := must("field_values", map[string]any{"dimension": "category", "from": "2026-04-01", "to": "2026-06-30"})
+			byValue := map[string]map[string]any{}
+			for _, i := range out["items"].([]any) {
+				byValue[i.(map[string]any)["value"].(string)] = i.(map[string]any)
+			}
+			if travel := byValue["Travel"]; travel == nil || travel["count"] != 2.0 || travel["total"] == "" {
+				t.Fatal(out)
+			}
+		}},
+		{"validate_only writes nothing", func(t *testing.T) {
+			before := must("dashboard_get", map[string]any{"id": "lab"})
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": []map[string]any{{"op": "replace", "path": "/title", "value": "Dry"}}, "validate_only": true})
+			if after := must("dashboard_get", map[string]any{"id": "lab"}); evalJSON(after) != evalJSON(before) {
+				t.Fatal("a dry run changed the draft")
+			}
+		}},
+		{"if_version rejects a stale edit", func(t *testing.T) {
+			version := must("dashboard_get", map[string]any{"id": "lab"})["spec"].(map[string]any)["version"].(float64)
+			_, text, failed := call("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": []map[string]any{{"op": "replace", "path": "/title", "value": "Stale"}}, "if_version": int(version) + 7})
+			if !failed || !strings.Contains(text, "re-read") {
+				t.Fatal("stale edit accepted", text)
+			}
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": []map[string]any{{"op": "replace", "path": "/title", "value": "Current"}}, "if_version": int(version)})
+		}},
+		{"a bad publish is rolled back", func(t *testing.T) {
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(lab())})
+			first := must("dashboard_publish", map[string]any{"dashboard_id": "lab", "note": "Good"})["published_version"].(float64)
+			edited := lab()
+			edited["title"] = "Second"
+			must("dashboard_apply", map[string]any{"dashboard_id": "lab", "ops": replace(edited)})
+			if second := must("dashboard_publish", map[string]any{"dashboard_id": "lab"})["published_version"].(float64); second <= first {
+				t.Fatal(first, second)
+			}
+			must("dashboard_rollback", map[string]any{"dashboard_id": "lab", "to_version": int(first)})
+			if live := must("dashboard_get", map[string]any{"id": "lab", "version": "published"}); live["spec"].(map[string]any)["title"] != "Lab" {
+				t.Fatal("rollback did not restore", live["spec"])
+			}
+		}},
+		{"a staged import is listed and posts nothing", func(t *testing.T) {
+			csv := "Date,Amount,Currency,Description,TransferWise ID\n2026-10-01,-12.34,EUR,\"Coffee, lunch\",ID-1\n"
+			start := must("import_start", map[string]any{"account": "assets:bank", "format": "wise_csv", "content_b64": base64.StdEncoding.EncodeToString([]byte(csv))})
+			items := must("imports_list", map[string]any{})["items"].([]any)
+			if len(items) != 1 || items[0].(map[string]any)["id"] != start["batch_id"] || items[0].(map[string]any)["status"] == "committed" {
+				t.Fatal(items, start)
+			}
+			if october := must("metric_query", map[string]any{"metric": "spending", "from": "2026-10-01", "to": "2026-10-31"}); october["total"] != "0" {
+				t.Fatal("staging must post nothing", october)
+			}
+		}},
+		{"nav_set then empty restores the default", func(t *testing.T) {
+			must("nav_set", map[string]any{"items": []map[string]any{{"id": "ledger", "label": "Ledger", "route": "/ledger"}}})
+			if items, _ := s.Semantic.Nav(ctx, owner); len(items) != 1 {
+				t.Fatal(items)
+			}
+			must("nav_set", map[string]any{"items": []map[string]any{}})
+			if items, _ := s.Semantic.Nav(ctx, owner); len(items) != 0 {
+				t.Fatal("an empty list should restore the default", items)
+			}
+		}},
+		{"user_list needs admin:users", func(t *testing.T) {
+			if _, text, failed := call("user_list", map[string]any{}); !failed {
+				t.Fatal("listed people without admin:users", text)
+			}
+			_, adminMust := evalCaller(t, ctx, mcpSession(t, ctx, principal.Principal{UserID: user.ID, Scopes: adminScopes, Admin: true, Actor: actor}, s, false), &largest)
+			if out := adminMust("user_list", map[string]any{}); len(out["items"].([]any)) < 2 {
+				t.Fatal(out)
+			}
+		}},
+		{"an agent can be revoked", func(t *testing.T) {
+			oa := oauth.NewService(oauth.NewMongoRepository(db), s.Identity, "http://localhost:6459")
+			reg, e := oa.Register(ctx, oauth.RegisterInput{Name: "Doomed agent", RedirectURIs: []string{"http://127.0.0.1:8484/callback"}, AuthMethod: "none"})
+			if e != nil {
+				t.Fatal(e)
+			}
+			resource, verifier := oa.Issuer+"/mcp", identity.Random()
+			auth := oauth.Authorization{ClientID: reg.ID, RedirectURI: reg.RedirectURIs[0], ResponseType: "code", Scope: "ledger:read", State: "s", Challenge: oauth.Challenge(verifier), ChallengeMethod: "S256", Resource: resource}
+			code, e := oa.Authorize(ctx, auth, owner)
+			if e != nil {
+				t.Fatal(e)
+			}
+			tokens, e := oa.Exchange(ctx, reg.Client, code, auth.RedirectURI, verifier, resource)
+			if e != nil {
+				t.Fatal(e)
+			}
+			adminCall, adminMust := evalCaller(t, ctx, mcpSession(t, ctx, principal.Principal{UserID: user.ID, Scopes: adminScopes, Admin: true, Actor: actor}, s, false), &largest)
+			id := ""
+			for _, g := range adminMust("agent_list", map[string]any{})["items"].([]any) {
+				if g.(map[string]any)["client_name"] == "Doomed agent" {
+					id = g.(map[string]any)["id"].(string)
+				}
+			}
+			if id == "" {
+				t.Fatal("agent not listed")
+			}
+			if _, _, failed := adminCall("agent_revoke", map[string]any{"id": id}); !failed {
+				t.Fatal("revoked without a reason")
+			}
+			adminMust("agent_revoke", map[string]any{"id": id, "reason": "No longer used"})
+			if _, e = oa.Bearer(ctx, tokens.AccessToken, resource); e == nil {
+				t.Fatal("the revoked agent's token still works")
+			}
+		}},
+		{"feed_upsert returns a secure link and stores no secret", func(t *testing.T) {
+			out := must("feed_upsert", map[string]any{"id": "wise", "url": "https://example.com/statement.csv", "account": "assets:bank", "format": "generic_csv", "date_format": "iso"})
+			if !strings.HasSuffix(out["secret_url"].(string), "/secure/feed/wise") || out["secret_set"] != false {
+				t.Fatal(out)
+			}
+			if s.Imports.HasFeedSecret(owner, imports.Feed{ID: "wise"}) {
+				t.Fatal("a secret was stored")
+			}
+		}},
+	} {
+		t.Run(tc.name, tc.run)
+	}
+
+	t.Run("the largest default answer fits in 25k tokens", func(t *testing.T) {
+		for _, tool := range []string{"catalog_get", "metric_list", "entries_list", "accounts_list", "dashboard_list"} {
+			must(tool, map[string]any{})
+		}
+		if largest > 100_000 { // about 25k tokens at four bytes each
+			t.Fatal("largest answer is", largest, "bytes")
+		}
+		t.Log("largest answer", largest, "bytes")
 	})
 }

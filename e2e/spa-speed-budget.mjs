@@ -37,7 +37,7 @@ for(let i=0;i<16;i++){
 }
 console.log(`range change: median ${median(range).toFixed(0)} ms, worst ${worst(range).toFixed(0)} ms (${range.map(n => Math.round(n)).join(' ')})`)
 
-const sizes=new Map();page.on('response',async r => {if(!/\/api\/(dashboards|bootstrap)/.test(r.url()))return;const h=await r.allHeaders().catch(() => ({}));const sized=Number(h['content-length'] ?? 0);sizes.set(new URL(r.url()).pathname,Math.max(sizes.get(new URL(r.url()).pathname) ?? 0,sized))})
+const sizes=new Map();page.on('response',async r => {if(!/\/api\/(dashboards|bootstrap)/.test(r.url()))return;const h=await r.allHeaders().catch(() => ({}));const sized=Number(h['content-length']) || (await r.body().catch(() => Buffer.alloc(0))).length;sizes.set(new URL(r.url()).pathname,Math.max(sizes.get(new URL(r.url()).pathname) ?? 0,sized))})
 await page.goto(`${base}/dashboards/spending`);await page.waitForLoadState('networkidle',{timeout:2000}).catch(() => {})
 const largest=Math.max(0,...sizes.values());console.log(`payload: ${[...sizes].map(([k,v]) => `${k} ${(v/1024).toFixed(1)} KB`).join(', ')}`)
 await browser.close()
