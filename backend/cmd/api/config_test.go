@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 )
@@ -19,9 +20,16 @@ func TestConfigVaultPrecedenceAndSecretValidation(t *testing.T) {
 	t.Setenv("MONEYBAG_LISTEN", "127.0.0.1:6459")
 	t.Setenv("MONEYBAG_VAULT_ENABLED", "false")
 	t.Setenv("MONEYBAG_UI", "legacy")
+	if err := os.Unsetenv("MONEYBAG_UI"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg, err := loadConfig(); err != nil || cfg.UI != "spa" {
+		t.Fatalf("default UI: %q, %v", cfg.UI, err)
+	}
+	t.Setenv("MONEYBAG_UI", "legacy")
 	c, e := loadConfig()
-	if e != nil || c.MongoDB != "test" {
-		t.Fatal(c.MongoDB, e)
+	if e != nil || c.MongoDB != "test" || c.UI != "legacy" {
+		t.Fatal(c.MongoDB, c.UI, e)
 	}
 	t.Setenv("MONEYBAG_UI", "invalid")
 	if _, e := loadConfig(); e == nil {

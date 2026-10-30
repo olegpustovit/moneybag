@@ -61,7 +61,7 @@ MONEYBAG_TEST_MONGO_URI=mongodb://127.0.0.1:27017/moneybag_test_local go test ./
 
 The integration suite requires a disposable database whose name starts with `moneybag_test_`; it drops that database. It checks colliding user IDs in shared collections, ledger invariants, OAuth, import retries, rules, reconciliation, sharing, undo/redo and all 64 tool scope guards through the official MCP SDK. Integration tests skip when the environment variable is absent.
 
-Browser checks use a separate synthetic QA environment on port 6460. Start the QA server with `MONEYBAG_UI=spa`, `MONEYBAG_SETUP_TOKEN=synthetic-preview-token`, a disposable MongoDB database, and `MONEYBAG_CHROMIUM_BIN` set for PNG previews:
+Browser checks use a separate synthetic QA environment on port 6460. Start the QA server with `MONEYBAG_SETUP_TOKEN=synthetic-preview-token`, a disposable MongoDB database, and `MONEYBAG_CHROMIUM_BIN` set for PNG previews:
 
 ```sh
 cd e2e
