@@ -38,7 +38,10 @@ export default function DashboardChart({ value:source, drilldown = false, tableI
   const series = value.series.length ? value.series : [{ name: '', color_index: 0 }]
   const rows=chartRows(value.points,series)
   const color = chartColor
-  const axes = <><CartesianGrid vertical={false} stroke="var(--bd)"/><XAxis dataKey="x" tickLine={false} axisLine={false} minTickGap={20}/><YAxis tickLine={false} axisLine={false} width={55}/><Tooltip cursor={{stroke:'var(--text3)',strokeDasharray:'3 3'}} shared={value.mark==='bar' ? false : undefined} content={props => <ChartTip {...props} rows={rows} format={value.y_format} stack={value.mark==='stack'}/>} />{value.rule && <ReferenceLine y={value.rule.y} stroke="var(--text2)" strokeDasharray="4 4" label={value.rule.label}/>}</>
+  const tickX=(v:string|number) => {const s=String(v);if(value.x.kind==='date' && /^\d{4}-\d{2}-\d{2}/.test(s))return s.slice(0,10);if(value.x.kind==='month' && /^\d{4}-\d{2}/.test(s))return s.slice(0,7);return s}
+  // Rates and other non-zero formats stay off zero so small moves remain visible.
+  const yDomain=value.mark==='bar' || value.mark==='stack' || /^(usd0?|eur0?|pct0?|int|mo)$/.test(value.y_format) ? undefined : (['auto','auto'] as const)
+  const axes = <><CartesianGrid vertical={false} stroke="var(--bd)"/><XAxis dataKey="x" tickLine={false} axisLine={false} minTickGap={20} tickFormatter={tickX}/><YAxis tickLine={false} axisLine={false} width={55} domain={yDomain}/><Tooltip cursor={{stroke:'var(--text3)',strokeDasharray:'3 3'}} shared={value.mark==='bar' ? false : undefined} content={props => <ChartTip {...props} rows={rows} format={value.y_format} stack={value.mark==='stack'}/>} />{value.rule && <ReferenceLine y={value.rule.y} stroke="var(--text2)" strokeDasharray="4 4" label={value.rule.label}/>}</>
   const timeSeries=(value.x.kind==='date' || value.x.kind==='month' || value.x.kind==='number' && value.x.field==='month') && rows.length>24
   const visibleSeries=series.filter(item => !hidden.includes(item.name)).length
   const direct=visibleSeries>0 && visibleSeries<=4
