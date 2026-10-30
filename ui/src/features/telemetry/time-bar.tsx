@@ -107,7 +107,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
  return <section className="tm-time" aria-label="Time range">
   <div className="tm-time-top">
    <div className={`tm-time-entry${invalid ? ' invalid' : ''}`}>
-    <label htmlFor={fieldId}>{label}</label>
+    <label htmlFor={fieldId}>{label.split('. ')[0]}{label.includes('. ') && <span className="sr-only">. {label.split('. ').slice(1).join('. ')}</span>}</label>
     <input id={fieldId} ref={input} value={shown} autoComplete="off" spellCheck={false} enterKeyHint="go" aria-invalid={invalid} aria-describedby={statusId}
      onFocus={e => e.currentTarget.select()} onChange={e => setDraft(e.target.value)} onBlur={() => setDraft(null)}
      onKeyDown={e => {if(e.key==='Enter'){if(parsed?.ok){state.setText(draft!);setDraft(null);e.currentTarget.blur()}else if(draft===null)e.currentTarget.blur()}else if(e.key==='Escape'){setDraft(null);e.currentTarget.blur()}}}/>
@@ -121,7 +121,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
    <div className="tm-zoom">
     <button type="button" className="tm-btn" title="Zoom out ( z )" onClick={state.zoomOut}>Zoom out</button>
     <button type="button" className="tm-btn" disabled={!state.canUndo} onClick={state.undo}>Undo zoom</button>
-    {!hideCompare && <><label className="tm-compare-label" htmlFor={compareId}>Compare to</label><select id={compareId} className="tm-btn tm-select" value={state.compare} onChange={e => state.setCompare(e.target.value as CompareMode)}><option value="previous_period">Previous period</option><option value="previous_year">Same period last year</option><option value="none">Nothing</option></select></>}
+    {!hideCompare && <><label className="sr-only" htmlFor={compareId}>Compare to</label><select id={compareId} title="Compare to" className="tm-btn tm-select" value={state.compare} onChange={e => state.setCompare(e.target.value as CompareMode)}><option value="previous_period">Previous period</option><option value="previous_year">Same period last year</option><option value="none">Nothing</option></select></>}
    </div>
   </div>
   {navigator && <HistoryNavigator bounds={bounds} range={state.range} onChange={(range,{final}) => state.setRange(range,{final})} xs={navigator.xs} values={navigator.values} bands={navigator.bands} label={navigator.label}/>}

@@ -42,7 +42,7 @@ body { margin:0; min-width:320px; }
 .nav-link.active svg { color:var(--text); }
 .nav-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .nav-count { margin-left:auto; padding:0 5px; border:1px solid var(--bd); color:var(--text2); font-size:11px; font-variant-numeric:tabular-nums; }
-.nav-kbd { width:16px; flex:none; color:var(--text3); font:10px var(--font-mono); letter-spacing:-.05em; }
+.nav-kbd { min-width:16px;white-space:nowrap; flex:none; color:var(--text3); font:10px var(--font-mono); letter-spacing:-.05em; }
 .workspace-content { min-width:0; }
 .main-content { max-width:1440px; padding:24px 32px 56px; }
 .mobile-header { display:none; }

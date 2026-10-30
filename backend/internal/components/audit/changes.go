@@ -186,9 +186,10 @@ func (g *ChangeGroup) add(e Event, status string) {
 	// A batch undoes event by event, so only a single-event group offers one undo.
 	g.Undoable = g.Count == 1 && status == "completed" && slices.Contains(undoable, e.Tool)
 	first := g.Events[0].Summary
-	same := true
+	same, sameTool := true, true
 	for _, event := range g.Events {
 		same = same && event.Summary == first
+		sameTool = sameTool && event.Tool == g.Events[0].Tool
 	}
 	rates, overview := true, ""
 	for _, event := range g.Events {
@@ -204,7 +205,7 @@ func (g *ChangeGroup) add(e Event, status string) {
 		g.Summary = overview
 	case rates:
 		g.Summary = fmt.Sprintf("Updated %d rate quotes", g.Count)
-	case same && plurals[g.Events[0].Tool] != "":
+	case sameTool && plurals[g.Events[0].Tool] != "":
 		g.Summary = fmt.Sprintf(plurals[g.Events[0].Tool], g.Count)
 	case same:
 		g.Summary = fmt.Sprintf("%s, %d times", first, g.Count)
