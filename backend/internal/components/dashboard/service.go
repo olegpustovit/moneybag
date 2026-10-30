@@ -483,14 +483,17 @@ func applyPatch(spec *Spec, patch jsonpatch.Patch) error {
 		if errors.Is(e, jsonpatch.ErrMissing) {
 			return fmt.Errorf("op %d: path %s not found; read valid paths with dashboard_summary or dashboard_get", i, path)
 		}
-		return fmt.Errorf("op %d (%s %s): %w", i, op.Kind(), path, e)
+		if op.Kind() == "test" {
+			return fmt.Errorf("op %d: test %s failed; the draft changed, so re-read it with dashboard_summary and retry", i, path)
+		}
+		return fmt.Errorf("op %d (%s %s): %w; check the value type against dashboard_get", i, op.Kind(), path, e)
 	}
 	// Decode into a fresh Spec: decoding into the old one merges maps, so removed queries would survive.
 	var patched Spec
 	decoder := json.NewDecoder(strings.NewReader(string(next)))
 	decoder.DisallowUnknownFields()
 	if e := decoder.Decode(&patched); e != nil {
-		return fmt.Errorf("invalid spec: %w", e)
+		return fmt.Errorf("invalid spec: %w; unknown fields are rejected, so check field names in dashboard_get", e)
 	}
 	*spec = patched
 	return nil
