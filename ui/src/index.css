@@ -215,7 +215,11 @@ th { color:var(--text2); font-weight:600; }
 .account-id { display:block; font-size:.75rem; }
 .account-dialog { max-height:90vh; overflow:auto; border-radius:0; }
 .account-form { display:flex; flex-direction:column; gap:.75rem; }
-.workspace-columns { width:100%; resize:vertical; border:1px solid var(--bd); background:var(--paper); color:var(--text); padding:.5rem; font:12px var(--font-mono); }
+.workspace-column-list { display:grid; gap:.5rem; }
+.workspace-column { display:grid; grid-template-columns:1fr 1fr; gap:.5rem; border:1px solid var(--bd); padding:.5rem; min-width:0; }
+.workspace-column legend { font-size:.8rem; padding:0 .25rem; }
+.workspace-column-formula { grid-column:1 / -1; }
+.workspace-column button { justify-self:start; }
 .account-form .account-close { flex-direction:row; align-items:center; }
 .account-groups .table-scroll { position:relative; }
 .budget-loading-controls > div { display:grid; gap:4px; width:9rem; font-size:.8rem; }.budget-loading-controls .skeleton-bar { height:32px; }.budget-loading-summary > div { width:8rem; }.budget-loading-summary .skeleton-bar { height:24px; }.budget-loading-bars { display:grid; gap:20px; margin:20px 0; }.budget-loading-bars .skeleton-bar { height:12px; }.budget-loading-table table { min-width:720px; table-layout:fixed; }
