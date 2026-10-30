@@ -38,8 +38,8 @@ type renderOutput struct {
 	Tests      dashboard.TestReport `json:"tests"`
 	Layout     []preview.Box        `json:"layout,omitempty"`
 	Checks     *preview.Checks      `json:"checks,omitempty"`
-	TimingMS   float64              `json:"timing_ms,omitempty" jsonschema:"page load to settled, as the page reported it"`
-	RenderMS   int64                `json:"render_ms,omitempty" jsonschema:"the whole render including Chromium"`
+	TimingMS   float64              `json:"timing_ms,omitempty"`
+	RenderMS   int64                `json:"render_ms,omitempty"`
 	Message    string               `json:"message,omitempty"`
 	PNG        []byte               `json:"-"`
 }

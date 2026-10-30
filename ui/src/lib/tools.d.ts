@@ -2342,9 +2342,6 @@ export interface DashboardRenderOutput {
         [k: string]: unknown;
       };
   message?: string;
-  /**
-   * the whole render including Chromium
-   */
   render_ms?: number;
   tests: {
     failed: number;
@@ -2362,9 +2359,6 @@ export interface DashboardRenderOutput {
         }[];
     [k: string]: unknown;
   };
-  /**
-   * page load to settled, as the page reported it
-   */
   timing_ms?: number;
   validation: {
     cost: number;
