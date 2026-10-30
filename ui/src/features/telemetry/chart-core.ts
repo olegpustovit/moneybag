@@ -11,7 +11,7 @@ export type Ticks={ticks:number[];labels:string[]}
 // A real UTC time axis. Labels are always human; a raw timestamp can never reach the screen.
 export function timeTicks(min:number,rawMax:number,width:number,gap=64):Ticks {
  // A label centred on the far edge would be cut in half, so the last 14px carry no tick.
- const max=rawMax-(rawMax-min)/Math.max(1,width)*14,span=Math.max(1,rawMax-min),[,unit,n]=STEPS.find(([ms]) => ms/span*width>=gap) ?? STEPS[STEPS.length-1],ticks:number[]=[],labels:string[]=[]
+ const max=rawMax-(rawMax-min)/Math.max(1,width)*14,span=Math.max(1,rawMax-min),[,unit,n]=STEPS.find(([ms,step]) => ms/span*width>=gap && (span<=120*DAY || (step!=='day' && step!=='hour'))) ?? STEPS[STEPS.length-1],ticks:number[]=[],labels:string[]=[]
  let lastYear=NaN
  const push=(t:number,short:string,day:Date) => {const y=day.getUTCFullYear();ticks.push(t);labels.push(lastYear!==y ? `${short}\n${y}` : short);lastYear=y}
  if(unit==='year'){for(let y=Math.ceil(new Date(min).getUTCFullYear()/n)*n;;y+=n){const t=Date.UTC(y,0,1);if(t>max)break;if(t>=min){ticks.push(t);labels.push(String(y))}}return {ticks,labels}}

@@ -193,10 +193,12 @@ export function timeseries(c:Cube,q:Query,{measure='spending',bucket,split,estim
  return {bucket:b,xs,total,series:series.filter(s => s.values.some(x => x!==0))}
 }
 // The comparison window bucketed like the current one, aligned by position so it overlays directly.
+// Both windows end at the same point of their bucket, but the earlier one may start with a sliver of an extra bucket; lining up from the end keeps a month against a month.
+export const alignCompare=(values:ArrayLike<number>,length:number):(number|null)[] => {const off=values.length-length;return Array.from({length},(_,i) => i+off>=0 && i+off<values.length ? values[i+off] : null)}
 export function compareSeries(c:Cube,q:Query,win:CompareWindow|null,{measure='spending',bucket,estimates='include'}:{measure?:Measure;bucket?:Bucket;estimates?:EstimatePolicy}={}):(number|null)[]|null {
  if(!win?.available)return null
  const b=bucket ?? autoBucket(q.range),base=timeseries(c,{range:win,pills:q.pills},{measure,bucket:b,estimates}),xs=bucketEdges(q.range,b)
- return xs.map((_,i) => i<base.xs.length ? base.total[i] : null)
+ return alignCompare(base.total,xs.length)
 }
 export function compareTotals(c:Cube,q:Query,win:CompareWindow|null):{current:Totals;previous:Totals|null} {return {current:totals(c,q),previous:win?.available ? totals(c,{range:win,pills:q.pills}) : null}}
 const groupSum=(c:Cube,q:Query,row:Int32Array,size:number,measure:Measure) => {
