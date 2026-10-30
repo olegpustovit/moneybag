@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import './telemetry.css'
 
 export function Sparkline({values,color='var(--c0)',label,height=30}:{values:ArrayLike<number|null>;color?:string;label?:string;height?:number}) {
@@ -9,7 +9,7 @@ export function Sparkline({values,color='var(--c0)',label,height=30}:{values:Arr
  return <svg className="tm-spark" viewBox={`0 0 200 ${height}`} height={height} preserveAspectRatio="none" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}><polyline points={points} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke"/></svg>
 }
 
-export type RankedRow={key:string;label:string;value:number;text:string;compare?:number;compareText?:string;color?:string;note?:string}
+export type RankedRow={key:string;label:string;value:number;text:string;compare?:number;compareText?:string;color?:string;estimated?:boolean;note?:string}
 // Sorted by size with direct labels. Rows too small to read collapse into one line that expands on request.
 export function RankedBars({rows,onSelect,selectLabel='Filter by',collapseBelow=.01,maxRows=12,noun='items',barColor='var(--c0)',emptyText='Nothing to rank in this range.',ariaLabel}:{rows:RankedRow[];onSelect?:(key:string) => void;selectLabel?:string;collapseBelow?:number;maxRows?:number;noun?:string;barColor?:string;emptyText?:string;ariaLabel?:string}) {
  const [expanded,setExpanded]=useState(false)
@@ -17,22 +17,24 @@ export function RankedBars({rows,onSelect,selectLabel='Filter by',collapseBelow=
  const sorted=[...rows].sort((a,b) => Math.abs(b.value)-Math.abs(a.value)),peak=Math.max(1e-9,...sorted.flatMap(r => [Math.abs(r.value),Math.abs(r.compare ?? 0)]))
  let shown=sorted,small:RankedRow[]=[]
  if(!expanded){const keep=sorted.filter((r,i) => i<maxRows && Math.abs(r.value)>=peak*collapseBelow);if(sorted.length-keep.length>=2){shown=keep;small=sorted.slice(keep.length)}}
- const body=(r:RankedRow) => <><span className="n" title={r.label}>{r.label}</span><span className="track"><i style={{width:`${Math.abs(r.value)/peak*100}%`,background:r.color ?? barColor}}/>{r.compare!==undefined && <b style={{left:`${Math.abs(r.compare)/peak*100}%`}} title={r.compareText}/>}</span><span className="t">{r.text}{r.note && <small>{r.note}</small>}</span></>
+ const body=(r:RankedRow) => <><span className="n" title={r.label}>{r.label}</span><span className="track"><i className={r.estimated ? 'tm-hatch' : undefined} style={{width:`${Math.abs(r.value)/peak*100}%`,background:r.estimated ? undefined : r.color ?? barColor}}/>{r.compare!==undefined && <b style={{left:`${Math.abs(r.compare)/peak*100}%`}} title={r.compareText}/>}</span><span className="t">{r.text}{r.note && <small>{r.note}</small>}</span></>
  return <ol className="tm-ranked" aria-label={ariaLabel}>
   {shown.map(r => <li key={r.key}>{onSelect ? <button type="button" aria-label={`${selectLabel} ${r.label}: ${r.text}${r.compareText ? `, was ${r.compareText}` : ''}`} onClick={() => onSelect(r.key)}>{body(r)}</button> : <div>{body(r)}</div>}</li>)}
   {small.length>0 && <li className="more"><button type="button" onClick={() => setExpanded(true)}><span className="n">{small.length} small {noun}</span><span className="track"/><span className="t">Show</span></button></li>}
  </ol>
 }
 
-export type DonutSlice={key:string;label:string;value:number;text:string;color:string}
+export type DonutSlice={key:string;label:string;value:number;text:string;color:string;estimated?:boolean}
 const TAU=Math.PI*2
 export function Donut({slices,center,centerLabel,size=180,onSelect,ariaLabel}:{slices:DonutSlice[];center?:string;centerLabel?:string;size?:number;onSelect?:(key:string) => void;ariaLabel?:string}) {
+ const hatchId=useId()
  const items=slices.filter(s => s.value>0),total=items.reduce((n,s) => n+s.value,0)
  if(!total)return <p className="tm-empty">Nothing to show.</p>
  const r=size/2-14,width=22,c=TAU*r;let at=0
  return <figure className="tm-donut" style={{maxWidth:size}}>
   <svg viewBox={`0 0 ${size} ${size}`} role="img" aria-label={ariaLabel ?? slices.map(s => `${s.label} ${s.text}`).join(', ')}>
-   <g transform={`rotate(-90 ${size/2} ${size/2})`}>{items.map(s => {const len=s.value/total*c,gap=items.length>1 ? Math.min(1.5,len/2) : 0,dash=`${Math.max(.5,len-gap)} ${c-Math.max(.5,len-gap)}`,offset=-at;at+=len;const pick=onSelect ? {tabIndex:0,role:'button',onClick:() => onSelect(s.key),onKeyDown:(e:React.KeyboardEvent) => {if(e.key==='Enter' || e.key===' '){e.preventDefault();onSelect(s.key)}},'aria-label':`${s.label}: ${s.text}`,className:'pick'} : {};return <circle key={s.key} cx={size/2} cy={size/2} r={r} fill="none" stroke={s.color} strokeWidth={width} strokeDasharray={dash} strokeDashoffset={offset} {...pick}><title>{`${s.label}: ${s.text}`}</title></circle>})}</g>
+   <defs><pattern id={hatchId} width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--paper)"/><rect width="2" height="6" fill="var(--hatch)"/></pattern></defs>
+   <g transform={`rotate(-90 ${size/2} ${size/2})`}>{items.map(s => {const len=s.value/total*c,gap=items.length>1 ? Math.min(1.5,len/2) : 0,dash=`${Math.max(.5,len-gap)} ${c-Math.max(.5,len-gap)}`,offset=-at;at+=len;const pick=onSelect ? {tabIndex:0,role:'button',onClick:() => onSelect(s.key),onKeyDown:(e:React.KeyboardEvent) => {if(e.key==='Enter' || e.key===' '){e.preventDefault();onSelect(s.key)}},'aria-label':`${s.label}: ${s.text}`,className:'pick'} : {};return <circle key={s.key} cx={size/2} cy={size/2} r={r} fill="none" stroke={s.estimated ? `url(#${hatchId})` : s.color} strokeWidth={width} strokeDasharray={dash} strokeDashoffset={offset} {...pick}><title>{`${s.label}: ${s.text}`}</title></circle>})}</g>
    {center && <text x="50%" y={centerLabel ? '48%' : '50%'} textAnchor="middle" dominantBaseline="middle" className="tm-donut-value">{center}</text>}
    {centerLabel && <text x="50%" y="59%" textAnchor="middle" dominantBaseline="middle" className="tm-donut-label">{centerLabel}</text>}
   </svg>

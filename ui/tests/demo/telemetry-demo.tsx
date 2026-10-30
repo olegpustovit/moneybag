@@ -29,6 +29,8 @@ const eur=unitFormat('eur',{minor:true,code}),full=balanceSeries(cube,{from:boun
 const dictionary={category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values}
 const ASKS=['Groceries over €50 last 3 months','Travel this year','Everything except rent, no estimates','Charges above €500 since march']
 const m=(c:number) => money(c,code)
+// Arguments make the React Compiler re-run this whenever the inputs change, instead of caching one reading forever.
+const clock=(..._inputs:unknown[]) => performance.now()
 declare global {interface Window {__demo:{readCached:typeof readCached;writeCached:typeof writeCached;wire:typeof wire;ask:string[];flags:unknown[];saved:number};__router?:unknown}}
 window.__demo={readCached,writeCached,wire,ask:[],flags:[],saved:0}
 const legacy:Record<string,ChartValue>={
@@ -45,12 +47,12 @@ function Demo() {
  const time=useTimeState({bounds,search,onSearch:writeSearch,defaultText:'12mo'})
  const pills=decodePills(search.f),setPills=(next:Pill[]) => writeSearch({f:encodePills(next) || undefined},{push:true})
  const [hiddenSpend,setHiddenSpend]=useState<string[]>([]),[details,setDetails]=useState<DetailsContent|null>(null),[drawerOpen,setDrawerOpen]=useState(false),[message,setMessage]=useState('')
- const t0=performance.now(),range=time.range,win=time.window,q={range,pills}
+ const range=time.range,win=time.window,q={range,pills},t0=clock(range,pills,win)
  const t=totals(cube,q),prev=win?.available ? totals(cube,{range:win,pills}) : null
  const spend=timeseries(cube,q,{split:'category',estimates:'split'}),out=timeseries(cube,q,{measure:'spending',bucket:spend.bucket}),inn=timeseries(cube,q,{measure:'income',bucket:spend.bucket}),compare=compareSeries(cube,q,win,{bucket:spend.bucket})
  const nw=balanceSeries(cube,range),nwStart=balanceAt(cube,range.from) ?? 0,nwEnd=balanceAt(cube,range.to) ?? 0,nwCompare=win?.available ? balanceSeries(cube,win) : null
  const facts=localFacts(cube,q,win),moved=whatMoved(cube,q,win,{limit:12}),rows=rowsIn(cube,q)
- const usd=rateSeries(cube,'EUR/USD',range),ms=performance.now()-t0
+ const usd=rateSeries(cube,'EUR/USD',range),ms=clock(rows,usd,moved,compare)-t0
  const compareName=win?.label ?? ''
  const saved=t.in-t.out,rate=t.in ? saved/t.in*100 : 0
  const onCursorPick=(i:number,xs:number[]) => {const from=xs[i];setMessage(`Picked ${dayLabel(from)}`)}
@@ -59,14 +61,14 @@ function Demo() {
  const grid:GridRow[]=Array.from(rows,i => {const a=cube.accounts[cube.a[i]],inc=a.class==='income',cents=inc ? -cube.v[i] : cube.v[i];return {date:isoDay(cube.startMs+cube.d[i]*864e5),payee:cube.payees[cube.p[i]],category:a.category,source:a.estimated ? 'Estimated' : 'Statement',amount:{v:inc ? cents : -cents,t:`${inc ? '+' : ''}${moneyExact(cents,code)}`,tone:inc ? 'ok' : undefined},id:a.id,trip:cube.tagSets[cube.t[i]]?.[0]?.slice(5) ?? ''}})
  const columns:GridColumn[]=[{key:'date',label:'Date',type:'date'},{key:'payee',label:'Payee',type:'text'},{key:'category',label:'Category',type:'text'},{key:'source',label:'Source',type:'text'},{key:'amount',label:'Amount',type:'money'},{key:'id',label:'Account ID',machine:true}]
  const leaders=whatMoved(cube,q,win,{limit:30})
- const ranked=leaders.map(x => ({key:x.key,label:x.label,value:x.now,text:m(x.now),compare:win?.available ? x.before : undefined,compareText:win?.available ? m(x.before) : undefined,color:`var(${colorOf(cube,'category',x.key)})`}))
+ const ranked=leaders.map(x => ({key:x.key,label:x.label,value:x.now,text:m(x.now),compare:win?.available ? x.before : undefined,compareText:win?.available ? m(x.before) : undefined,color:`var(${colorOf(cube,'category',x.key)})`,estimated:x.key==='Estimated'}))
  const payees=whatMoved(cube,q,win,{by:'payee',limit:40}).map(x => ({key:x.key,label:x.label,value:x.now,text:m(x.now),compare:win?.available ? x.before : undefined,compareText:win?.available ? m(x.before) : undefined}))
  const inBy=whatMoved(cube,q,null,{measure:'income',limit:6}).filter(x => x.now>0),outBy=whatMoved(cube,q,null,{limit:7}).filter(x => x.now>0)
  const flowNodes=[...inBy.map(x => ({key:`in:${x.key}`,label:x.label,color:'var(--c2)',text:m(x.now)})),{key:'pool',label:'Money in',color:'var(--ink)',text:m(t.in)},...outBy.map(x => ({key:`out:${x.key}`,label:x.label,color:`var(${colorOf(cube,'category',x.key)})`,text:m(x.now)})),...(saved>0 ? [{key:'saved',label:'Saved',color:'var(--ok)',text:m(saved)}] : [])]
  const flowLinks=[...inBy.map(x => ({from:`in:${x.key}`,to:'pool',value:x.now})),...outBy.map(x => ({from:'pool',to:`out:${x.key}`,value:x.now})),...(saved>0 ? [{from:'pool',to:'saved',value:saved}] : [])]
  const spendSeries:ChartSeries[]=spend.series.map(s => ({...s}))
  const pots=entityColors(cube,'category')
- const donut=outBy.map(x => ({key:x.key,label:x.label,value:x.now,text:m(x.now),color:`var(${colorOf(cube,'category',x.key)})`}))
+ const donut=outBy.map(x => ({key:x.key,label:x.label,value:x.now,text:m(x.now),color:`var(${colorOf(cube,'category',x.key)})`,estimated:x.key==='Estimated'}))
  const summary=`${t.entries.toLocaleString('en-US')} entries · ${m(t.out)} out · ${m(t.in)} in`
  const commandGroups=[{heading:'Pages',items:['Now','Spending','Income','Budget','Future','Ledger','Data','Changes'].map(p => ({id:p,label:p}))},{heading:'Accounts',items:cube.accounts.map(a => ({id:a.id,label:a.label,hint:a.category}))},{heading:'Payees',items:cube.payees.slice(0,60).map(p => ({id:p,label:p}))},{heading:'Saved views',items:[{id:'v1',label:'Trips since 2024'},{id:'v2',label:'Everyday spending, no estimates'}]}]
  return <main className="demo">
@@ -88,7 +90,7 @@ function Demo() {
    <section className="demo-panel s6"><h3 className="demo-h">Top categories</h3><RankedBars rows={ranked} noun="categories" onSelect={key => setPills([...pills.filter(p => p.field!=='category'),{field:'category',op:'is',values:[key]}])} ariaLabel="Spending by category, largest first"/></section>
    <section className="demo-panel s6"><h3 className="demo-h">Top payees</h3><RankedBars rows={payees} noun="payees" maxRows={8} collapseBelow={.04} onSelect={key => setPills([...pills.filter(p => p.field!=='payee'),{field:'payee',op:'contains',values:[key]}])} ariaLabel="Spending by payee, largest first"/></section>
    <section className="demo-panel s8"><h3 className="demo-h">Cash flow</h3><Sankey nodes={flowNodes} links={flowLinks} formatValue={m}/></section>
-   <section className="demo-panel s4"><h3 className="demo-h">Where it went</h3><Donut slices={donut} center={m(t.out)} centerLabel="Money out" size={200} onSelect={key => setPills([{field:'category',op:'is',values:[key]}])}/><div className="tm-legend demo-legend">{donut.map(s => <span key={s.key} className="tm-legend-key"><i style={{background:s.color}}/>{s.label}</span>)}</div></section>
+   <section className="demo-panel s4"><h3 className="demo-h">Where it went</h3><Donut slices={donut} center={m(t.out)} centerLabel="Money out" size={200} onSelect={key => setPills([{field:'category',op:'is',values:[key]}])}/><div className="tm-legend demo-legend">{donut.map(s => <span key={s.key} className="tm-legend-key"><i className={s.estimated ? 'tm-hatch' : undefined} style={{background:s.estimated ? undefined : s.color}}/>{s.label}</span>)}</div></section>
    <section className="demo-panel s6"><TimeChart title="EUR/USD" note="A rate leaves zero so its moves stay visible." mark="line" format={unitFormat('rate')} xs={usd.xs} series={[{key:'usd',label:'EUR/USD',color:'--c3',values:usd.values}]} range={range} bounds={bounds} onRangeChange={(r,{final}) => time.setRange(r,{final})} onStepOut={time.zoomOut} syncKey="demo" height={200}/></section>
    <section className="demo-panel s6"><TimeChart title="Biggest moves" note="Category axis" mark="bar" format={eur} categories={moved.slice(0,8).map(x => x.label)} series={[{key:'now',label:'This period',color:'--c0',values:moved.slice(0,8).map(x => x.now)},...(win?.available ? [{key:'then',label:compareName.replace(/^./,c => c.toUpperCase()),color:'--series-other',values:moved.slice(0,8).map(x => x.before)}] : [])]} height={200}/></section>
   </div>

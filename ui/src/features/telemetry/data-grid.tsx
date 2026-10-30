@@ -28,7 +28,8 @@ export function gridText(column:GridColumn,value:GridValue):string {
  }
  return type==='date' ? humanDate(value) : value
 }
-const compare=(a:unknown,b:unknown) => {if(a===b)return 0;if(a===null || a===undefined)return 1;if(b===null || b===undefined)return -1;return typeof a==='number' && typeof b==='number' ? a-b : String(a).localeCompare(String(b))}
+const collator=new Intl.Collator('en',{numeric:true,sensitivity:'base'})
+const compare=(a:unknown,b:unknown) => typeof a==='number' && typeof b==='number' ? a-b : collator.compare(String(a),String(b))
 export function sortRows<R extends GridRow>(rows:R[],sort:GridSort):R[] {if(!sort)return rows;const sign=sort.desc ? -1 : 1;return [...rows].sort((a,b) => {const x=raw(a[sort.key]),y=raw(b[sort.key]);if(x===null || x===undefined)return y===null || y===undefined ? 0 : 1;if(y===null || y===undefined)return -1;return sign*compare(x,y)})}
 // A total exists only when the column asks for one and its unit can add up. Rates, runway and text never get one, whatever the spec says.
 export function columnTotal(column:GridColumn,rows:GridRow[]):number|null {
@@ -48,7 +49,7 @@ export function DataGrid({columns,rows,rowKey,label,sort:controlled,onSortChange
  const visible=columns.filter(c => !c.machine),sorted=sortRows(rows,sort),details=!!onDetails,cols=template(visible,details),m=roleFor(visible)
  const virtual=sorted.length>virtualFrom
  useLayoutEffect(() => {const top=(body.current?.getBoundingClientRect().top ?? 0)+scrollY;if(Math.abs(top-margin)>1)setMargin(top)})
- const virtualizer=useWindowVirtualizer({count:sorted.length,estimateSize:() => 36,overscan:14,scrollMargin:margin,enabled:virtual})
+ const virtualizer=useWindowVirtualizer({count:sorted.length,estimateSize:() => 36,overscan:14,scrollMargin:margin,enabled:virtual,measureElement:el => el.getBoundingClientRect().height || 36})
  const items=virtual ? virtualizer.getVirtualItems() : sorted.map((_,index) => ({index,start:0}))
  const barPeak=new Map(visible.filter(c => c.cell==='bar').map(c => [c.key,Math.max(1e-9,...rows.map(r => {const v=raw(r[c.key]);return typeof v==='number' ? Math.abs(v) : 0}))]))
  const totals=visible.map(c => columnTotal(c,sorted)),hasTotal=totals.some(t => t!==null)

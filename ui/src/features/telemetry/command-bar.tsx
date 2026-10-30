@@ -20,7 +20,7 @@ export function CommandBar({groups,onSelect,onAsk,open:openProp,onOpenChange,pla
    <DialogTitle className="sr-only">Command bar</DialogTitle>
    <DialogDescription className="sr-only">Type to jump somewhere, or ask an agent a question.</DialogDescription>
    <Command label="Command bar" loop>
-    <Command.Input value={query} onValueChange={setQuery} placeholder={placeholder} aria-label="Search or ask"/>
+    <Command.Input autoFocus value={query} onValueChange={setQuery} placeholder={placeholder} aria-label="Search or ask"/>
     <Command.List>
      <Command.Empty>{onAsk ? 'Nothing to jump to. Press Enter to ask an agent.' : 'Nothing found.'}</Command.Empty>
      {groups.map(group => <Command.Group key={group.heading} heading={group.heading}>{group.items.slice(0,q ? undefined : LIMIT).map(item => <Command.Item key={item.id} value={`${group.heading}/${item.id}`} keywords={[item.label,...(item.keywords ?? [])]} onSelect={() => {onSelect(item,group.heading);set(false)}}><span>{item.label}</span>{item.hint && <small>{item.hint}</small>}</Command.Item>)}</Command.Group>)}

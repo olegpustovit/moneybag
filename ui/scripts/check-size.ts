@@ -8,6 +8,8 @@ const initial = [...html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.(?:js|css))"/
 if (!initial.some((name) => name.endsWith('.js'))) throw new Error('index.html does not reference a JS entry')
 const size = (ext: string) => initial.filter((name) => name.endsWith(ext)).reduce((total, name) => total + gzipSize(name), 0)
 const failures: string[] = []
+if (readdirSync(dist).includes('telemetry-demo.html')) failures.push('dev-only telemetry demo reached the production build')
+if (initial.some((name) => /uplot|time-chart-canvas/i.test(name) || (name.endsWith('.js') && /uPlot|u-over/.test(readFileSync(new URL(name, dist), 'utf8'))))) failures.push('uPlot reached the entry bundle')
 const css = initial.filter((name) => name.endsWith('.css')).map((name) => readFileSync(new URL(name, dist), 'utf8')).join('\n')
 const fallback = css.match(/@font-face\s*\{[^}]*font-family:\s*["']?Geist Fallback["']?;[^}]*}/)?.[0] ?? ''
 if (!/local\(["']?Arial["']?\)/.test(fallback) || !/size-adjust:\s*[\d.]+%/.test(fallback) || !/ascent-override:\s*[\d.]+%/.test(fallback) || !/descent-override:\s*[\d.]+%/.test(fallback)) failures.push('Geist metric-adjusted Arial fallback missing from CSS')

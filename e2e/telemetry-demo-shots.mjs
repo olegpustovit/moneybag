@@ -14,6 +14,10 @@ for(const width of [1440,390])for(const theme of ['light','dark']){
  console.log(width,theme,JSON.stringify(overflow),errors.slice(0,3).join(' | '))
  await page.screenshot({path:`${out}/kit-${width}-${theme}.png`,fullPage:true})
  for(let i=0,step=width>500 ? 1000 : 1300;i<(width>500 ? 5 : 7);i++)await page.screenshot({path:`${out}/s${i}-${width}-${theme}.png`,fullPage:true,clip:{x:0,y:i*step,width,height:step}})
+ await page.evaluate(() => {const g=document.querySelector('[aria-label="Entries"]');scrollTo(0,g.getBoundingClientRect().top+scrollY-(innerWidth>500 ? 90 : 60))});await page.waitForTimeout(200);await page.screenshot({path:`${out}/grid-${width}-${theme}.png`})
+ await page.evaluate(() => scrollTo(0,0));await page.getByRole('combobox',{name:'Add a filter'}).focus();await page.keyboard.type('gro');await page.waitForTimeout(100);await page.screenshot({path:`${out}/filter-${width}-${theme}.png`});await page.keyboard.press('Escape');await page.keyboard.press('Escape')
+ await page.getByRole('button',{name:'How was Money out calculated?'}).click();await page.getByRole('dialog').waitFor();await page.waitForTimeout(300);await page.screenshot({path:`${out}/drawer-${width}-${theme}.png`});await page.keyboard.press('Escape');await page.waitForTimeout(400)
+ await page.keyboard.press('Control+k');await page.getByRole('dialog').waitFor();await page.keyboard.type('re');await page.waitForTimeout(200);await page.screenshot({path:`${out}/command-${width}-${theme}.png`})
  await context.close()
 }
 await browser.close()

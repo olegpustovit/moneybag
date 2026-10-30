@@ -11,6 +11,12 @@ export function defaultPresets(bounds:Bounds,spec?:string[]):Preset[] {
  const year=new Date(bounds.today).getUTCFullYear(),first=new Date(bounds.start).getUTCFullYear(),years=[year-1,year-2].filter(y => y>=first).map(y => String(y))
  return ['30d','90d','6mo','12mo','ytd','last month','last quarter',...years,'all'].map(text => ({label:presetName(text),text}))
 }
+// What the field shows for a saved range. Anything else someone typed stays exactly as they typed it.
+const UNITS:Record<string,string>={d:'day',w:'week',mo:'month',y:'year'}
+export function friendlyTime(text:string):string {
+ const m=text.match(/^(\d+)(d|w|mo|y)$/);if(m)return `Last ${m[1]} ${UNITS[m[2]]}${m[1]==='1' ? '' : 's'}`
+ return text==='ytd' ? 'Year to date' : text==='all' ? 'All time' : text.length<3 ? text : text.replace(/^[a-z]/,c => c.toUpperCase())
+}
 const MIN_DAYS=7
 const snap=(t:number) => Math.round(t/DAY)*DAY
 const percent=(t:number,b:Bounds) => (t-b.start)/Math.max(DAY,b.today-b.start)*100
@@ -84,7 +90,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
  const [draft,setDraft]=useState<string|null>(null),input=useRef<HTMLInputElement>(null),fieldId=useId(),statusId=useId(),compareId=useId()
  const list=presets ?? defaultPresets(bounds)
  const isCanonical=/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/.test(state.text),activePreset=list.find(p => {const r=parseRange(p.text,bounds);return r && r.from===state.range.from && r.to===state.range.to})
- const shown=draft ?? (activePreset && isCanonical ? activePreset.label : isCanonical ? rangeLabel(state.range) : state.text)
+ const shown=draft ?? (activePreset && isCanonical ? activePreset.label : isCanonical ? rangeLabel(state.range) : friendlyTime(state.text))
  const parsed=draft===null ? null : parseTime(draft,bounds)
  const settled=`${rangeLabel(state.range)} · ${rangeDays(state.range).toLocaleString('en-US')} ${rangeDays(state.range)===1 ? 'day' : 'days'}`
  const status=!parsed ? settled : parsed.ok ? `${rangeLabel(parsed.range)} · ${rangeDays(parsed.range).toLocaleString('en-US')} ${rangeDays(parsed.range)===1 ? 'day' : 'days'} · press Enter` : parsed.message
