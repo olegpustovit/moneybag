@@ -326,6 +326,7 @@ func (s *Service) Apply(ctx context.Context, p principal.Principal, in PreviewIn
 	if e != nil {
 		return ReclassResult{}, e
 	}
+	ctx = audit.WithBatch(ctx, ulid.Make().String())
 	out := ReclassResult{Entries: []ledger.Entry{}, EventIDs: []string{}}
 	for _, c := range preview.WouldChange {
 		if c.From != "" && c.To != "" {

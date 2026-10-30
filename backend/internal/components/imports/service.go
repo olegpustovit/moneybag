@@ -392,7 +392,7 @@ func (s *Service) Commit(ctx context.Context, p principal.Principal, id string, 
 		return CommitResult{}, e
 	}
 	var out CommitResult
-	e := s.audit.Workflow(ctx, func(tx context.Context) error {
+	e := s.audit.Workflow(audit.WithBatch(ctx, id), func(tx context.Context) error {
 		b, e := s.batch(tx, p, id)
 		if e != nil {
 			return e
@@ -443,7 +443,7 @@ func (s *Service) Commit(ctx context.Context, p principal.Principal, id string, 
 			}
 			out.AssertionID = result.Assertion.ID
 		}
-		_, e = s.audit.Write(tx, p, "import_commit", audit.Target{Collection: "import_batches", ID: id}, "", b, out, func(tx context.Context) error {
+		_, e = s.audit.Write(audit.WithSummary(tx, fmt.Sprintf("Imported %d transactions from a statement, %d skipped", out.Posted, out.Skipped)), p, "import_commit", audit.Target{Collection: "import_batches", ID: id}, "", b, out, func(tx context.Context) error {
 			_, e := s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": "committed"}})
 			return e
 		})
@@ -465,7 +465,7 @@ func (s *Service) reverseBatch(ctx context.Context, p principal.Principal, id, r
 		return nil, fmt.Errorf("reason required")
 	}
 	out := []ledger.Entry{}
-	e := s.audit.Workflow(ctx, func(tx context.Context) error {
+	e := s.audit.Workflow(audit.WithBatch(ctx, id+":undo"), func(tx context.Context) error {
 		b, e := s.batch(tx, p, id)
 		if e != nil {
 			return e

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/oklog/ulid/v2"
+	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
@@ -121,6 +123,7 @@ func (s *Service) Sync(ctx context.Context, p principal.Principal, ecb, gold boo
 	if e := p.Require("ledger:write"); e != nil {
 		return SyncResult{}, e
 	}
+	ctx = audit.WithBatch(ctx, ulid.Make().String())
 	out := SyncResult{Written: []Quote{}}
 	var firstErr error
 	run := func(provider string, fn func() ([]Quote, error)) bool {
@@ -191,6 +194,7 @@ func (s *Service) put(ctx context.Context, p principal.Principal, have map[strin
 		return nil, e
 	}
 	in.At = t.UTC().Format(time.RFC3339)
+	ctx = audit.WithRoutine(ctx)
 	if old, ok := have[in.Pair+"@"+in.At]; ok && (old.Corrected || old.Archived || old.Source != in.Source || old.Value.String() == in.Value.String()) {
 		return nil, nil
 	}

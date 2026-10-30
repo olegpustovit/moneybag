@@ -33,9 +33,13 @@ type Event struct {
 	Reason    string          `json:"reason,omitempty" bson:"reason,omitempty"`
 	GrantID   string          `json:"grant_id,omitempty" bson:"grant_id,omitempty"`
 	GrantHash string          `json:"grant_hash,omitempty" bson:"grant_hash,omitempty"`
-	PrevHash  string          `json:"prev_hash" bson:"prev_hash"`
-	Hash      string          `json:"hash" bson:"hash"`
-	Outcome   *Outcome        `json:"outcome,omitempty" bson:"-"`
+	// Summary, BatchID and Routine stay out of the hash when empty, so events written before they existed still verify.
+	Summary  string   `json:"summary,omitempty" bson:"summary,omitempty"`
+	BatchID  string   `json:"batch_id,omitempty" bson:"batch_id,omitempty"`
+	Routine  bool     `json:"routine,omitempty" bson:"routine,omitempty"`
+	PrevHash string   `json:"prev_hash" bson:"prev_hash"`
+	Hash     string   `json:"hash" bson:"hash"`
+	Outcome  *Outcome `json:"outcome,omitempty" bson:"-"`
 }
 type Outcome struct {
 	Hash   string          `json:"hash" bson:"hash"`
@@ -64,6 +68,35 @@ func WithGrant(ctx context.Context, id, hash string) context.Context {
 	return context.WithValue(ctx, grantContextKey{}, grantContext{id, hash})
 }
 
+type noteContextKey struct{}
+
+// Note carries the readable-feed fields of the next audited writes.
+type Note struct {
+	Summary, BatchID string
+	Routine          bool
+}
+
+// WithSummary sets the human summary of the writes under ctx; without it Write derives one from the tool and payload.
+func WithSummary(ctx context.Context, summary string) context.Context {
+	note, _ := ctx.Value(noteContextKey{}).(Note)
+	note.Summary = summary
+	return context.WithValue(ctx, noteContextKey{}, note)
+}
+
+// WithBatch makes the writes under ctx collapse into one line of the changes feed.
+func WithBatch(ctx context.Context, id string) context.Context {
+	note, _ := ctx.Value(noteContextKey{}).(Note)
+	note.BatchID = id
+	return context.WithValue(ctx, noteContextKey{}, note)
+}
+
+// WithRoutine marks the writes under ctx as system housekeeping, hidden from the default changes feed.
+func WithRoutine(ctx context.Context) context.Context {
+	note, _ := ctx.Value(noteContextKey{}).(Note)
+	note.Routine = true
+	return context.WithValue(ctx, noteContextKey{}, note)
+}
+
 func (s *Service) Workflow(ctx context.Context, fn func(context.Context) error) error {
 	return mongodb.Workflow(ctx, fn)
 }
@@ -76,6 +109,8 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 	if grant, ok := ctx.Value(grantContextKey{}).(grantContext); ok {
 		event.GrantID, event.GrantHash = grant.id, grant.hash
 	}
+	note, _ := ctx.Value(noteContextKey{}).(Note)
+	event.Summary, event.BatchID, event.Routine = note.Summary, note.BatchID, note.Routine
 	err = mongodb.Workflow(ctx, func(tx context.Context) error {
 		b, err := json.Marshal(before)
 		if err != nil {
@@ -87,6 +122,9 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 			return err
 		}
 		event.After = a
+		if event.Summary == "" {
+			event.Summary = Summarize(event)
+		}
 		seq, err := mongodb.Next(tx, db, p.UserID+":audit")
 		if err != nil {
 			return err

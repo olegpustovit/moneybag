@@ -137,7 +137,27 @@ type Account struct {
 	Class       string            `json:"class,omitempty" bson:"class,omitempty"`
 	Groups      map[string]string `json:"groups,omitempty" bson:"groups,omitempty"`
 	ClosedAt    *time.Time        `json:"closed_at,omitempty" bson:"closed_at,omitempty"`
+	DisplayName string            `json:"display_name,omitempty" bson:"display_name,omitempty" jsonschema:"human name shown everywhere; name keeps working when this is empty"`
+	Note        string            `json:"note,omitempty" bson:"note,omitempty" jsonschema:"working notes, shown in Details rather than beside the name"`
+	Estimated   *bool             `json:"estimated,omitempty" bson:"estimated,omitempty" jsonschema:"true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix"`
 }
+
+// IsEstimated is the stored flag, or for accounts older than the flag, the expenses:estimated id prefix.
+func (a Account) IsEstimated() bool {
+	if a.Estimated != nil {
+		return *a.Estimated
+	}
+	return a.ID == "expenses:estimated" || strings.HasPrefix(a.ID, "expenses:estimated:")
+}
+
+// Label is the name people read.
+func (a Account) Label() string {
+	if a.DisplayName != "" {
+		return a.DisplayName
+	}
+	return a.Name
+}
+
 type Posting struct {
 	Account string  `json:"account" bson:"account"`
 	Amount  Amount  `json:"amount" bson:"amount"`

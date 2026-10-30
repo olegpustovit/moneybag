@@ -548,6 +548,9 @@ func (s *Sources) postingRows(ctx context.Context, p principal.Principal, entry 
 
 // valueAt mirrors the budget conversion: a posting price in EUR wins, otherwise the rate at end of the entry date.
 func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledger.Posting, target, date string, cache map[string]*big.Rat) (ledger.Decimal, error) {
+	if s.Rates != nil {
+		return s.Rates.ValueAt(ctx, p, post, target, date, cache)
+	}
 	amount := post.Amount
 	if amount.Commodity == target {
 		return amount.Value, nil
@@ -562,20 +565,7 @@ func (s *Sources) valueAt(ctx context.Context, p principal.Principal, post ledge
 			return v, nil
 		}
 	}
-	if s.Rates == nil {
-		v, e := s.Valuer.Convert(ctx, p, amount, target, date+"T23:59:59Z")
-		return v.Value, e
-	}
-	key := amount.Commodity + ">" + target + "@" + date
-	r, ok := cache[key]
-	if !ok {
-		var e error
-		if r, e = s.Rates.Rate(ctx, p, amount.Commodity, target, date+"T23:59:59Z"); e != nil {
-			return ledger.Decimal{}, e
-		}
-		cache[key] = r
-	}
-	v, e := rates.Apply(amount, r, target)
+	v, e := s.Valuer.Convert(ctx, p, amount, target, date+"T23:59:59Z")
 	return v.Value, e
 }
 

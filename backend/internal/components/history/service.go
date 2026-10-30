@@ -269,8 +269,8 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 		if e != nil {
 			return e
 		}
-		closed := old.ClosedAt != nil
-		_, e = s.Ledger.UpdateAccount(ctx, p, ledger.AccountUpdate{ID: id, Name: &old.Name, Pot: &old.Pot, Location: &old.Location, Class: &old.Class, Groups: &old.Groups, Close: &closed})
+		closed, estimated := old.ClosedAt != nil, old.IsEstimated()
+		_, e = s.Ledger.UpdateAccount(ctx, p, ledger.AccountUpdate{ID: id, Name: &old.Name, Pot: &old.Pot, Location: &old.Location, Class: &old.Class, Groups: &old.Groups, Close: &closed, DisplayName: &old.DisplayName, Note: &old.Note, Estimated: &estimated})
 		return e
 	case "tags_set":
 		olds, e := decodeBefore[map[string][]string](event)
