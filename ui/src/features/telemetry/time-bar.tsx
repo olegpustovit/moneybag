@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { DAY, dayLabel, parseRange, parseTime, rangeDays, rangeLabel, type Bounds, type CompareMode, type Range } from './time-grammar'
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { DAY, dayLabel, parseRange, parseTime, rangeDays, rangeLabel, stepRange, type Bounds, type CompareMode, type Range } from './time-grammar'
 import { ignoreShortcut, type TimeState } from './use-time-state'
 import type { Band } from './chart-core'
 import { CurrencySwitch, type Currency } from './currency'
@@ -81,22 +81,23 @@ export function HistoryNavigator({bounds,range,onChange,xs,values,bands,label='F
  return <div ref={box} className="tm-nav" role="group" aria-label={`${label}. Drag to choose a window.`} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
   <svg viewBox="0 0 1000 72" preserveAspectRatio="none" aria-hidden="true">{path && <path d={path} className="tm-nav-area" vectorEffect="non-scaling-stroke"/>}{bands?.map(b => <rect key={`${b.label}${b.from}`} x={(b.from-bounds.start)/span*1000} y="64" width={Math.max(3,(b.to-b.from)/span*1000)} height="8" className="tm-nav-band"><title>{b.label}</title></rect>)}</svg>
   {years.map(y => <span key={y} className="tm-nav-year" style={{left:`${percent(Date.UTC(y,0,1),bounds)}%`}}>{y}</span>)}
-  <div className="tm-nav-win" data-window="" style={{left:`${left}%`,width:`${width}%`}} {...slider('m','Move the time window',range.from,rangeLabel(range))}>
+  <div className="tm-nav-win" data-window="" style={{'--l':left,'--w':width} as CSSProperties} {...slider('m','Move the time window',range.from,rangeLabel(range))}>
    <span className="tm-grip l" data-grip="l" {...slider('l','Start of the time window',range.from,dayLabel(range.from))}/>
    <span className="tm-grip r" data-grip="r" {...slider('r','End of the time window',range.to,dayLabel(range.to))}/>
   </div>
  </div>
 }
 
-export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,label='Time range. Type anything'}:{state:TimeState;bounds:Bounds;presets?:Preset[];navigator?:{xs:number[];values:ArrayLike<number>;bands?:Band[];label?:string};hideCompare?:boolean;currency?:Currency;label?:string}) {
+export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,prefetch,label='Time range. Type anything'}:{state:TimeState;bounds:Bounds;presets?:Preset[];navigator?:{xs:number[];values:ArrayLike<number>;bands?:Band[];label?:string};hideCompare?:boolean;currency?:Currency;prefetch?:(range:Range) => void;label?:string}) {
  const [draft,setDraft]=useState<string|null>(null),input=useRef<HTMLInputElement>(null),fieldId=useId(),statusId=useId(),compareId=useId()
  const list=presets ?? defaultPresets(bounds)
  const isCanonical=/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/.test(state.text),activePreset=list.find(p => {const r=parseRange(p.text,bounds);return r && r.from===state.range.from && r.to===state.range.to})
- const shown=draft ?? (activePreset && isCanonical ? friendlyTime(activePreset.text) : isCanonical ? rangeLabel(state.range) : friendlyTime(state.text))
+ const shown=draft ?? (activePreset && isCanonical ? friendlyTime(activePreset.text) : isCanonical ? `${rangeDays(state.range).toLocaleString('en-US')} ${rangeDays(state.range)===1 ? 'day' : 'days'}` : friendlyTime(state.text))
  const parsed=draft===null ? null : parseTime(draft,bounds)
  const settled=rangeLabel(state.range)
  const status=!parsed ? settled : parsed.ok ? `${rangeLabel(parsed.range)} · ${rangeDays(parsed.range).toLocaleString('en-US')} ${rangeDays(parsed.range)===1 ? 'day' : 'days'} · press Enter` : parsed.message
  const invalid=!!parsed && !parsed.ok && parsed.reason!=='empty'
+ const warm=(r:Range|null) => {if(r)prefetch?.(r)},hot=(direction:number) => ({onPointerEnter:() => warm(stepRange(state.range,direction,bounds)),onFocus:() => warm(stepRange(state.range,direction,bounds))})
  const latest=useRef(state);latest.current=state
  useEffect(() => {
   const onKey=(e:globalThis.KeyboardEvent) => {
@@ -116,10 +117,10 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,lab
     <div id={statusId} className={`tm-time-status${invalid ? ' err' : ''}`} aria-live="polite" title={status}>{status}</div>
    </div>
    <div className="tm-arrows">
-    <button type="button" className="tm-btn square" aria-label="Previous period" title="Previous period ( [ )" onClick={() => state.step(-1)}>←</button>
-    <button type="button" className="tm-btn square" aria-label="Next period" title="Next period ( ] )" onClick={() => state.step(1)}>→</button>
+    <button type="button" className="tm-btn square" aria-label="Previous period" title="Previous period ( [ )" {...hot(-1)} onClick={() => state.step(-1)}>←</button>
+    <button type="button" className="tm-btn square" aria-label="Next period" title="Next period ( ] )" {...hot(1)} onClick={() => state.step(1)}>→</button>
    </div>
-   <div className="tm-presets" role="group" aria-label="Quick ranges">{list.map(p => <button key={p.text} type="button" className="tm-btn" aria-pressed={activePreset?.text===p.text} onClick={() => state.setText(p.text)}>{p.label}</button>)}</div>
+   <div className="tm-presets" role="group" aria-label="Quick ranges">{list.map(p => <button key={p.text} type="button" className="tm-btn" aria-pressed={activePreset?.text===p.text} onPointerEnter={() => warm(parseRange(p.text,bounds))} onFocus={() => warm(parseRange(p.text,bounds))} onClick={() => state.setText(p.text)}>{p.label}</button>)}</div>
    <div className="tm-zoom">
     {currency && <CurrencySwitch value={currency}/>}
     <button type="button" className="tm-btn" title="Zoom out ( z )" onClick={state.zoomOut}>Zoom out</button>

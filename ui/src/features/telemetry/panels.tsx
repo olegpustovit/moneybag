@@ -15,7 +15,7 @@ import type { SpecComponent } from './view-data'
 import type { DetailsContent } from './details-drawer'
 import './telemetry.css'
 
-export type PanelCtx={cube:Cube|null;range:Range;win:CompareWindow|null;compareMode:string;defaultCompare:string;pills:Pill[];filtering:boolean;dashboard:string;syncKey:string;bounds:Bounds;explore:string[];readOnly?:boolean;
+export type PanelCtx={cube:Cube|null;range:Range;win:CompareWindow|null;compareMode:string;defaultCompare:string;pills:Pill[];filtering:boolean;dashboard:string;syncKey:string;bounds:Bounds;explore:string[];readOnly?:boolean;fresh?:boolean;syncing?:boolean;
  setRange:(range:Range,meta:{final:boolean}) => void;stepOut:() => void;addPill:(pill:Pill) => void;tableLink?:(id:string) => ReactNode}
 type Comparison={from?:string;to?:string;total?:string;text?:string;delta_pct?:number|null;direction?:string;good?:boolean}
 type Point={bucket?:string;name:string;value:string;text:string;estimated?:boolean}
@@ -24,7 +24,8 @@ const UNITS:Record<string,Unit>={eur:'eur',usd:'usd',int:'int',pct:'pct',mo:'mo'
 const isMetric=(v:unknown):v is MetricValue => typeof v==='object' && v!==null && typeof (v as MetricValue).metric==='string' && ['stat','time_chart','ranked_bars','sankey','entries'].includes((v as MetricValue).type)
 const tryNumber=(s:unknown) => {const n=Number(s);return Number.isFinite(n) ? n : 0}
 const fromIso=(s:string|undefined) => s ? dayFromIso(s) : NaN
-const isExact=(v:MetricValue,ctx:PanelCtx) => ctx.cube?.base!=='USD' && !ctx.filtering && !v.fixed && fromIso(v.from)===ctx.range.from && fromIso(v.to)===ctx.range.to && ctx.compareMode===ctx.defaultCompare
+// Server text is for the first paint of the default view only; once someone moves the range the cube answers, so no figure is swapped a beat later.
+const isExact=(v:MetricValue,ctx:PanelCtx) => !!ctx.fresh && ctx.cube?.base!=='USD' && !ctx.filtering && !v.fixed && fromIso(v.from)===ctx.range.from && fromIso(v.to)===ctx.range.to && ctx.compareMode===ctx.defaultCompare
 const metricOf=(ctx:PanelCtx,id:string|undefined) => ctx.cube?.metrics.find(m => m.id===id)
 const metricText=(ctx:PanelCtx,m:CubeMetric,v:number) => m.unit==='int' ? Math.round(v).toLocaleString('en-US') : money(v,ctx.cube?.base)
 const fixedRange=(c:SpecComponent,ctx:PanelCtx):Range|null => {if(!c.fixed)return null;return parseRange(c.fixed.range ?? 'all',ctx.bounds)}
@@ -169,8 +170,10 @@ export function Panel({c,value,ctx,span}:{c:SpecComponent;value:unknown;ctx:Pane
   const parsed=componentValue.safeParse(value)
   return parsed.success ? <LegacyPanel c={c} value={parsed.data} ctx={ctx}/> : <PanelError c={c} dashboard={ctx.dashboard}/>
  }
+ // Panels the cube cannot work out keep the last range's figures until the server answers; say so calmly.
+ const live=!!ctx.cube && isMetric(value) && value.type!=='entries' && cubeCanCompute(metricOf(ctx,value.metric)) || !!c.fixed,busy=!!ctx.syncing && !live
  const flush=value && typeof value==='object' && ['stat','kpi'].includes((value as {type?:string}).type ?? '')
- return <section className={`panel${flush ? ' flush' : ''}`} data-panel={c.id} style={{gridColumn:`span ${Math.max(1,Math.min(12,span))}`}}>
+ return <section className={`panel${flush ? ' flush' : ''}${busy ? ' tm-stale' : ''}`} aria-busy={busy || undefined} data-panel={c.id} style={{gridColumn:`span ${Math.max(1,Math.min(12,span))}`}}>
   <CatchBoundary getResetKey={() => JSON.stringify([ctx.range,ctx.pills])} errorComponent={() => <PanelError c={c} dashboard={ctx.dashboard}/>}>{body()}</CatchBoundary>
  </section>
 }

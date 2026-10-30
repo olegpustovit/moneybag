@@ -12,14 +12,16 @@ export function Sparkline({values,color='var(--c0)',label,height=30}:{values:Arr
 export type RankedRow={key:string;label:string;value:number;text:string;compare?:number;compareText?:string;color?:string;estimated?:boolean;note?:string}
 // Sorted by size with direct labels. Rows too small to read collapse into one line that expands on request.
 export function RankedBars({rows,onSelect,selectLabel='Filter by',collapseBelow=.01,maxRows=10,noun='items',barColor='var(--text3)',emptyText='Nothing to rank in this range.',ariaLabel}:{rows:RankedRow[];onSelect?:(key:string) => void;selectLabel?:string;collapseBelow?:number;maxRows?:number;noun?:string;barColor?:string;emptyText?:string;ariaLabel?:string}) {
- const [expanded,setExpanded]=useState(false)
- if(!rows.length)return <p className="tm-empty">{emptyText}</p>
+ const [expanded,setExpanded]=useState(false),[fullest,setFullest]=useState(0),count=Math.min(rows.length,maxRows+1)
+ if(count>fullest)setFullest(count)
+ // Keeps the height of the fullest list seen, so stepping the range never moves what sits below.
+ if(!rows.length)return <p className="tm-empty" style={{minHeight:fullest*29}}>{emptyText}</p>
  const sorted=[...rows].sort((a,b) => Math.abs(b.value)-Math.abs(a.value)),peak=Math.max(1e-9,...sorted.flatMap(r => [Math.abs(r.value),Math.abs(r.compare ?? 0)]))
  let shown=sorted,small:RankedRow[]=[]
  if(!expanded){const keep=sorted.filter((r,i) => i<maxRows && Math.abs(r.value)>=peak*collapseBelow);if(sorted.length-keep.length>=2){shown=keep;small=sorted.slice(keep.length)}}
  const body=(r:RankedRow) => <><span className="n" title={r.label}>{r.label}</span><span className="track"><i className={r.estimated ? 'tm-hatch' : undefined} style={{width:`${Math.abs(r.value)/peak*100}%`,background:r.estimated ? undefined : r.color ?? barColor}}/>{r.compare!==undefined && <b style={{left:`${Math.abs(r.compare)/peak*100}%`}} title={r.compareText}/>}</span><span className="t">{r.text}{r.note && <small>{r.note}</small>}</span></>
- return <ol className="tm-ranked" aria-label={ariaLabel}>
-  {shown.map(r => <li key={r.key}>{onSelect ? <button type="button" aria-label={`${selectLabel} ${r.label}: ${r.text}${r.compareText ? `, was ${r.compareText}` : ''}`} onClick={() => onSelect(r.key)}>{body(r)}</button> : <div>{body(r)}</div>}</li>)}
+ return <ol className="tm-ranked" aria-label={ariaLabel} style={{minHeight:fullest*29}}>
+  {shown.map((r,i) => <li key={i}>{onSelect ? <button type="button" aria-label={`${selectLabel} ${r.label}: ${r.text}${r.compareText ? `, was ${r.compareText}` : ''}`} onClick={() => onSelect(r.key)}>{body(r)}</button> : <div>{body(r)}</div>}</li>)}
   {small.length>0 && <li className="more"><button type="button" onClick={() => setExpanded(true)}><span className="n">{small.length} small {noun}</span><span className="track"/><span className="t">Show</span></button></li>}
  </ol>
 }

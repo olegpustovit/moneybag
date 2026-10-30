@@ -112,6 +112,10 @@ describe('TimeBar',() => {
   render(<Bar/>);expect(screen.getAllByRole('button').map(b => b.textContent).slice(2,6)).toEqual(['30D','This month','90D','6M'])
   fireEvent.click(screen.getByRole('button',{name:'This month'}));expect(screen.getByTestId('t').textContent).toBe('this month');expect(screen.getByText(/1 Oct 2026 to 30 Oct 2026/)).toBeTruthy()
  })
+ it('names an unnamed range by its length and keeps the dates in the caption',() => {
+  render(<Bar initial={{t:'2026-05-03 to 2026-05-19'}}/>)
+  expect(field().value).toBe('17 days');expect(screen.getByText(/3 May 2026 to 19 May 2026/)).toBeTruthy()
+ })
  it('parses live, reports errors through aria, and applies on Enter',() => {
   render(<Bar/>)
   fireEvent.change(field(),{target:{value:'q2 2026'}});expect(screen.getByText(/1 Apr 2026 to 30 Jun 2026 · 91 days · press Enter/)).toBeTruthy();expect(field().getAttribute('aria-invalid')).toBe('false')

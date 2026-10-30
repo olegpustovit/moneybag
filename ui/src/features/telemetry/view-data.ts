@@ -15,17 +15,18 @@ export function viewParams(text:string|undefined,bounds:Bounds):ViewParams {
  return range ? {from:isoDay(range.from),to:isoDay(range.to)} : {}
 }
 const keyOf=(user:string,id:string,params:ViewParams) => ['dashboard-view',user,id,params.from ?? '',params.to ?? ''] as const
-async function fetchView(user:string,id:string,params:ViewParams):Promise<ViewBody> {
+async function fetchView(user:string,id:string,params:ViewParams,signal?:AbortSignal):Promise<ViewBody> {
  const query=new URLSearchParams(Object.entries(params).filter(([,v]) => !!v) as [string,string][])
- const response=await fetch(`/api/dashboards/${encodeURIComponent(id)}/view${query.size ? `?${query}` : ''}`,{credentials:'same-origin'})
+ const response=await fetch(`/api/dashboards/${encodeURIComponent(id)}/view${query.size ? `?${query}` : ''}`,{credentials:'same-origin',signal})
  if(!response.ok)throw new ApiError(response.status===404 ? 'This dashboard is not available.' : response.status===401 ? 'Sign in to continue.' : 'Could not load this dashboard.',response.status)
  const body=await response.json() as ViewBody
  if(!query.size)writeCachedView(user,id,body)
  return body
 }
-export const viewQuery=(user:string,id:string,params:ViewParams) => queryOptions({queryKey:keyOf(user,id,params),staleTime:15_000,gcTime:600_000,placeholderData:keepPreviousData,queryFn:() => fetchView(user,id,params),
+export const viewQuery=(user:string,id:string,params:ViewParams) => queryOptions({queryKey:keyOf(user,id,params),staleTime:15_000,gcTime:600_000,placeholderData:keepPreviousData,queryFn:({signal}) => fetchView(user,id,params,signal),
  // A rate-only write serves the last render with stale:true while the server refreshes it.
  refetchInterval:query => query.state.data?.stale ? 5_000 : false})
+export const hasView=(client:QueryClient,user:string,id:string,params:ViewParams) => client.getQueryData(keyOf(user,id,params))!==undefined
 // Last good view first: a remembered page paints at once and useQuery revalidates it behind the numbers.
 export async function paintLastGood(client:QueryClient,user:string,id:string):Promise<boolean> {
  const key=keyOf(user,id,{})
