@@ -117,7 +117,8 @@ func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source 
 	cacheSource := source
 	read := func() ([]map[string]any, error) { return s.rows(ctx, p, source) }
 	stack, _ := ctx.Value(viewStackKey{}).([]string)
-	if s.Snapshots != nil && s.Views != nil && len(stack) == 0 && strings.HasPrefix(source, "view:") {
+	sharedLeaf := false
+	if s.Snapshots != nil && s.Views != nil && strings.HasPrefix(source, "view:") {
 		v, _, stable, err := s.viewDefinition(ctx, p, strings.TrimPrefix(source, "view:"))
 		if err != nil {
 			return nil, err
@@ -126,10 +127,11 @@ func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source 
 			parameterKey = key
 			cacheSource = "leaf:" + source
 			read = func() ([]map[string]any, error) { return s.evaluateView(ctx, p, v) }
+			sharedLeaf = true
 		}
 	}
 	params, _ := json.Marshal(parameterKey)
-	if s.Snapshots != nil && !(len(stack) > 0 && strings.HasPrefix(source, "view:")) {
+	if s.Snapshots != nil && (sharedLeaf || !(len(stack) > 0 && strings.HasPrefix(source, "view:"))) {
 		build := read
 		read = func() ([]map[string]any, error) {
 			value, err := s.Snapshots.read(ctx, p, "source", cacheSource, json.RawMessage(params), func() (any, error) { return build() }, nil)
@@ -141,7 +143,7 @@ func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source 
 	}
 	var rows []map[string]any
 	var err error
-	if len(stack) > 0 && strings.HasPrefix(source, "view:") {
+	if len(stack) > 0 && strings.HasPrefix(source, "view:") && !sharedLeaf {
 		v, epoch, stable, e := s.viewDefinition(ctx, p, strings.TrimPrefix(source, "view:"))
 		if e != nil {
 			return nil, e

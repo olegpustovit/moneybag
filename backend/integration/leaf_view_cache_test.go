@@ -104,6 +104,18 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	if err != nil || before.Value != "Example-left" {
 		t.Fatalf("before edit: %v, %v", before.Value, err)
 	}
+	leafKey, _ := json.Marshal(struct {
+		Query  dashboard.Query
+		Source any
+	}{dashboard.Query{From: "postings"}, []string{"", ""}})
+	leafBuilt := false
+	_, err = reqcache.Do[[]map[string]any](request, "rows|"+p.UserID+"|leaf:view:leaf|"+string(leafKey), func() ([]map[string]any, error) {
+		leafBuilt = true
+		return nil, nil
+	})
+	if err != nil || leafBuilt {
+		t.Fatalf("nested leaf was not shared: built=%t, %v", leafBuilt, err)
+	}
 	built := false
 	_, err = reqcache.Do[any](request, "view-chain|"+p.UserID+"|0|view:middle|null", func() (any, error) {
 		built = true
