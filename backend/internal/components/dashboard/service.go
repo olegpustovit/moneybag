@@ -473,7 +473,6 @@ func (s *Service) Preview(ctx context.Context, p principal.Principal, id, versio
 		Params  map[string]any
 	}{version, params}
 	value, err := s.snapshots.read(ctx, p, "render", id, key, func() (any, error) {
-		slog.Info("temporary preview snapshot build", "dashboard", id)
 		return s.preview(ctx, p, id, version, params)
 	}, func(v any) bool { return v.(Rendered).Validation.OK })
 	if err != nil {
