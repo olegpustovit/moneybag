@@ -756,6 +756,7 @@ export interface DashboardAddComponentInput {
 export interface DashboardAddComponentOutput {
   component_id?: string;
   draft_version: number;
+  event_id?: string;
   validation: {
     cost: number;
     errors:
@@ -802,6 +803,7 @@ export interface DashboardComposeInput {
 export interface DashboardComposeOutput {
   component_id?: string;
   draft_version: number;
+  event_id?: string;
   validation: {
     cost: number;
     errors:
@@ -1191,6 +1193,7 @@ export interface DashboardPatchInput {
 export interface DashboardPatchOutput {
   component_id?: string;
   draft_version: number;
+  event_id?: string;
   validation: {
     cost: number;
     errors:
@@ -1327,6 +1330,7 @@ export interface DashboardPublishInput {
   version: number;
 }
 export interface DashboardPublishOutput {
+  event_id?: string;
   gate: {
     cost: number;
     errors:
@@ -1366,6 +1370,7 @@ export interface DashboardRemoveComponentInput {
 export interface DashboardRemoveComponentOutput {
   component_id?: string;
   draft_version: number;
+  event_id?: string;
   validation: {
     cost: number;
     errors:
@@ -1400,6 +1405,7 @@ export interface DashboardRollbackInput {
   to_version: number;
 }
 export interface DashboardRollbackOutput {
+  event_id?: string;
   gate: {
     cost: number;
     errors:
@@ -1504,6 +1510,7 @@ export interface DashboardUpdateComponentInput {
 export interface DashboardUpdateComponentOutput {
   component_id?: string;
   draft_version: number;
+  event_id?: string;
   validation: {
     cost: number;
     errors:

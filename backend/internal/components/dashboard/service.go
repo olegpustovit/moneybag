@@ -207,6 +207,7 @@ func (s *Service) Create(ctx context.Context, p principal.Principal, in CreateIn
 }
 
 type EditResult struct {
+	EventID      string     `json:"event_id,omitempty"`
 	DraftVersion int        `json:"draft_version"`
 	ComponentID  string     `json:"component_id,omitempty"`
 	Validation   Validation `json:"validation"`
@@ -240,7 +241,7 @@ func (s *Service) edit(ctx context.Context, p principal.Principal, id, tool stri
 		spec.ID = id
 		spec.Version = h.Revision + 1
 		v := Version{Key: h.Key + ":" + strconv.Itoa(spec.Version), UserID: p.UserID, DashboardID: id, Version: spec.Version, Spec: spec, Author: p.Actor, CreatedAt: time.Now().UTC()}
-		_, e = s.audit.Write(tx, p, tool, audit.Target{Collection: "dashboards", ID: id}, "", old, v, func(tx context.Context) error {
+		eventID, e := s.audit.Write(tx, p, tool, audit.Target{Collection: "dashboards", ID: id}, "", old, v, func(tx context.Context) error {
 			if _, e := s.repo.db.Collection("dashboard_versions").InsertOne(tx, v); e != nil {
 				return e
 			}
@@ -257,7 +258,7 @@ func (s *Service) edit(ctx context.Context, p principal.Principal, id, tool stri
 		if e != nil {
 			return e
 		}
-		out = EditResult{DraftVersion: spec.Version, Validation: r.Validation}
+		out = EditResult{EventID: eventID, DraftVersion: spec.Version, Validation: r.Validation}
 		return nil
 	})
 	return out, e
@@ -475,6 +476,7 @@ func (s *Service) preview(ctx context.Context, p principal.Principal, id, versio
 }
 
 type PublishResult struct {
+	EventID          string     `json:"event_id,omitempty"`
 	PublishedVersion int        `json:"published_version"`
 	Gate             Validation `json:"gate"`
 	URL              string     `json:"url"`
@@ -527,7 +529,7 @@ func (s *Service) publish(ctx context.Context, p principal.Principal, id string,
 			}
 			return fmt.Errorf("publish gate failed: %s", strings.Join(reasons, "; "))
 		}
-		_, e = s.audit.Write(tx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, note, h, out, func(tx context.Context) error {
+		eventID, e := s.audit.Write(tx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, note, h, out, func(tx context.Context) error {
 			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note}
 			if h.DraftVersion == version {
 				update["draft_version"] = 0
@@ -538,6 +540,9 @@ func (s *Service) publish(ctx context.Context, p principal.Principal, id string,
 			}
 			return e
 		})
+		if e == nil {
+			out.EventID = eventID
+		}
 		return e
 	})
 	return out, e

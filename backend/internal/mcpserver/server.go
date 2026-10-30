@@ -383,10 +383,13 @@ func New(s Services, opts Options) *mcp.Server {
 	})
 	add(r, "dashboard_create", "dashboard", "dash:write", "Use this when creating a dashboard draft. Optional from_template is budget-vs-actual or forecast. It belongs to your authenticated user.", false, false, s.Dashboard.Create)
 	add(r, "dashboard_add_component", "dashboard", "dash:write", "Use this when adding a KPI, table, chart, budget_bars, scenario_compare or text note. New components append a layout row by default; a missing named page is added. Spans are 1..12.", false, false, func(ctx context.Context, p principal.Principal, in dashboard.AddInput) (dashboard.EditResult, error) {
-		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
 			in.DashboardID = access.ID
 			return access.Dashboard.Add(tx, access.Principal, in)
 		})
+		if access.Grant != nil {
+			result.EventID = ""
+		}
 		return result, err
 	})
 	add(r, "dashboard_update_component", "dashboard", "dash:write", "Use this when changing fields on one draft component. set is a partial component; its id cannot change. Creates a new immutable draft version.", false, false, func(ctx context.Context, p principal.Principal, in struct {
@@ -402,18 +405,24 @@ func New(s Services, opts Options) *mcp.Server {
 		if e = json.Unmarshal(b, &set); e != nil {
 			return dashboard.EditResult{}, e
 		}
-		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
 			return access.Dashboard.UpdateComponent(tx, access.Principal, access.ID, in.ComponentID, set)
 		})
+		if access.Grant != nil {
+			result.EventID = ""
+		}
 		return result, err
 	})
 	add(r, "dashboard_remove_component", "dashboard", "dash:write", "Use this when removing a component and its layout placements from a new draft version. Published output is unchanged until publish.", false, true, func(ctx context.Context, p principal.Principal, in struct {
 		DashboardID string `json:"dashboard_id"`
 		ComponentID string `json:"component_id"`
 	}) (dashboard.EditResult, error) {
-		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
 			return access.Dashboard.Remove(tx, access.Principal, access.ID, in.ComponentID)
 		})
+		if access.Grant != nil {
+			result.EventID = ""
+		}
 		return result, err
 	})
 	add(r, "dashboard_compose", "dashboard", "dash:write", "Use this when rearranging a page's 12-column layout. A missing named page is added. Each row contains cols with span and component ID.", false, false, func(ctx context.Context, p principal.Principal, in struct {
@@ -421,9 +430,12 @@ func New(s Services, opts Options) *mcp.Server {
 		Page        string          `json:"page,omitempty"`
 		Layout      []dashboard.Row `json:"layout"`
 	}) (dashboard.EditResult, error) {
-		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
 			return access.Dashboard.Compose(tx, access.Principal, access.ID, in.Page, in.Layout)
 		})
+		if access.Grant != nil {
+			result.EventID = ""
+		}
 		return result, err
 	})
 	add(r, "dashboard_patch", "dashboard", "dash:write", "Use this for RFC6902 JSON Patch edits to a dashboard draft. ops is a JSON array of operations, or a string containing that array. At most 500 operations and 1 MiB; unknown spec fields are rejected. A failing operation is reported as op <index>: path <path> not found (or its error).", false, false, func(ctx context.Context, p principal.Principal, in struct {
@@ -431,9 +443,12 @@ func New(s Services, opts Options) *mcp.Server {
 		Ops         json.RawMessage `json:"ops" jsonschema:"RFC6902 operations: a JSON array, or a string containing that array"`
 	}) (dashboard.EditResult, error) {
 		b := in.Ops
-		result, _, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
+		result, access, err := dashboardWrite(ctx, p, s, in.DashboardID, func(tx context.Context, access sharing.Access) (dashboard.EditResult, error) {
 			return access.Dashboard.Patch(tx, access.Principal, access.ID, b)
 		})
+		if access.Grant != nil {
+			result.EventID = ""
+		}
 		return result, err
 	})
 	add(r, "dashboard_validate", "dashboard", "ledger:read", "Use this before preview or publish. Compiles every CEL expression, evaluates all rows, checks layout references and renders every component within the server budget.", true, false, func(ctx context.Context, p principal.Principal, in DashboardInput) (dashboard.Validation, error) {
@@ -527,6 +542,7 @@ func New(s Services, opts Options) *mcp.Server {
 		})
 		if access.Grant != nil {
 			v.URL = "/shared/" + access.Grant.ID
+			v.EventID = ""
 		}
 		if e == nil {
 			if refreshErr := s.Sharing.RefreshDashboard(ctx, access.Principal, access.ID); refreshErr != nil {
@@ -545,6 +561,7 @@ func New(s Services, opts Options) *mcp.Server {
 		})
 		if access.Grant != nil {
 			v.URL = "/shared/" + access.Grant.ID
+			v.EventID = ""
 		}
 		if e == nil {
 			if refreshErr := s.Sharing.RefreshDashboard(ctx, access.Principal, access.ID); refreshErr != nil {

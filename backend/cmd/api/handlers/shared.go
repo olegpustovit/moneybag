@@ -228,6 +228,7 @@ func (h *Handler) apiSharedPatch(w http.ResponseWriter, r *http.Request) {
 		h.sharedWriteError(w, err)
 		return
 	}
+	result.EventID = ""
 	respond(w, http.StatusOK, result)
 }
 func (h *Handler) apiSharedPublish(w http.ResponseWriter, r *http.Request) {
@@ -258,6 +259,7 @@ func (h *Handler) apiSharedPublish(w http.ResponseWriter, r *http.Request) {
 		result.Warnings = append(result.Warnings, "Published successfully; some shared snapshots could not refresh. Maintenance will retry.")
 	}
 	result.URL = "/shared/" + access.Grant.ID
+	result.EventID = ""
 	respond(w, http.StatusOK, result)
 }
 func (h *Handler) apiSharedEvaluate(w http.ResponseWriter, r *http.Request) {

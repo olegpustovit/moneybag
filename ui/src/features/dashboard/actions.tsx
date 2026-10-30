@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { dashboardNotice } from './undo-notice'
 import { Button } from '../../components/ui/button'
 import { FormulaInput } from '../../components/formula/input'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui/dialog'
@@ -9,9 +9,9 @@ import { tool, type Session } from '../../lib/api'
 import type { DashboardListOutput } from '../../lib/tools'
 
 type Head=NonNullable<DashboardListOutput['items']>[number]
-export function DashboardActions({session,id,head,onPublished}:{session:Session;id:string;head:Head|undefined;onPublished:() => void}) {
+export function DashboardActions({session,id,head,onPublished,onUndoPublication}:{session:Session;id:string;head:Head|undefined;onPublished:() => void;onUndoPublication:() => void}) {
  const [action,setAction]=useState<'publish'|'share'|'rollback'|null>(null),[filter,setFilter]=useState(''),client=useQueryClient()
- const publish=useMutation({mutationFn:(note:string) => tool(session,'dashboard_publish',{dashboard_id:id,version:head?.draft_version ?? 0,note}),onSuccess:async (result) => {await invalidate();setAction(null);onPublished();toast.success(`Published dashboard v${result.published_version}`,{description:result.warnings?.join(' · ')})}})
+ const publish=useMutation({mutationFn:(note:string) => tool(session,'dashboard_publish',{dashboard_id:id,version:head?.draft_version ?? 0,note}),onSuccess:async (result) => {await invalidate();setAction(null);onPublished();dashboardNotice({session,client,eventID:result.event_id,message:`Published dashboard v${result.published_version}`,description:result.warnings?.join(' · '),onUndo:onUndoPublication})}})
  const rollback=useMutation({mutationFn:(version:number) => tool(session,'dashboard_rollback',{dashboard_id:id,to_version:version}),onSuccess:async () => {await invalidate();setAction(null);onPublished()}})
  const share=useMutation({mutationFn:(data:FormData) => {const expiry=String(data.get('expires') || ''),sources=String(data.get('sources') || '').split(',').map(x => x.trim()).filter(Boolean);return tool(session,'dashboard_share',{dashboard_id:id,grantee:String(data.get('grantee')).trim(),role:String(data.get('role')),mode:String(data.get('mode')),refresh:String(data.get('refresh')),sources,row_filter:String(data.get('row_filter') || '').trim(),expires_at:expiry ? new Date(expiry).toISOString() : undefined})},onSuccess:async () => {await client.invalidateQueries({queryKey:['shares-owned',session.user.id]})}})
  async function invalidate() {await Promise.all([client.invalidateQueries({queryKey:['dashboards',session.user.id]}),client.invalidateQueries({queryKey:['dashboard-spec',session.user.id,id]}),client.invalidateQueries({queryKey:['dashboard',session.user.id,id]})])}

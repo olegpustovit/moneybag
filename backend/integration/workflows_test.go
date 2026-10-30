@@ -432,12 +432,16 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = dash.Publish(ctx, pa, "undo-publish", edited.DraftVersion, "Publish edit"); e != nil {
+	publishResult, e := dash.Publish(ctx, pa, "undo-publish", edited.DraftVersion, "Publish edit")
+	if e != nil {
 		t.Fatal(e)
 	}
+	if edited.EventID == "" || publishResult.EventID == "" {
+		t.Fatal("dashboard writes must return audit event IDs", edited, publishResult)
+	}
 	published, e := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_publish", Target: "undo-publish", Limit: 1})
-	if e != nil || len(published.Events) != 1 {
-		t.Fatal("publish event", published, e)
+	if e != nil || len(published.Events) != 1 || published.Events[0].ID != publishResult.EventID {
+		t.Fatal("publish event", published, publishResult, e)
 	}
 	if _, e = a.Write(ctx, pa, "synthetic_other_target", audit.Target{Collection: "accounts", ID: "undo-publish"}, "", nil, nil, func(context.Context) error { return nil }); e != nil {
 		t.Fatal(e)

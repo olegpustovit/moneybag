@@ -252,8 +252,8 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 		version := editDraft["version"].(float64)
 		patch := map[string]any{"ops": []any{map[string]any{"op": "test", "path": "/version", "value": version}, map[string]any{"op": "replace", "path": "/title", "value": "Editor changed"}}}
 		code, patched := editorRequest("POST", "/patch", patch, true)
-		if code != 200 {
-			t.Fatal("editor patch", code, patched)
+		if code != 200 || patched["event_id"] != nil {
+			t.Fatal("editor patch must not expose owner audit event", code, patched)
 		}
 		if code, _ = editorRequest("POST", "/patch", patch, true); code != 400 {
 			t.Fatal("stale editor patch", code)
@@ -263,6 +263,9 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatal("stale publish", code)
 		}
 		code, published := editorRequest("POST", "/publish", map[string]any{"version": newVersion, "note": "Editor publish"}, true)
+		if published["event_id"] != nil {
+			t.Fatal("editor publish must not expose owner audit event", published)
+		}
 		if code != 200 {
 			t.Fatal("editor publish", code, published)
 		}
@@ -312,6 +315,14 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatal("read-only shared editor MCP access", readResult, err)
 		}
 		mcpClient := mcpSession(t, ctx, viewerPrincipal, services, false)
+		sharedPatch, err := mcpClient.CallTool(ctx, &mcp.CallToolParams{Name: "dashboard_patch", Arguments: map[string]any{"dashboard_id": raceGrant.ShareID, "ops": []any{map[string]any{"op": "replace", "path": "/title", "value": "Before"}}}})
+		if err != nil || sharedPatch.IsError {
+			t.Fatal("shared MCP patch", sharedPatch, err)
+		}
+		encodedPatch, err := json.Marshal(sharedPatch.StructuredContent)
+		if err != nil || strings.Contains(string(encodedPatch), "event_id") {
+			t.Fatal("shared MCP patch exposed owner event", string(encodedPatch), err)
+		}
 		locked, release, started := make(chan struct{}), make(chan struct{}), make(chan struct{}, 2)
 		ownerDone := make(chan error, 1)
 		go func() {
