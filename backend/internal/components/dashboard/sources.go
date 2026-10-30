@@ -75,6 +75,21 @@ func sourceParams(source string, params any, dates []string) any {
 	}
 }
 
+// leafViewParams permits cross-dashboard sharing only when a direct journal view cannot read params.
+func leafViewParams(v View, params any) (any, bool) {
+	if !memoizableLeaf(v) {
+		return nil, false
+	}
+	raw, err := json.Marshal(v.Query)
+	if err != nil || strings.Contains(string(raw), "params") {
+		return nil, false
+	}
+	return struct {
+		Query  Query
+		Source any
+	}{v.Query, sourceParams(v.Query.From, params, nil)}, true
+}
+
 // sharedRows returns immutable rows for the query engine, which copies each row before deriving fields.
 func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
 	ctx = expressions.WithVolatility(ctx)
@@ -98,13 +113,26 @@ func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source 
 			ctx = context.WithValue(ctx, balanceDatesKey{}, dates)
 		}
 	}
-	params, _ := json.Marshal(sourceParams(source, ctx.Value(paramsKey{}), dates))
+	parameterKey := sourceParams(source, ctx.Value(paramsKey{}), dates)
+	cacheSource := source
 	read := func() ([]map[string]any, error) { return s.rows(ctx, p, source) }
 	stack, _ := ctx.Value(viewStackKey{}).([]string)
+	if s.Snapshots != nil && s.Views != nil && len(stack) == 0 && strings.HasPrefix(source, "view:") {
+		v, _, stable, err := s.viewDefinition(ctx, p, strings.TrimPrefix(source, "view:"))
+		if err != nil {
+			return nil, err
+		}
+		if key, ok := leafViewParams(v, ctx.Value(paramsKey{})); stable && ok {
+			parameterKey = key
+			cacheSource = "leaf:" + source
+			read = func() ([]map[string]any, error) { return s.evaluateView(ctx, p, v) }
+		}
+	}
+	params, _ := json.Marshal(parameterKey)
 	if s.Snapshots != nil && !(len(stack) > 0 && strings.HasPrefix(source, "view:")) {
 		build := read
 		read = func() ([]map[string]any, error) {
-			value, err := s.Snapshots.read(ctx, p, "source", source, json.RawMessage(params), func() (any, error) { return build() }, nil)
+			value, err := s.Snapshots.read(ctx, p, "source", cacheSource, json.RawMessage(params), func() (any, error) { return build() }, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -129,7 +157,7 @@ func (s *Sources) sharedRows(ctx context.Context, p principal.Principal, source 
 			rows, err = read()
 		}
 	} else {
-		rows, err = reqcache.Do(ctx, "rows|"+p.UserID+"|"+source+"|"+string(params), read)
+		rows, err = reqcache.Do(ctx, "rows|"+p.UserID+"|"+cacheSource+"|"+string(params), read)
 	}
 	return rows, err
 }

@@ -30,3 +30,30 @@ func TestSourceParams(t *testing.T) {
 		t.Fatal("ignored non-string filter changed the key")
 	}
 }
+
+func TestLeafViewParams(t *testing.T) {
+	leaf := View{ID: "leaf", Query: Query{From: "postings", Where: "row.amount > 0"}}
+	a, ok := leafViewParams(leaf, map[string]any{"unused": 1})
+	if !ok {
+		t.Fatal("parameter-independent leaf not shareable")
+	}
+	b, ok := leafViewParams(leaf, map[string]any{"unused": 2})
+	if !ok || !reflect.DeepEqual(a, b) {
+		t.Fatal("unrelated parameter changed leaf key")
+	}
+	c, ok := leafViewParams(leaf, map[string]any{"from": "2026-01-01"})
+	if !ok || reflect.DeepEqual(a, c) {
+		t.Fatal("leaf key ignored source date")
+	}
+	changed := leaf
+	changed.Query.Where = "row.amount > 1"
+	d, ok := leafViewParams(changed, nil)
+	if !ok || reflect.DeepEqual(a, d) {
+		t.Fatal("leaf key ignored view definition")
+	}
+	for _, query := range []Query{{From: "postings", Where: "row.amount > params.floor"}, {From: "postings", Where: "row.name == 'params'"}, {From: "postings", Where: "now() != null"}, {From: "view:other"}, {From: "accounts"}} {
+		if _, ok := leafViewParams(View{ID: "unsafe", Query: query}, nil); ok {
+			t.Fatalf("unsafe view was shareable: %q", query.From)
+		}
+	}
+}

@@ -16,10 +16,30 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/event"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+type blockedSourceValuer struct {
+	once             sync.Once
+	entered, release chan struct{}
+}
+
+func (v *blockedSourceValuer) Convert(ctx context.Context, p principal.Principal, a ledger.Amount, target, at string) (ledger.Amount, error) {
+	v.once.Do(func() {
+		close(v.entered)
+		select {
+		case <-v.release:
+		case <-ctx.Done():
+		}
+	})
+	if err := ctx.Err(); err != nil {
+		return ledger.Amount{}, err
+	}
+	return (testValuer{}).Convert(ctx, p, a, target, at)
+}
 
 func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
@@ -136,5 +156,84 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	second, err := engine.Evaluate(ctx, p, "size(data.accounts) + size(data.history)", balances, map[string]any{"unrelated": 2})
 	if err != nil || second.Value != first.Value || journalReads.Load() != 1 {
 		t.Fatal("balance sources missed the shared cache")
+	}
+	sources.Expr = expr
+	sources.Views = dashboard.NewService(dashboard.NewMongoRepository(db), &engine, a)
+	leaf := dashboard.View{Key: p.UserID + ":leaf", UserID: p.UserID, ID: "leaf", Query: dashboard.Query{From: "postings", Where: "row.amount > 0.0"}}
+	parameterized := dashboard.View{Key: p.UserID + ":parameterized", UserID: p.UserID, ID: "parameterized", Query: dashboard.Query{From: "postings", Where: "row.amount > params.floor"}}
+	if err := a.Mutation(ctx, p, func(tx context.Context) error {
+		_, e := db.Collection("views").InsertMany(tx, []any{leaf, parameterized})
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	viewCount := func(owner principal.Principal, id string, params map[string]any) (float64, error) {
+		q := map[string]dashboard.Query{"v": {From: "view:" + id, Agg: map[string]string{"count": "count()"}}}
+		r, e := engine.Evaluate(ctx, owner, "data.v[0].count", q, params)
+		if e != nil {
+			return 0, e
+		}
+		n, ok := r.Value.(float64)
+		if !ok {
+			return 0, fmt.Errorf("unexpected view count")
+		}
+		return n, nil
+	}
+	if n, e := viewCount(p, "leaf", map[string]any{"unrelated": 1}); e != nil || n != 3 {
+		t.Fatal("leaf baseline differs")
+	}
+	if n, e := viewCount(p, "leaf", map[string]any{"unrelated": 2}); e != nil || n != 3 {
+		t.Fatal("shared leaf differs")
+	}
+	if n, e := viewCount(p, "leaf", map[string]any{"from": "2026-02-01"}); e != nil || n != 2 {
+		t.Fatal("leaf date bound ignored")
+	}
+	if n, e := viewCount(p, "parameterized", map[string]any{"floor": float64(0)}); e != nil || n != 3 {
+		t.Fatal("parameterized view baseline differs")
+	}
+	if n, e := viewCount(p, "parameterized", map[string]any{"floor": float64(2)}); e != nil || n != 0 {
+		t.Fatal("parameterized view reused incompatible result")
+	}
+	if _, e := viewCount(other, "leaf", nil); e == nil {
+		t.Fatal("view crossed owner boundary")
+	}
+	if err := a.Mutation(ctx, p, func(tx context.Context) error {
+		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > 2.0"}})
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n, e := viewCount(p, "leaf", map[string]any{"unrelated": 1}); e != nil || n != 0 {
+		t.Fatal("view edit did not invalidate cached output")
+	}
+	if err := a.Mutation(ctx, p, func(tx context.Context) error {
+		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > 0.0"}})
+		return e
+	}); err != nil {
+		t.Fatal(err)
+	}
+	blocker := &blockedSourceValuer{entered: make(chan struct{}), release: make(chan struct{})}
+	sources.Valuer = blocker
+	done := make(chan error, 1)
+	go func() { _, e := viewCount(p, "leaf", map[string]any{"unrelated": "in-flight"}); done <- e }()
+	select {
+	case <-blocker.entered:
+	case <-time.After(10 * time.Second):
+		close(blocker.release)
+		t.Fatal("view did not reach the blocked source")
+	}
+	writeErr := a.Mutation(ctx, p, func(tx context.Context) error {
+		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > params.floor"}})
+		return e
+	})
+	close(blocker.release)
+	if writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+	if n, e := viewCount(p, "leaf", map[string]any{"floor": float64(2)}); e != nil || n != 0 {
+		t.Fatal("in-flight old view poisoned the new parameterized view")
 	}
 }
