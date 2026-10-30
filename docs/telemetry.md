@@ -50,10 +50,11 @@ All are session-authenticated `GET`s with gzip, a weak `ETag` over the response 
  "flows":{"d":[0,0,1],"a":[0,1,0],"p":[0,1,0],"t":[0,0,1],"v":[1234,-50,900],"n":[1,1,2]},
  "balances":{"d":[0,31],"net":[100,120],"assets":[100,120],"liabilities":[0,0],"estimated_until":"2025-09-30"},
  "rates":{"EUR/USD":{"d":[0],"v":[1.1]}},
- "metrics":[],"annotations":[],"labels":{}}
+ "metrics":[],"annotations":[],"labels":{},"aliases":[{"pattern":"lidl\\s*\\d+","name":"Lidl"}]}
 ```
+Optional `aliases` (omitted when none) are the payee aliases as `{pattern,name}`, patterns case-insensitive regexes; the browser shows `name` wherever it lists raw entries, and an invalid pattern is skipped. `rate` and `avg` metrics divide by months counted as the sum over calendar months of days covered / days in that month, so a whole quarter is exactly 3 and equal-length windows compare fairly; server and cube use the same rule.
 `d` is a day offset from `start`; `v` is signed base-currency **cents** at the entry date's rate; one row per day/account/payee/tag-set; estimated flag comes from the account. Equity legs are left out, and a posting with no quote carries `v:0` and is counted in a top-level `unvalued`. `balances` is daily-resolution net worth (only changed days plus month ends is fine). Cube totals power exploring only. Any tile links to the exact `metric_query` figure in the Details drawer.
-- `GET /api/changes?from=&to=&q=&routine=&cursor=` → grouped readable feed `{groups:[{id,at,actor:{kind,label},summary,count,routine,batch_id,status,undoable,targets,events:[…]}],next}`.
+- `GET /api/changes?from=&to=&q=&routine=&cursor=` → grouped readable feed. Events collapse into one group when they share a `batch_id`, when they are routine writes by one tool and actor on one day, or when one actor runs the same tool with consecutive events less than 10 minutes apart (summary like "Added 142 entries"; `limit` counts groups; `undoable` is only true for a single-event group). Payee aliases are applied to summaries at read time. `{groups:[{id,at,actor:{kind,label},summary,count,routine,batch_id,status,undoable,targets,events:[…]}],next}`.
 - `POST /api/feedback` (CSRF) → flag a number with `{target:{dashboard,component,metric,value,params},note}`.
 - `GET|PUT|DELETE /api/saved-views` (CSRF on writes) → personal views. `PUT {id?,name,page,state}`, `DELETE ?id=`. Not shared, not audited as finance writes.
 - `POST /api/usage` (CSRF, so send it with `fetch(..., {keepalive:true})`) with `{path,dashboard}` → page views for `usage_get`. Not audited, so a beacon never invalidates a cached view.

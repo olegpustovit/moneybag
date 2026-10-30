@@ -18,10 +18,10 @@ if (!rootFont.test(css)) failures.push('Geist fallback missing from root font st
 const authStyles=readdirSync(new URL('assets/',dist)).filter(name => /^auth-.+\.css$/.test(name))
 if (authStyles.length!==1 || !rootFont.test(readFileSync(new URL(`assets/${authStyles[0]}`,dist),'utf8'))) failures.push('Geist fallback missing from auth root font stack')
 if (size(".js") > 120_000) failures.push(`entry JS ${size(".js")} B > 120 KB`)
-if (size('.css') > 30_000) failures.push(`entry CSS ${size('.css')} B > 30 KB`)
+if (size('.css') > 12_000) failures.push(`entry CSS ${size('.css')} B > 12 KB`)
 for (const name of readdirSync(new URL('assets/', dist))) {
   if (name.endsWith('.js') && !initial.includes(`assets/${name}`)) {
-    const limit = name.startsWith('editor-') ? 160_000 : name.startsWith('chart-') ? 120_000 : 100_000
+    const limit = 60_000
     if (gzipSize(`assets/${name}`) > limit) failures.push(`chunk ${name} exceeds ${limit / 1000} KB`)
   }
 }
