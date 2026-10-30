@@ -36,6 +36,20 @@ func Encode(v any) (Encoded, error) {
 }
 
 func encodeRaw(raw []byte) (Encoded, error) {
+	return encodeTagged(raw, raw)
+}
+
+// encodeView leaves as_of out of the ETag: a rebuild with the same numbers must still answer 304.
+// as_of and stale are the last fields, so user content cannot be mistaken for them.
+func encodeView(raw []byte) (Encoded, error) {
+	asOf, stale := bytes.LastIndex(raw, []byte(`"as_of":`)), bytes.LastIndex(raw, []byte(`"stale":`))
+	if asOf < 0 || stale < asOf {
+		return Encoded{}, fmt.Errorf("view body has no trailing as_of and stale fields")
+	}
+	return encodeTagged(raw, append(raw[:asOf:asOf], raw[stale:]...))
+}
+
+func encodeTagged(raw, tagged []byte) (Encoded, error) {
 	var b bytes.Buffer
 	w := gzip.NewWriter(&b)
 	if _, err := w.Write(raw); err != nil {
@@ -44,7 +58,7 @@ func encodeRaw(raw []byte) (Encoded, error) {
 	if err := w.Close(); err != nil {
 		return Encoded{}, err
 	}
-	sum := sha256.Sum256(raw)
+	sum := sha256.Sum256(tagged)
 	return Encoded{Gzip: b.Bytes(), ETag: `W/"` + hex.EncodeToString(sum[:16]) + `"`}, nil
 }
 
@@ -93,7 +107,7 @@ func (e *viewEntry) staleEncoded() (Encoded, error) {
 			e.err = fmt.Errorf("view body has no trailing stale field")
 			return
 		}
-		e.stale, e.err = encodeRaw(append(trimmed, `"stale":true}`...))
+		e.stale, e.err = encodeView(append(trimmed, `"stale":true}`...))
 	})
 	return e.stale, e.err
 }
@@ -208,7 +222,11 @@ func (s *Service) buildView(ctx context.Context, p principal.Principal, id, vers
 	if pages == nil {
 		pages = []Page{}
 	}
-	encoded, err := Encode(PageView{Head: head, Spec: current.Spec, Version: current.Version, Status: current.Status, Pages: pages, Values: rendered.Values, Computed: rendered.Computed, Validation: rendered.Validation, AsOf: time.Now().UTC().Format(time.RFC3339)})
+	raw, err := json.Marshal(PageView{Head: head, Spec: current.Spec, Version: current.Version, Status: current.Status, Pages: pages, Values: rendered.Values, Computed: rendered.Computed, Validation: rendered.Validation, AsOf: time.Now().UTC().Format(time.RFC3339)})
+	if err != nil {
+		return nil, err
+	}
+	encoded, err := encodeView(raw)
 	if err != nil {
 		return nil, err
 	}

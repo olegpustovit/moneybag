@@ -36,7 +36,7 @@ Verify tools: `dashboard_lint` returns `{rule,severity(error|warning),path,compo
 
 ## Browser reads
 
-All are session-authenticated `GET`s with gzip, a weak `ETag` over the response body (which changes with the revision, params and `as_of`), `Cache-Control: private, no-cache` and `304` support. Authentication and access checks run before any `304`.
+All are session-authenticated `GET`s with gzip, a weak `ETag` over the response body, leaving out `as_of` on views so a rebuild with the same numbers still answers `304`, `Cache-Control: private, no-cache` and `304` support. Authentication and access checks run before any `304`.
 
 - `GET /api/bootstrap` → `{session:{user,csrf,version,mcp_url},nav:[{id,label,icon,dashboard|route}],dashboards:[Head],tables:[Table],counts:{imports,reconcile,feedback},labels}`. One round trip instead of session + discover + lists. `/api/session` stays for the sign-in check.
 - `GET /api/dashboards/{id}/view?version=&from=&to=&month=` → `{head,spec,version,status,pages,values,computed,validation,as_of,stale}`, with `stale` always last. `version` is `draft`, `published` or a number; omitted means the draft if one exists, otherwise published, like `dashboard_get`. `pages` has resolved titles, `version` and `status` describe what is shown, and `as_of` is the RFC 3339 time of the render. `{id}` may be an editor grant id; viewer grants get 403 and revoked ones 404. Rate-only writes serve the last render with `stale:true` and its `as_of` while it refreshes; ledger and spec writes always answer fresh. The page never uses MCP for this.
