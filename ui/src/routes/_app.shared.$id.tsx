@@ -6,6 +6,7 @@ import { Button } from '../components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../components/ui/dialog'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '../components/ui/sheet'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
 import { DashboardEditor } from '../features/dashboard/editor'
 import { Component } from '../features/dashboard/component'
 import { tableSort } from '../features/dashboard/table-sort'
@@ -13,7 +14,8 @@ import { componentValue } from '../features/dashboard/values'
 import type { DashboardPublishOutput } from '../lib/tools'
 import { sharedDraftQuery, sharedPost, sharedQuery } from '../features/sharing/queries'
 
-export const Route=createFileRoute('/_app/shared/$id')({validateSearch:z.object({sort:tableSort,sort_table:z.string().max(200).optional().catch(undefined),page:z.string().optional().catch(undefined)}),loader:async ({context,params}) => {await context.queryClient.fetchQuery(sharedQuery(context.session,params.id))},pendingComponent:() => <section aria-busy="true"><h1>Shared dashboard</h1><p>Loading dashboard…</p></section>,errorComponent:SharedError,component:SharedDashboard})
+export const Route=createFileRoute('/_app/shared/$id')({validateSearch:z.object({sort:tableSort,sort_table:z.string().max(200).optional().catch(undefined),page:z.string().optional().catch(undefined)}),loader:async ({context,params}) => {await context.queryClient.fetchQuery(sharedQuery(context.session,params.id))},pendingMs:150,pendingMinMs:300,pendingComponent:SharedPending,errorComponent:SharedError,component:SharedDashboard})
+function SharedPending() {return <section role="status" aria-busy="true"><span className="sr-only">Loading shared dashboard…</span><header className="page-header"><div><p className="breadcrumb">SHARED DASHBOARDS</p><h1>Shared dashboard</h1></div></header><div className="shared-loading" aria-hidden="true"><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/><Skeleton className="skeleton-bar"/></div></section>}
 function SharedError({reset}:{reset:() => void}) {const router=useRouter();return <section className="dashboard-error"><h1>Shared dashboard unavailable</h1><p>It may have expired or access may have been revoked.</p><Button onClick={() => {reset();void router.invalidate()}}>Try again</Button> <a href="/shared">Back to shares</a></section>}
 function SharedDashboard() {
  const {session}=Route.useRouteContext(),{id}=Route.useParams(),search=Route.useSearch(),navigate=Route.useNavigate(),{data}=useSuspenseQuery(sharedQuery(session,id)),pages=data.pages ?? [],page=pages.find(item => item.id===search.page) ?? pages[0]

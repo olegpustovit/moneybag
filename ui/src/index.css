@@ -148,6 +148,7 @@ th { color:var(--text2); font-weight:600; }
 .refresh-line { height:2px; background:var(--c0); }
 @media (max-width:760px) { .dashboard-grid > .panel { grid-column:span 12 !important; } .budget-row { grid-template-columns:minmax(80px,1fr) minmax(60px,1fr) auto; gap:6px; } }
 
+.settings-loading-line { width:min(280px,80%); height:32px; margin-top:12px; }.shared-loading { display:grid; gap:16px; }.shared-loading .skeleton-bar { height:32px; }.shared-loading .skeleton-bar:nth-child(2) { width:70%; }.shared-loading .skeleton-bar:nth-child(3) { width:45%; }
 .settings-layout { max-width: 960px; }
 .settings-section { padding: 1.5rem 0; border-bottom: 1px solid var(--border); }
 .settings-section h2 { font-size: 1.05rem; font-weight: 600; margin: 0 0 .35rem; }

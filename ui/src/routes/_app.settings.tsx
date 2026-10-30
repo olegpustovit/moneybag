@@ -4,6 +4,8 @@ import { createFileRoute, useRouter } from '@tanstack/react-router'
 import { Button } from '../components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
+import { Skeleton } from '../components/ui/skeleton'
+import { LoadingTable } from '../components/loading-table'
 import { FormulaInput } from '../components/formula/input'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
@@ -12,13 +14,16 @@ import { settingsQuery } from '../lib/queries'
 
 export const Route = createFileRoute('/_app/settings')({
   loader: ({ context }) => context.queryClient.query({ ...settingsQuery(context.session), staleTime: 'static' }),
-  pendingComponent: () => <div className="dashboard-pending" aria-busy="true">Loading settings…</div>,
+  pendingMs: 150,
+  pendingMinMs: 300,
+  pendingComponent: SettingsPending,
   errorComponent: SettingsError,
   component: Settings,
 })
-function SettingsError({ reset }: { reset: () => void }) {
+function SettingsPending() {const {session}=Route.useRouteContext();return <section role="status" aria-busy="true"><span className="sr-only">Loading settings…</span><header className="page-header"><div><p className="breadcrumb">WORKSPACE / SETTINGS</p><h1>Settings</h1><p className="description">Your account and connected agents.</p></div></header><div className="settings-layout" aria-hidden="true"><section className="settings-section"><h2>Appearance</h2><Skeleton className="skeleton-bar settings-loading-line"/></section><section className="settings-section"><h2>Connected agents</h2><p>Agents can work within the scopes you granted.</p><LoadingTable columns={['Agent','Access','Status','Action']}/></section><section className="settings-section"><h2>Statement feeds</h2><p>Connect a feed to stage statements for review.</p><LoadingTable columns={['Feed','Account','Format','Action']}/></section>{session.user.is_admin && <section className="settings-section"><h2>Invite a user</h2><Skeleton className="skeleton-bar settings-loading-line"/></section>}<section className="settings-section"><h2>Account</h2><Skeleton className="skeleton-bar settings-loading-line"/></section></div></section>}
+function SettingsError({ error, reset }: { error: unknown; reset: () => void }) {
   const router = useRouter()
-  return <section className="dashboard-error"><h1>Could not load settings</h1><p>Check your connection and try again.</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section>
+  return <section className="dashboard-error"><h1>Could not load settings</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section>
 }
 function formFields(form: HTMLFormElement): Record<string,string> {
   const fields: Record<string,string> = {}
