@@ -147,46 +147,60 @@ func (s *Service) Status(ctx context.Context, p principal.Principal, account str
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	// Backdated entries, reversals and import undos change past balances; recheck so status is current.
-	// shortcut: read-only callers see the last nightly verification, upgrade if that matters to them.
-	if p.Require("ledger:write") == nil {
-		if e := s.verify(ctx, p, account); e != nil {
-			return nil, e
-		}
-	}
 	f := bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}
 	if account != "" {
 		f["account"] = account
 	}
-	cur, e := s.repo.db.Collection("balance_assertions").Aggregate(ctx, bson.A{
-		bson.M{"$match": f},
-		bson.M{"$sort": bson.D{{Key: "ok", Value: -1}, {Key: "date", Value: -1}}},
-		bson.M{"$limit": 5001},
-		bson.M{"$group": bson.M{"_id": "$account", "last_ok": bson.M{"$first": bson.M{"$cond": bson.A{"$ok", "$date", ""}}}, "count": bson.M{"$sum": 1}}},
-	}, options.Aggregate().SetBatchSize(5001))
-	if e != nil {
-		return nil, e
-	}
-	defer cur.Close(ctx)
-	var assertions []struct {
-		Account string `bson:"_id"`
-		LastOK  string `bson:"last_ok"`
-		Count   int    `bson:"count"`
-	}
-	if e = cur.All(ctx, &assertions); e != nil {
-		return nil, e
-	}
 	byAccount := map[string]*AccountStatus{}
 	count := 0
-	for _, a := range assertions {
-		count += a.Count
-		byAccount[a.Account] = &AccountStatus{Account: a.Account, LastOK: a.LastOK, Discrepancies: []Discrepancy{}}
+	// Backdated entries, reversals and import undos change past balances; recheck so status is current.
+	// shortcut: read-only callers see the last nightly verification, upgrade if that matters to them.
+	if p.Require("ledger:write") == nil {
+		if e := s.verify(ctx, p, account, func(a Assertion) {
+			count++
+			if count > 5000 {
+				return
+			}
+			row := byAccount[a.Account]
+			if row == nil {
+				row = &AccountStatus{Account: a.Account, Discrepancies: []Discrepancy{}}
+				byAccount[a.Account] = row
+			}
+			if a.OK && a.Date > row.LastOK {
+				row.LastOK = a.Date
+			}
+		}); e != nil {
+			return nil, e
+		}
+	} else {
+		cur, e := s.repo.db.Collection("balance_assertions").Aggregate(ctx, bson.A{
+			bson.M{"$match": f},
+			bson.M{"$sort": bson.D{{Key: "ok", Value: -1}, {Key: "date", Value: -1}}},
+			bson.M{"$limit": 5001},
+			bson.M{"$group": bson.M{"_id": "$account", "last_ok": bson.M{"$first": bson.M{"$cond": bson.A{"$ok", "$date", ""}}}, "count": bson.M{"$sum": 1}}},
+		}, options.Aggregate().SetBatchSize(5001))
+		if e != nil {
+			return nil, e
+		}
+		defer cur.Close(ctx)
+		var assertions []struct {
+			Account string `bson:"_id"`
+			LastOK  string `bson:"last_ok"`
+			Count   int    `bson:"count"`
+		}
+		if e = cur.All(ctx, &assertions); e != nil {
+			return nil, e
+		}
+		for _, a := range assertions {
+			count += a.Count
+			byAccount[a.Account] = &AccountStatus{Account: a.Account, LastOK: a.LastOK, Discrepancies: []Discrepancy{}}
+		}
 	}
 	if count > 5000 {
 		return nil, fmt.Errorf("too many assertions; select one account")
 	}
 	f["status"] = "open"
-	cur, e = s.repo.db.Collection("discrepancies").Find(ctx, f, options.Find().SetLimit(5001).SetBatchSize(5001))
+	cur, e := s.repo.db.Collection("discrepancies").Find(ctx, f, options.Find().SetLimit(5001).SetBatchSize(5001))
 	if e != nil {
 		return nil, e
 	}
@@ -425,9 +439,9 @@ func (s *Service) Duplicates(ctx context.Context, p principal.Principal, in ledg
 }
 
 func (s *Service) Verify(ctx context.Context, p principal.Principal) error {
-	return s.verify(ctx, p, "")
+	return s.verify(ctx, p, "", nil)
 }
-func (s *Service) verify(ctx context.Context, p principal.Principal, account string) error {
+func (s *Service) verify(ctx context.Context, p principal.Principal, account string, onAssertion func(Assertion)) error {
 	if e := p.Require("ledger:write"); e != nil {
 		return e
 	}
@@ -493,9 +507,14 @@ func (s *Service) verify(ctx context.Context, p principal.Principal, account str
 			return e
 		}
 		if diff.Rat().Cmp(a.Diff.Rat()) != 0 || a.OK != (diff.Rat().Sign() == 0) {
-			if _, e = s.Assert(ctx, p, AssertInput{Account: a.Account, Date: a.Date, Amount: a.Amount, Source: a.Source}); e != nil {
-				return e
+			result, err := s.Assert(ctx, p, AssertInput{Account: a.Account, Date: a.Date, Amount: a.Amount, Source: a.Source})
+			if err != nil {
+				return err
 			}
+			a = result.Assertion
+		}
+		if onAssertion != nil {
+			onAssertion(a)
 		}
 	}
 	return cur.Err()
