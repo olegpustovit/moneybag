@@ -106,29 +106,35 @@ function Bar({initial={}}:{initial?:TelemetrySearch}) {
 describe('TimeBar',() => {
  const field=() => screen.getByLabelText('Time range. Type anything') as HTMLInputElement
  const dates=() => ['Start date','End date'].map(n => (screen.getByLabelText(n) as HTMLInputElement).value)
- it('edits the start and end dates, keeping from before to and inside the history',() => {
+ const type=(el:HTMLElement,value:string) => {fireEvent.focus(el);fireEvent.change(el,{target:{value}});fireEvent.blur(el)}
+ it('takes typed start and end dates, keeping from before to',() => {
   render(<Bar initial={{t:'2026-03'}}/>)
   const from=screen.getByLabelText('Start date'),to=screen.getByLabelText('End date')
-  fireEvent.change(from,{target:{value:'2026-03-10'}});expect(screen.getByTestId('t').textContent).toBe('2026-03-10 to 2026-03-31')
-  fireEvent.change(from,{target:{value:'2026-05-02'}});expect(screen.getByTestId('t').textContent).toBe('2026-05-02 to 2026-05-02')
-  fireEvent.change(to,{target:{value:'2026-04-01'}});expect(screen.getByTestId('t').textContent).toBe('2026-04-01 to 2026-04-01')
-  fireEvent.change(from,{target:{value:'0002-01-01'}});expect(screen.getByTestId('t').textContent).toBe('2026-04-01 to 2026-04-01')
-  expect(from.getAttribute('min')).toBe('2023-01-01');expect(to.getAttribute('max')).toBe('2026-10-30')
+  type(from,'10 Mar 2026');expect(screen.getByTestId('t').textContent).toBe('2026-03-10 to 2026-03-31')
+  type(from,'2 may 2026');expect(screen.getByTestId('t').textContent).toBe('2026-05-02 to 2026-05-02')
+  type(to,'1 Apr 2026');expect(screen.getByTestId('t').textContent).toBe('2026-04-01 to 2026-04-01')
+ })
+ it('validates a typed date, and leaves the range alone when it is wrong',() => {
+  render(<Bar initial={{t:'2026-03'}}/>);const from=screen.getByLabelText('Start date') as HTMLInputElement
+  fireEvent.focus(from);fireEvent.change(from,{target:{value:'31 Feb 2026'}});expect(from.getAttribute('aria-invalid')).toBe('true');expect(screen.getByRole('alert')).toBeTruthy()
+  fireEvent.keyDown(from,{key:'Enter'});expect(screen.getByTestId('t').textContent).toBe('2026-03')
+  fireEvent.blur(from);expect(from.value).toBe('1 Mar 2026');expect(screen.queryByRole('alert')).toBeNull()
+  type(from,'1 Jan 2001');expect(screen.getByTestId('t').textContent).toBe('2026-03');expect(from.value).toBe('1 Mar 2026')
  })
  it('shows the typed preview instead of the date fields while typing',() => {
   render(<Bar/>);fireEvent.change(field(),{target:{value:'q2 2026'}})
   expect(document.querySelector('.tm-dates-pair')?.className).toContain('typing');expect(document.querySelector('.tm-time-status')?.className).toContain('on')
  })
- it('shows a friendly name and the resolved dates',() => {render(<Bar/>);expect(field().value).toBe('Last 12 months');expect(dates()).toEqual(['2025-10-31','2026-10-30'])})
+ it('shows a friendly name and the resolved dates',() => {render(<Bar/>);expect(field().value).toBe('Last 12 months');expect(dates()).toEqual(['31 Oct 2025','30 Oct 2026'])})
  it('offers This month after 30 days, even when a page lists other presets',() => {
   expect(defaultPresets(bounds,['90d','30d','ytd']).map(p => p.label)).toEqual(['90D','30D','This month','YTD'])
   expect(defaultPresets(bounds,['30d','this month']).map(p => p.label)).toEqual(['30D','This month'])
   render(<Bar/>);expect(screen.getAllByRole('button').map(b => b.textContent).slice(2,6)).toEqual(['30D','This month','90D','6M'])
-  fireEvent.click(screen.getByRole('button',{name:'This month'}));expect(screen.getByTestId('t').textContent).toBe('this month');expect(dates()).toEqual(['2026-10-01','2026-10-30'])
+  fireEvent.click(screen.getByRole('button',{name:'This month'}));expect(screen.getByTestId('t').textContent).toBe('this month');expect(dates()).toEqual(['1 Oct 2026','30 Oct 2026'])
  })
  it('names an unnamed range by its length and keeps the dates in the caption',() => {
   render(<Bar initial={{t:'2026-05-03 to 2026-05-19'}}/>)
-  expect(field().value).toBe('17 days');expect(dates()).toEqual(['2026-05-03','2026-05-19'])
+  expect(field().value).toBe('17 days');expect(dates()).toEqual(['3 May 2026','19 May 2026'])
  })
  it('parses live, reports errors through aria, and applies on Enter',() => {
   render(<Bar/>)
@@ -154,7 +160,7 @@ describe('TimeBar',() => {
   fireEvent.keyDown(end,{key:'ArrowRight'});expect(screen.getByTestId('t').textContent).toBe('2026-03-01 to 2026-04-07')
   fireEvent.change(screen.getByLabelText('Compare to'),{target:{value:'previous_year'}});expect(screen.getByTestId('cmp').textContent).toBe('previous_year')
  })
- it('falls back on a bad URL value instead of breaking',() => {render(<Bar initial={{t:'nonsense'}}/>);expect(dates()).toEqual(['2025-10-31','2026-10-30'])})
+ it('falls back on a bad URL value instead of breaking',() => {render(<Bar initial={{t:'nonsense'}}/>);expect(dates()).toEqual(['31 Oct 2025','30 Oct 2026'])})
 })
 
 function Filters({onSave}:{onSave?:() => void}) {

@@ -1,12 +1,19 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import './telemetry.css'
 
-export function Sparkline({values,color='var(--c0)',label,height=30}:{values:ArrayLike<number|null>;color?:string;label?:string;height?:number}) {
- const nums:number[]=[];for(let i=0;i<values.length;i++){const v=values[i];if(v!==null && v!==undefined && Number.isFinite(v))nums.push(v)}
+export function Sparkline({values,color='var(--c0)',label,height=30,tip}:{values:ArrayLike<number|null>;color?:string;label?:string;height?:number;tip?:(index:number) => string}) {
+ const [at,setAt]=useState<number|null>(null)
+ const nums:number[]=[],indices:number[]=[];for(let i=0;i<values.length;i++){const v=values[i];if(v!==null && v!==undefined && Number.isFinite(v)){nums.push(v);indices.push(i)}}
  if(nums.length<2)return <svg className="tm-spark" height={height} aria-hidden="true"/>
  const min=Math.min(...nums),max=Math.max(...nums),y=(v:number) => (height-3-(max>min ? (v-min)/(max-min) : .5)*(height-6)).toFixed(1)
  const points=nums.map((v,i) => `${(i/(nums.length-1)*200).toFixed(1)},${y(v)}`).join(' ')
- return <svg className="tm-spark" viewBox={`0 0 200 ${height}`} height={height} preserveAspectRatio="none" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}><polyline points={points} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke"/></svg>
+ const svg=<svg className="tm-spark" viewBox={`0 0 200 ${height}`} height={height} preserveAspectRatio="none" role={label ? 'img' : undefined} aria-label={label} aria-hidden={label ? undefined : true}><polyline points={points} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke"/></svg>
+ if(!tip)return svg
+ const yAt=(v:number) => height-3-(max>min ? (v-min)/(max-min) : .5)*(height-6),spot=at===null ? null : Math.min(at,nums.length-1),left=spot===null ? 0 : spot/(nums.length-1)*100
+ return <div className="tm-spark-hover" style={{color}} onPointerMove={e => {const r=e.currentTarget.getBoundingClientRect();setAt(Math.max(0,Math.min(nums.length-1,Math.round((e.clientX-r.left)/r.width*(nums.length-1)))))}} onPointerLeave={() => setAt(null)}>
+  {svg}
+  {spot!==null && <><i className="tm-spark-dot" style={{left:`${left}%`,top:yAt(nums[spot])}}/><span className="tm-spark-tip" style={left>60 ? {right:`${100-left}%`} : {left:`${left}%`}}>{tip(indices[spot])}</span></>}
+ </div>
 }
 
 export type RankedRow={key:string;label:string;value:number;text:string;compare?:number;compareText?:string;color?:string;estimated?:boolean;note?:string}

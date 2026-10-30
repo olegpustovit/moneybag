@@ -68,8 +68,9 @@ function buildOptions(model:{current:Model},width:number,tip:HTMLDivElement,hand
   const m=model.current;if(!m.bands?.length || !time)return
   const ctx=u.ctx,{left,top,width:w,height:h}=u.bbox,r=uPlot.pxRatio;ctx.save();ctx.beginPath();ctx.rect(left,top,w,h);ctx.clip();ctx.font=`${10*r}px Geist, system-ui, sans-serif`
   const fill=tint(token('--c1'),'22'),label=token('--text2')
+  ctx.textAlign='left'
   let labelEnd=-Infinity
- for(const band of m.bands){const x0=u.valToPos(band.from,'x',true),x1=u.valToPos(band.to+864e5,'x',true);if(x1<left || x0>left+w)continue;ctx.fillStyle=fill;ctx.fillRect(x0,top,Math.max(2*r,x1-x0),h);const wide=ctx.measureText(band.label).width+6*r;if(x0>=labelEnd && (wide<x1-x0 || (m.xs.length && (u.scales.x.max!-u.scales.x.min!)<500*864e5))){ctx.fillStyle=label;ctx.fillText(band.label,x0+3*r,top+h-5*r);labelEnd=x0+wide}}
+ for(const band of m.bands){const x0=u.valToPos(band.from,'x',true),x1=u.valToPos(band.to+864e5,'x',true);if(x1<left || x0>left+w)continue;ctx.fillStyle=fill;ctx.fillRect(x0,top,Math.max(2*r,x1-x0),h);const wide=ctx.measureText(band.label).width+6*r;if(x0>=labelEnd && x0+wide<=left+w && (wide<x1-x0 || (m.xs.length && (u.scales.x.max!-u.scales.x.min!)<500*864e5))){ctx.fillStyle=label;ctx.fillText(band.label,x0+3*r,top+h-5*r);labelEnd=x0+wide}}
   ctx.restore()
  }
  const drawOver=(u:uPlot) => {

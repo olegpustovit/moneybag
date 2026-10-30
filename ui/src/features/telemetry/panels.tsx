@@ -2,9 +2,10 @@ import { CatchBoundary, Link, useNavigate } from '@tanstack/react-router'
 import type { ReactNode } from 'react'
 import { componentValue, type ComponentValue } from '../dashboard/values'
 import { tableTotal } from '../dashboard/table-total'
-import { annotationBands, balanceField, balanceSeries, colorOf, compareSeries, cubeCanCompute, goodWhen, metricTotal, timeseries, whatMoved, type Cube, type CubeMetric, type Dimension, type EstimatePolicy, type Pill } from './cube'
-import { compareWindow, dayFromIso, isoDay, rangeLabel, type Bounds, type Bucket, type CompareWindow, type Range, parseRange } from './time-grammar'
-import { compactNumber, money, percent, unitFormat, type Unit } from './format'
+import { annotationBands, balanceField, balanceSeries, colorOf, compareSeries, cubeCanCompute, goodWhen, label, metricRows, metricTotal, timeseries, whatMoved, type Cube, type CubeMetric, type Dimension, type EstimatePolicy, type Pill } from './cube'
+import { bucketLabel, compareWindow, dayFromIso, dayLabel, isoDay, rangeLabel, type Bounds, type Bucket, type CompareWindow, type Range, parseRange } from './time-grammar'
+import { encodePills } from './filters'
+import { compactNumber, money, moneyExact, percent, unitFormat, type Unit } from './format'
 import { TimeChart, type ChartSeries } from './time-chart'
 import LegacyChart from './legacy-chart'
 import { RankedBars, Sankey, type RankedRow } from './marks'
@@ -48,19 +49,20 @@ function Head({title,fixed,onDetails,note,children}:{title?:string;fixed?:string
 function StatPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  const m=metricOf(ctx,v.metric),canCube=!!ctx.cube && cubeCanCompute(m) && !c.fixed,exact=isExact(v,ctx)
  const label=v.title ?? v.label ?? ''
- let text=v.text ?? '',change:StatChange|null=null,comparison:string|undefined,spark:ArrayLike<number|null>=(v.sparkline ?? []).map(tryNumber),share=(v.estimates?.share_pct ?? 0)/100
+ let text=v.text ?? '',change:StatChange|null=null,comparison:string|undefined,spark:ArrayLike<number|null>=(v.sparkline ?? []).map(tryNumber),share=(v.estimates?.share_pct ?? 0)/100,sparkTip:((i:number) => string)|undefined
  if(canCube && m && ctx.cube){
   const win=windowFor(c,ctx,ctx.range),q={range:ctx.range,pills:ctx.pills},now=metricTotal(ctx.cube,q,m,policyOf(c,m)),prev=win?.available ? metricTotal(ctx.cube,{range:win,pills:ctx.pills},m,policyOf(c,m)).total : null
   const fmt=(x:number) => metricText(ctx,m,x)
   if(!exact)text=fmt(now.total)
   change=changeBetween(now.total,prev,goodWhen(m),fmt);comparison=win?.label;share=now.total && m.unit!=='int' ? now.estimated/now.total : 0
-  spark=balanceField(m) ? balanceSeries(ctx.cube,ctx.range,{field:balanceField(m)!,maxPoints:60}).values : timeseries(ctx.cube,q,{measure:m,estimates:policyOf(c,m)}).total
+  const line=balanceField(m) ? {...balanceSeries(ctx.cube,ctx.range,{field:balanceField(m)!,maxPoints:60}),bucket:null} : (ts => ({xs:ts.xs,values:ts.total,bucket:ts.bucket}))(timeseries(ctx.cube,q,{measure:m,estimates:policyOf(c,m)}))
+  spark=line.values;sparkTip=i => `${line.bucket ? bucketLabel(line.xs[i],line.bucket) : dayLabel(line.xs[i])} · ${fmt(Number(line.values[i] ?? 0))}`
  } else if(v.compare && v.compare.direction){
   const pct=v.compare.delta_pct,dir=v.compare.direction==='up' ? 'up' as const : v.compare.direction==='down' ? 'down' as const : 'flat' as const
   change={direction:dir,good:dir==='flat' ? null : v.compare.good ?? null,text:pct===null || pct===undefined ? 'New' : `${dir==='up' ? '+' : dir==='down' ? '−' : ''}${percent(Math.abs(pct))}`,detail:v.compare.text ? `from ${v.compare.text}` : undefined};comparison=(c.compare ?? ctx.compareMode)==='previous_year' ? 'same period last year' : 'previous period'
  }
  const showNo=(c.compare ?? ctx.compareMode)==='none'
- return <Stat label={label} value={text} change={showNo ? null : change} comparison={showNo ? undefined : comparison} spark={spark} sparkColor={m && goodWhen(m)==='down' ? 'var(--c4)' : 'var(--c0)'} estimatedShare={share>.005 ? share : undefined} fixedRange={c.fixed?.reason} onDetails={() => metricDetails(c,v,ctx,text)} entriesTo={v.entries?.accounts?.length ? <Link to="/ledger" search={drillSearch(v.entries,c.fixed ? undefined : ctx.range)} className="tm-stat-open" aria-label={`${label} ${text}. See the entries.`}><span className="tm-stat-value data">{text}</span></Link> : undefined}/>
+ return <Stat label={label} value={text} change={showNo ? null : change} comparison={showNo ? undefined : comparison} spark={spark} sparkTip={sparkTip} sparkColor={m && goodWhen(m)==='down' ? 'var(--c4)' : 'var(--c0)'} estimatedShare={share>.005 ? share : undefined} fixedRange={c.fixed?.reason} onDetails={() => metricDetails(c,v,ctx,text)} entriesTo={v.entries?.accounts?.length ? <Link to="/ledger" search={drillSearch(v.entries,c.fixed ? undefined : ctx.range)} className="tm-stat-open" aria-label={`${label} ${text}. See the entries.`}><span className="tm-stat-value data">{text}</span></Link> : undefined}/>
 }
 const bucketFromIso=(buckets:string[]):Bucket => {if(buckets[0]?.length===7)return 'month';if(buckets.length>1 && dayFromIso(buckets[1])-dayFromIso(buckets[0])>=6*864e5)return 'week';return 'day'}
 const toMs=(b:string) => dayFromIso(b.length===7 ? `${b}-01` : b)
@@ -114,9 +116,10 @@ function SankeyPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
 }
 function EntriesPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  // A panel is a glance; the Ledger link has the rest. The server sends up to 50 so this can change without a spec change.
- const rows:GridRow[]=(v.rows ?? []).slice(0,12).map(r => ({id:r.entry+r.account,date:r.date,payee:r.payee,account:ctx.cube?.accounts.find(a => a.id===r.account || a.label===r.account)?.category ?? r.account.split(':').at(-1)?.replace(/[_-]+/g,' ') ?? '',amount:{v:tryNumber(r.value),t:r.text}}))
+ const m=metricOf(ctx,v.metric),live=!!ctx.cube && !!m && cubeCanCompute(m) && !balanceField(m),range=fixedRange(c,ctx) ?? ctx.range,all=live ? metricRows(ctx.cube!,{range,pills:ctx.pills},m!) : null
+ const rows:GridRow[]=all ? all.slice(0,12).map((r,i) => ({id:`${r.date}${i}`,date:isoDay(r.date),payee:r.payee,account:label(ctx.cube!,r.account),amount:{v:r.value/100,t:moneyExact(r.value,ctx.cube!.base)}})) : (v.rows ?? []).slice(0,12).map(r => ({id:r.entry+r.account,date:r.date,payee:r.payee,account:ctx.cube?.accounts.find(a => a.id===r.account || a.label===r.account)?.category ?? r.account.split(':').at(-1)?.replace(/[_-]+/g,' ') ?? '',amount:{v:tryNumber(r.value),t:r.text}}))
  const title=v.title ?? v.label
- return <><Head title={title} fixed={c.fixed?.reason} note={typeof v.total==='number' && v.total>rows.length ? `Latest ${rows.length} of ${v.total.toLocaleString('en-US')}` : undefined}><Link className="tm-details-link" to="/ledger" search={drillSearch(v.ref ?? v.entries,c.fixed ? undefined : ctx.range)}>See all in Ledger</Link></Head><DataGrid label={title ?? 'Entries'} rows={rows} rowKey={(r,i) => `${String(r.id)}${i}`} columns={[{key:'date',label:'Date',type:'date'},{key:'payee',label:'Payee',type:'text'},{key:'account',label:'Category',type:'text'},{key:'amount',label:'Amount',type:'money'}]} emptyText="No entries in this range."/></>
+ return <><Head title={title} fixed={c.fixed?.reason} note={Number(all?.length ?? v.total ?? 0)>rows.length ? `Latest ${rows.length} of ${Number(all?.length ?? v.total ?? 0).toLocaleString('en-US')}` : undefined}><Link className="tm-details-link" to="/ledger" search={{...drillSearch(v.ref ?? v.entries,c.fixed ? undefined : ctx.range),f:encodePills(ctx.pills) || undefined}}>See all in Ledger</Link></Head><DataGrid label={title ?? 'Entries'} rows={rows} rowKey={(r,i) => `${String(r.id)}${i}`} columns={[{key:'date',label:'Date',type:'date'},{key:'payee',label:'Payee',type:'text'},{key:'account',label:'Category',type:'text'},{key:'amount',label:'Amount',type:'money'}]} emptyText={ctx.filtering ? 'No entries match this filter in this range.' : 'No entries in this range.'}/></>
 }
 const COLUMN:Record<string,ColumnType>={usd:'money',usd0:'money',eur:'money',eur0:'money',USD:'money',EUR:'money',int:'number',number:'number',pct:'pct',pct0:'pct',date:'date',days:'days',mo:'number'}
 export function legacyColumns(columns:{key:string;label:string;format:string;align:string;type?:string;total?:boolean}[]):GridColumn[] {
@@ -171,7 +174,7 @@ export function Panel({c,value,ctx,span}:{c:SpecComponent;value:unknown;ctx:Pane
   return parsed.success ? <LegacyPanel c={c} value={parsed.data} ctx={ctx}/> : <PanelError c={c} dashboard={ctx.dashboard}/>
  }
  // Panels the cube cannot work out keep the last range's figures until the server answers; say so calmly.
- const live=!!ctx.cube && isMetric(value) && value.type!=='entries' && cubeCanCompute(metricOf(ctx,value.metric)) || !!c.fixed,busy=!!ctx.syncing && !live
+ const live=!!ctx.cube && isMetric(value) && cubeCanCompute(metricOf(ctx,value.metric)) || !!c.fixed,busy=!!ctx.syncing && !live
  const flush=value && typeof value==='object' && ['stat','kpi'].includes((value as {type?:string}).type ?? '')
  return <section className={`panel${flush ? ' flush' : ''}${busy ? ' tm-stale' : ''}`} aria-busy={busy || undefined} data-panel={c.id} style={{gridColumn:`span ${Math.max(1,Math.min(12,span))}`}}>
   <CatchBoundary getResetKey={() => JSON.stringify([ctx.range,ctx.pills])} errorComponent={() => <PanelError c={c} dashboard={ctx.dashboard}/>}>{body()}</CatchBoundary>

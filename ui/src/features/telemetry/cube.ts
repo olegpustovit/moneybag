@@ -162,6 +162,15 @@ export function inCurrency(c:Cube,code:'EUR'|'USD'):Cube {
  const b=c.balances,out:Cube={...c,base:'USD',v:convert(c.d,c.v),balances:{...b,net:convert(b.d,b.net),assets:convert(b.d,b.assets),liabilities:convert(b.d,b.liabilities),exGold:convert(b.d,b.exGold)},mask:null}
  usdCubes.set(c,out);return out
 }
+// One unit of a commodity in another, using the quote at or before the day; through EUR when there's no direct pair. Null when no quote exists.
+export function rateOn(c:Cube,from:string,to:string,day:number):number|null {
+ if(from===to)return 1
+ const at=(pair:string) => {const r=c.rates[pair];if(!r?.d.length)return null;let lo=0,hi=r.d.length-1;while(lo<hi){const mid=(lo+hi+1)>>1;if(r.d[mid]<=day)lo=mid;else hi=mid-1}return r.v[lo] || null}
+ const direct=at(`${from}/${to}`);if(direct)return direct
+ const inverse=at(`${to}/${from}`);if(inverse)return 1/inverse
+ if(from==='EUR' || to==='EUR')return null
+ const a=rateOn(c,from,'EUR',day),b=rateOn(c,'EUR',to,day);return a && b ? a*b : null
+}
 // Colour follows the entity: slots go by all-time rank across the whole cube, so a range or filter can never reshuffle them.
 const SLOTS=['--c0','--c1','--c2','--c3','--c4']
 export function entityColors(c:Cube,key:Dimension):Map<string,string> {
@@ -258,6 +267,12 @@ export function rowsIn(c:Cube,q:Query):Int32Array {
  const [lo,hi]=span(c,q.range),m=pillMask(c,q.pills),out=new Int32Array(hi-lo);let k=0
  for(let i=hi-1;i>=lo;i--)if((!m || m[i]) && c.cls[c.a[i]])out[k++]=i
  return out.subarray(0,k)
+}
+// The rows behind a metric, newest first: what its total adds up from, so a list always agrees with the figures beside it.
+export function metricRows(c:Cube,q:Query,m:CubeMetric):{date:number;payee:string;account:string;value:number}[] {
+ const w=weights(c,m),rows=rowsIn(c,q),out=[]
+ for(let k=0;k<rows.length;k++){const i=rows[k],a=c.a[i];if(!w[a] || !c.v[i] || (m.estimates==='exclude' && c.est[a]))continue;out.push({date:c.startMs+c.d[i]*DAY,payee:c.payees[c.p[i]],account:c.accounts[a].category,value:w[a]*c.v[i]})}
+ return out
 }
 // Facts the browser can compute while exploring. A saved view's sentence comes from the server's `facts`.
 export function localFacts(c:Cube,q:Query,win:CompareWindow|null,metric?:CubeMetric):Fact[] {

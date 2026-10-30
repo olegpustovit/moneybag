@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { DAY, dayFromIso, dayLabel, isoDay, parseRange, parseTime, rangeDays, rangeLabel, stepRange, type Bounds, type CompareMode, type Range } from './time-grammar'
+import { DAY, dayLabel, parseRange, parseTime, rangeDays, rangeLabel, stepRange, type Bounds, type CompareMode, type Range } from './time-grammar'
 import { ignoreShortcut, type TimeState } from './use-time-state'
 import type { Band } from './chart-core'
 import { CurrencySwitch, type Currency } from './currency'
@@ -136,10 +136,11 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,pre
  const invalid=!!parsed && !parsed.ok && parsed.reason!=='empty'
  const warm=(r:Range|null) => {if(r)prefetch?.(r)},hot=(direction:number) => ({onPointerEnter:() => warm(stepRange(state.range,direction,bounds)),onFocus:() => warm(stepRange(state.range,direction,bounds))})
  // A date commits as soon as it is a real day inside the history; the other end follows so from never passes to.
- const pickDate=(side:'from'|'to',value:string) => {
-  setEdit({side,value});if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return
-  const t=dayFromIso(value);if(Number.isNaN(t) || t<bounds.start || t>bounds.today)return
-  const {from,to}=state.range;state.setRange(side==='from' ? {from:t,to:Math.max(t,to)} : {from:Math.min(t,from),to:t},{final:true})
+ const editParsed=edit ? parseTime(edit.value,bounds) : null,editError=editParsed && !editParsed.ok && editParsed.reason!=='empty' ? editParsed.message : null
+ // A typed day is a one-day range, so a month or year works too: the start takes its first day, the end its last.
+ const commitDate=(side:'from'|'to') => {
+  if(edit?.side===side && editParsed?.ok){const t=editParsed.range[side],{from,to}=state.range;if(t!==state.range[side])state.setRange(side==='from' ? {from:t,to:Math.max(t,to)} : {from:Math.min(t,from),to:t},{final:true})}
+  setEdit(null)
  }
  const latest=useRef(state);latest.current=state
  useEffect(() => {
@@ -162,7 +163,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,pre
     <div className={`tm-dates-pair${draft!==null ? ' typing' : ''}`}>
      {(['from','to'] as const).map(side => <Fragment key={side}>
       {side==='to' && <span aria-hidden="true">–</span>}
-      <input type="date" aria-label={side==='from' ? 'Start date' : 'End date'} min={isoDay(bounds.start)} max={isoDay(bounds.today)} value={edit?.side===side ? edit.value : isoDay(state.range[side])} onChange={e => pickDate(side,e.target.value)} onBlur={() => setEdit(null)}/>
+      <span className="tm-date"><input type="text" autoComplete="off" spellCheck={false} enterKeyHint="done" aria-label={side==='from' ? 'Start date' : 'End date'} aria-invalid={edit?.side===side && !!editError} title="Type a date, like 11 Apr 2026" value={edit?.side===side ? edit.value : dayLabel(state.range[side])} onFocus={e => {e.currentTarget.select();setEdit({side,value:dayLabel(state.range[side])})}} onChange={e => setEdit({side,value:e.target.value})} onBlur={() => commitDate(side)} onKeyDown={e => {e.stopPropagation();if(e.key==='Enter' && !editError && editParsed?.ok)e.currentTarget.blur();else if(e.key==='Escape'){setEdit(null);e.currentTarget.blur()}}}/>{edit?.side===side && editError && <span className="tm-date-err" role="alert">{editError}</span>}</span>
      </Fragment>)}
     </div>
     <div id={statusId} className={`tm-time-status${invalid ? ' err' : ''}${draft!==null ? ' on' : ''}`} aria-live="polite" title={status}>{status}</div>

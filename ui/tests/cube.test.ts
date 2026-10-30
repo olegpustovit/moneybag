@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { months as monthCount, alignCompare, annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
+import { months as monthCount, alignCompare, metricRows, rateOn, annotationBands, balanceAt, balanceSeries, colorOf, compareSeries, compareTotals, decodeCube, entityColors, estimateSplit, localFacts, rateSeries, rowsIn, suggestValues, timeseries, totals, whatMoved, type Pill } from '../src/features/telemetry/cube'
 import { compareWindow, dayFromIso as d, parseRange, type Range } from '../src/features/telemetry/time-grammar'
 import { balanceField, cubeCanCompute, metricTotal, inCurrency } from '../src/features/telemetry/cube'
 import { money, moneyCompact, moneyExact, moneySigned, unitFormat } from '../src/features/telemetry/format'
@@ -142,3 +142,10 @@ console.log('cube ok')
 assert.deepEqual(alignCompare([0,5,6],2),[5,6])
 assert.deepEqual(alignCompare([5,6],3),[null,5,6])
 {const bank={...c,accounts:c.accounts};assert.ok(suggestValues(bank,{range:all},'account').every(x => !bank.accounts.find(a => a.label===x.value && (a.class==='expense' || a.class==='income'))),'account suggestions are where money sits, never spending categories')}
+{const m={id:'s',label:'S',unit:'eur',kind:'flow',additivity:'sum',estimates:'include',accounts:['expenses:'],sign:1}
+ const rows=metricRows(c,{range:all},m),only=metricRows(c,{range:all,pills:[{field:'payee',op:'is',values:['Lidl']}]},m)
+ assert.ok(rows.length>only.length && only.length>0,'a filter narrows the list');assert.ok(only.every(r => r.payee==='Lidl'))
+ assert.equal(rows.reduce((n,r) => n+r.value,0),totals(c,{range:all}).out,'the list adds up to the spending figure')
+ assert.ok(rows.every((r,i) => !i || r.date<=rows[i-1].date),'newest first')}
+{const q={...c,rates:{'EUR/USD':{d:Int32Array.from([0,10]),v:Float64Array.from([1,2])},'UAH/EUR':{d:Int32Array.from([0]),v:Float64Array.from([.02])}}}
+ assert.equal(rateOn(q,'EUR','USD',5),1);assert.equal(rateOn(q,'EUR','USD',10),2);assert.equal(rateOn(q,'USD','EUR',12),.5);assert.equal(rateOn(q,'UAH','USD',12),.04);assert.equal(rateOn(q,'EUR','EUR',1),1);assert.equal(rateOn(q,'XAU_g','EUR',1),null)}
