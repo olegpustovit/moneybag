@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { RouteError } from '../features/telemetry/route-error'
 import { useQuery, useSuspenseQuery } from '@tanstack/react-query'
 import { Link, Outlet, createFileRoute, redirect, useLocation, useNavigate, useRouter } from '@tanstack/react-router'
-import { Banknote, BookOpen, Database, Gauge, History, LayoutDashboard, Menu, Receipt, Settings, Share2, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
+import { Banknote, BookOpen, Database, Gauge, History, LayoutDashboard, Menu, Plane, Receipt, Settings, Share2, TrendingUp, Wallet, type LucideIcon } from 'lucide-react'
 import { ApiError, bootstrapQuery, savedViewsQuery, usageBeacon, type Bootstrap, type DashboardHead, type NavItem } from '../lib/api'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '../components/ui/sheet'
 import { Button } from '../components/ui/button'
@@ -21,7 +21,7 @@ export const Route=createFileRoute('/_app')({
  loader:({context}) => {void import('../features/telemetry/cube-store').then(store => context.queryClient.prefetchQuery(store.cubeQuery(context.session.user.id,context.queryClient)))},
  shouldReload:false,pendingMs:Infinity,errorComponent:p => <main className="loading"><RouteError {...p} title="Could not load your workspace"/></main>,component:Workspace,
 })
-const ICONS:Record<string,LucideIcon>={gauge:Gauge,receipt:Receipt,banknote:Banknote,wallet:Wallet,'trending-up':TrendingUp,'book-open':BookOpen,database:Database,history:History}
+const ICONS:Record<string,LucideIcon>={gauge:Gauge,plane:Plane,receipt:Receipt,banknote:Banknote,wallet:Wallet,'trending-up':TrendingUp,'book-open':BookOpen,database:Database,history:History}
 function usableNav(data:Bootstrap):(NavItem&{to:string})[] {
  const known=new Set(data.dashboards.map(d => d.id))
  // An agent's nav may name a dashboard that isn't built yet; a dead link is worse than a shorter list.
