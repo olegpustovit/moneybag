@@ -133,7 +133,12 @@ func (h *Handler) apiSettings(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load connections"})
 		return
 	}
-	respond(w, http.StatusOK, map[string]any{"feeds": feeds, "agents": agents})
+	suspended, err := h.oauth.Suspended(r.Context())
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "could not load agent status"})
+		return
+	}
+	respond(w, http.StatusOK, map[string]any{"feeds": feeds, "agents": agents, "agents_suspended": suspended, "is_admin": p.Admin})
 }
 
 func (h *Handler) apiActivityAgents(w http.ResponseWriter, r *http.Request) {

@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{.Title}}</title><script src="/theme.js"></script><link rel="stylesheet" href="{{asset "auth.css"}}"></head>
+<body><main class="auth"><a class="brand auth-brand" href="/"><span class="logo">M</span><span>Moneybag</span></a><h1>{{.Title}}</h1>
+{{if .Error}}<p class="error" role="alert">{{.Error}}</p>{{end}}
+{{if .Sentence}}<p><strong>{{.Sentence}}</strong></p>{{end}}
+{{if not .Done}}<p class="cap">Requested by {{.Requester}}. Their reason: {{.Reason}}</p>
+<form method="post" action="{{.Action}}" class="stack"><input type="hidden" name="csrf" value="{{.CSRF}}"><div class="toolbar"><button class="btn" name="decision" value="allow">Approve</button><button class="btn ghost" name="decision" value="deny">Decline</button></div></form>
+<p class="cap auth-note">This approves only what is written above. The link works once and expires within an hour.</p>{{else}}<p class="cap auth-note"><a href="/">Back to Moneybag</a></p>{{end}}</main></body></html>

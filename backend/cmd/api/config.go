@@ -55,7 +55,7 @@ func loadConfig() (config, error) {
 			return c, fmt.Errorf("MONEYBAG_SECRET_KEY must be base64 encoding of 32 bytes")
 		}
 	}
-	allowed := map[string]bool{"account": true, "ledger": true, "rates": true, "budget": true, "tables": true, "model": true, "dashboard": true, "audit": true, "classify": true, "import": true, "reconcile": true}
+	allowed := map[string]bool{"account": true, "ledger": true, "rates": true, "budget": true, "tables": true, "model": true, "dashboard": true, "audit": true, "classify": true, "import": true, "reconcile": true, "admin": true}
 	c.Toolsets = map[string]bool{}
 	for _, set := range strings.FieldsFunc(env("TOOLSETS", ""), func(r rune) bool { return r == ',' || r == ' ' }) {
 		if !allowed[set] {

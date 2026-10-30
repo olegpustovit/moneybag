@@ -247,6 +247,10 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		e = fmt.Errorf("unsupported_grant_type")
 	}
 	if e != nil {
+		if e == oauth.ErrAgentsSuspended {
+			respond(w, 403, map[string]string{"error": "agents_suspended", "error_description": e.Error()})
+			return
+		}
 		code := "invalid_grant"
 		if e == oauth.ErrInvalidTarget {
 			code = "invalid_target"
