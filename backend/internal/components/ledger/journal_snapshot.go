@@ -141,7 +141,7 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 			arrays = append(arrays, "$months")
 			facets = append(facets, bson.E{Key: "months", Value: bson.A{
 				bson.M{"$match": bson.M{"status": "posted", "date": bson.M{"$gte": window.from, "$lte": window.to}}},
-				bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:"}}},
+				bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:(?!estimated)"}}},
 				bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
 				bson.M{"$limit": 5001}, bson.M{"$replaceWith": bson.M{"kind": "month", "data": "$$ROOT"}},
 			}})
