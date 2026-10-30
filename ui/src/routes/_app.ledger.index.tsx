@@ -3,7 +3,7 @@ import { RouteError } from '../features/telemetry/route-error'
 import { createFileRoute } from '@tanstack/react-router'
 import { agentsQuery, tool } from '../lib/api'
 import type { EntriesListInput, EntriesListOutput } from '../lib/tools'
-import { commodityLabel, decimalLabel } from '../lib/format'
+import { commodityLabel, decimalLabel, tidyPayee } from '../lib/format'
 import { useCube } from '../features/telemetry/cube-store'
 import { dim, suggestValues, totals, type Cube, type Pill } from '../features/telemetry/cube'
 import { decodePills, encodePills, pillsToCel } from '../features/telemetry/filters'
@@ -53,7 +53,7 @@ function rowOf(e:Entry,cube:Cube|null,agents:Map<string,string>):GridRow {
  const estimated=flow.some(p => acct(p.account)?.estimated),imported=e.kind==='import' || (e.links ?? []).some(l => l.rel==='import')
  const by=e.actor.kind==='agent' ? agents.get(e.actor.id) ?? 'an agent' : e.actor.kind==='system' ? 'Moneybag' : 'you'
  const alias=cube?.aliases.find(a => a.re.test(e.payee))?.name
- return {id:e.id,date:e.date,payee:alias ?? (e.payee || (transfer ? 'Transfer' : 'Entry')),category:transfer ? 'Transfer' : acct(flow[0].account)?.category ?? 'Other',from:acct(money_[0]?.account ?? '')?.label ?? '',source:estimated ? 'Estimated' : imported ? 'From statement' : `Added by ${by}`,amount:{v:income ? amt.value : -amt.value,t:`${income ? '+' : ''}${amt.text}`,tone:income ? 'ok' : undefined}}
+ return {id:e.id,date:e.date,payee:alias ?? (e.payee ? tidyPayee(e.payee) : transfer ? 'Transfer' : 'Entry'),category:transfer ? 'Transfer' : acct(flow[0].account)?.category ?? 'Other',from:acct(money_[0]?.account ?? '')?.label ?? '',source:estimated ? 'Estimated' : imported ? 'From statement' : `Added by ${by}`,amount:{v:income ? amt.value : -amt.value,t:`${income ? '+' : ''}${amt.text}`,tone:income ? 'ok' : undefined}}
 }
 const COLUMNS:GridColumn[]=[{key:'date',label:'Date',type:'date'},{key:'payee',label:'Payee',type:'text',sortable:false},{key:'category',label:'Category',type:'text',sortable:false,width:'minmax(0,.7fr)'},{key:'from',label:'Account',type:'text',sortable:false,width:'minmax(0,.7fr)'},{key:'source',label:'Source',type:'text',sortable:false,width:'minmax(0,.7fr)'},{key:'amount',label:'Amount',type:'money',width:'minmax(96px,132px)'}]
 function Ledger() {

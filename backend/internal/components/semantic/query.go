@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 type Filter struct {
@@ -145,7 +146,7 @@ func (s *Service) book(ctx context.Context, p principal.Principal) (*book, error
 			if name, ok := names[payee]; ok {
 				return name
 			}
-			name := payee
+			name := tidyPayee(payee)
 			for i, pattern := range patterns {
 				if pattern.MatchString(payee) {
 					name = aliases[i].Name
@@ -1231,7 +1232,15 @@ func (s *Service) Annotations(ctx context.Context, p principal.Principal, rule, 
 		}
 		return (to == "" || a.From <= to) && (from == "" || end >= from)
 	}
+	covered := map[string]bool{}
 	for _, a := range stored {
+		if a.From != "" {
+			covered[a.TagRule] = true
+		}
+		// A wildcard names many tags, not one period; each tag below gets its own band.
+		if strings.HasSuffix(a.TagRule, "*") && a.From == "" {
+			continue
+		}
 		if a.TagRule != "" {
 			if a.From == "" {
 				a.From, a.To = b.tagSpan(a.TagRule)
@@ -1275,6 +1284,10 @@ func (s *Service) Annotations(ctx context.Context, p principal.Principal, rule, 
 		if rest, ok := strings.CutPrefix(tag, "trip:"); ok {
 			kind, name = "trip", rest
 		}
+		// shortcut: charge dates only approximate a trip (prepaid flights stretch it), so long spans are dropped; store explicit dates with annotation_upsert to get those bands.
+		if covered[tag] || spanDays(spans[tag][0], spans[tag][1]) > 45 {
+			continue
+		}
 		a := Annotation{ID: tag, Label: b.label("tag", tag, humanize(name)), From: spans[tag][0], To: spans[tag][1], TagRule: tag, Kind: kind}
 		if overlaps(a) {
 			out = append(out, a)
@@ -1303,4 +1316,34 @@ func (b *book) tagSpan(rule string) (string, string) {
 		}
 	}
 	return from, to
+}
+
+func spanDays(from, to string) int {
+	a, e := time.Parse(time.DateOnly, from)
+	b, f := time.Parse(time.DateOnly, to)
+	if e != nil || f != nil {
+		return 0
+	}
+	return int(b.Sub(a).Hours() / 24)
+}
+
+var payeeStoreNumber = regexp.MustCompile(`[\s-]*(P-)?\d{3,}$`)
+
+// tidyPayee shows the merchant from bank text: the part before the first comma, without a store number, and not shouting. The entry keeps the original.
+func tidyPayee(raw string) string {
+	name, _, _ := strings.Cut(raw, ",")
+	name = strings.TrimSpace(payeeStoreNumber.ReplaceAllString(strings.TrimSpace(name), ""))
+	if name == "" {
+		return raw
+	}
+	if strings.ToUpper(name) == name {
+		words := strings.Fields(strings.ToLower(name))
+		for i, word := range words {
+			runes := []rune(word)
+			runes[0] = unicode.ToUpper(runes[0])
+			words[i] = string(runes)
+		}
+		name = strings.Join(words, " ")
+	}
+	return name
 }

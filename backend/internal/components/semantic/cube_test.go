@@ -89,3 +89,18 @@ func TestMonthsBetweenCountsDaysOverMonthLength(t *testing.T) {
 		}
 	}
 }
+
+func TestTidyPayee(t *testing.T) {
+	for raw, want := range map[string]string{
+		"Home and repair, CROATIA, terminal 50121946, terminal address -, document No. X": "Home and repair",
+		"MUELLER TRG BURZE 5059, ZAGREB":     "Mueller Trg Burze",
+		"KONZUM P-1232, ZAGREB":              "Konzum",
+		"X CORP. PAID FEATURES, 865 FM 1209": "X Corp. Paid Features",
+		"Wolt":                               "Wolt",
+		"12345":                              "12345",
+	} {
+		if got := tidyPayee(raw); got != want {
+			t.Errorf("tidyPayee(%q) = %q, want %q", raw, got, want)
+		}
+	}
+}

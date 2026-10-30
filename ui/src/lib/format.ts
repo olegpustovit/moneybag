@@ -45,3 +45,10 @@ export function relativeTime(value:string, now=Date.now()):string | undefined {
  if(seconds<86400)return `${Math.floor(seconds/3600)} h ago`
  return `${Math.floor(seconds/86400)} d ago`
 }
+
+// Keep in step with tidyPayee in semantic/query.go: the merchant from bank text, without a store number, and not shouting.
+export function tidyPayee(raw:string):string {
+ const name=raw.split(',')[0].trim().replace(/[\s-]*(P-)?\d{3,}$/,'').trim()
+ if(!name)return raw
+ return name===name.toUpperCase() ? name.toLowerCase().split(/\s+/).map(word => word[0].toUpperCase()+word.slice(1)).join(' ') : name
+}

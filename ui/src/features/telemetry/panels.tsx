@@ -110,7 +110,7 @@ function SankeyPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
 }
 function EntriesPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
  // A panel is a glance; the Ledger link has the rest. The server sends up to 50 so this can change without a spec change.
- const rows:GridRow[]=(v.rows ?? []).slice(0,12).map(r => ({id:r.entry+r.account,date:r.date,payee:r.payee,account:ctx.cube?.accounts.find(a => a.id===r.account)?.category ?? r.account.split(':').at(-1)?.replace(/[_-]+/g,' ') ?? '',amount:{v:tryNumber(r.value),t:r.text}}))
+ const rows:GridRow[]=(v.rows ?? []).slice(0,12).map(r => ({id:r.entry+r.account,date:r.date,payee:r.payee,account:ctx.cube?.accounts.find(a => a.id===r.account || a.label===r.account)?.category ?? r.account.split(':').at(-1)?.replace(/[_-]+/g,' ') ?? '',amount:{v:tryNumber(r.value),t:r.text}}))
  const title=v.title ?? v.label
  return <><Head title={title} fixed={c.fixed?.reason} note={typeof v.total==='number' && v.total>rows.length ? `Latest ${rows.length} of ${v.total.toLocaleString('en-US')}` : undefined}><Link className="tm-details-link" to="/ledger" search={drillSearch(v.ref ?? v.entries,c.fixed ? undefined : ctx.range)}>See all in Ledger</Link></Head><DataGrid label={title ?? 'Entries'} rows={rows} rowKey={(r,i) => `${String(r.id)}${i}`} columns={[{key:'date',label:'Date',type:'date'},{key:'payee',label:'Payee',type:'text'},{key:'account',label:'Category',type:'text'},{key:'amount',label:'Amount',type:'money'}]} emptyText="No entries in this range."/></>
 }

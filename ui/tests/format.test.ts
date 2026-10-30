@@ -1,5 +1,5 @@
 import { strict as assert } from 'node:assert'
-import { accountLabel, amountLabel, commodityLabel, dateLabel, decimalLabel, decimalPrecision, fieldLabel, relativeTime } from '../src/lib/format'
+import { accountLabel, amountLabel, commodityLabel, dateLabel, decimalLabel, decimalPrecision, fieldLabel, relativeTime, tidyPayee } from '../src/lib/format'
 
 assert.equal(amountLabel({v:'-9007199254740993.123456789',c:'EUR'}),'−9,007,199,254,740,993.123456789 €')
 assert.equal(amountLabel({v:'0.00',c:'USD'}),'0.00 $ USD')
@@ -26,3 +26,7 @@ assert.equal(decimalLabel('−9007199254740993.1',3),'−9,007,199,254,740,993.1
 assert.equal(decimalLabel('1.2345',2),'1.2345')
 assert.equal(decimalLabel('invalid',2),'invalid')
 assert.equal(amountLabel({v:'0.1',c:'USD'},2),'0.10 $ USD')
+assert.equal(tidyPayee('MUELLER TRG BURZE 5059, ZAGREB'),'Mueller Trg Burze')
+assert.equal(tidyPayee('Home and repair, CROATIA, terminal 50121946'),'Home and repair')
+assert.equal(tidyPayee('KONZUM P-1232, ZAGREB'),'Konzum')
+assert.equal(tidyPayee('12345'),'12345')

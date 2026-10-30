@@ -236,7 +236,7 @@ export function rateSeries(c:Cube,pair:string,r:Range):{xs:number[];values:numbe
  return {xs,values}
 }
 export function annotationBands(c:Cube,r?:Range):{from:number;to:number;label:string}[] {
- const out=c.annotations.map(x => ({from:dayFromIso(x.from),to:dayFromIso(x.to),label:x.label}));return r ? out.filter(x => x.to>=r.from && x.from<=r.to) : out
+ const out=c.annotations.map(x => ({from:dayFromIso(x.from),to:dayFromIso(x.to),label:x.label})).sort((a,b) => a.from-b.from);return r ? out.filter(x => x.to>=r.from && x.from<=r.to) : out
 }
 // Row indices newest first, for a grid. Asset and equity postings are left out because they are not money in or out.
 export function rowsIn(c:Cube,q:Query):Int32Array {
