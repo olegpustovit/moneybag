@@ -18,3 +18,24 @@ jobs:
           cache-dependency-path: backend/go.sum
       - run: make check
       - run: make build
+  speed-budget:
+    runs-on: ubuntu-latest
+    services:
+      mongo:
+        image: mongo:8
+        ports:
+          - 27017:27017
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/go.mod
+          cache-dependency-path: backend/go.sum
+      - run: e2e/speed-budget-ci.sh
+        timeout-minutes: 6
+        env:
+          MONEYBAG_E2E_MONGO_URI: mongodb://127.0.0.1:27017
+          CHROMIUM_BIN: /usr/bin/google-chrome
