@@ -64,3 +64,7 @@ func summarizeDashboard(result dashboard.GetResult) dashboardSummary {
 	}
 	return out
 }
+
+type lintOutput struct {
+	Issues []dashboard.Issue `json:"issues"`
+}

@@ -390,6 +390,21 @@ func New(s Services, opts Options) *mcp.Server {
 		}
 		return result, nil
 	})
+	add(r, "dashboard_lint", "dashboard", "ledger:read", "Use this before publishing to check a dashboard for rule violations. Each issue names the component, the rule and the fix.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (lintOutput, error) {
+		v, e := versionRef(in.Version)
+		if e != nil {
+			return lintOutput{}, e
+		}
+		access, e := s.Sharing.Access(ctx, p, in.ID, false)
+		if e != nil {
+			return lintOutput{}, e
+		}
+		result, e := access.Dashboard.Get(ctx, access.Principal, access.ID, v)
+		if e != nil {
+			return lintOutput{}, e
+		}
+		return lintOutput{Issues: dashboard.Lint(result.Spec)}, nil
+	})
 	add(r, "dashboard_summary", "dashboard", "ledger:read", "Use this to see a dashboard's pages, components and data sources without the full spec. Use dashboard_get when you need the CEL.", true, false, func(ctx context.Context, p principal.Principal, in GetDashboardInput) (dashboardSummary, error) {
 		v, e := versionRef(in.Version)
 		if e != nil {
