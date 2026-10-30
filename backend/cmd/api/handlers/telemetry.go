@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
@@ -133,7 +135,14 @@ func (h *Handler) apiFeedback(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid flag"})
 		return
 	}
-	flag, e := h.services.Feedback.Flag(r.Context(), p, in)
+	// Writes queue behind one lock that a rate backfill can hold for minutes; a person waiting on a flag gets an answer instead.
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	flag, e := h.services.Feedback.Flag(ctx, p, in)
+	if errors.Is(e, context.DeadlineExceeded) {
+		respond(w, http.StatusServiceUnavailable, map[string]string{"error": "the server is busy with other changes; try again in a moment"})
+		return
+	}
 	if e != nil {
 		respond(w, http.StatusBadRequest, map[string]string{"error": e.Error()})
 		return

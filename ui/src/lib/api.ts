@@ -46,7 +46,7 @@ export async function settingsPost<T>(session:Session,path:'/settings/invite'|'/
  return result
 }
 async function send(session:Session,method:'POST'|'PUT'|'DELETE',path:string,body?:unknown,keepalive=false):Promise<Response> {
- const response=await fetch(path,{method,credentials:'same-origin',keepalive,headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:body===undefined ? undefined : JSON.stringify(body)})
+ const response=await fetch(path,{method,credentials:'same-origin',keepalive,signal:AbortSignal.timeout(10000),headers:{'Content-Type':'application/json','X-CSRF-Token':session.csrf},body:body===undefined ? undefined : JSON.stringify(body)})
  if(!response.ok)throw new ApiError(`Request failed (${response.status}).`,response.status)
  return response
 }
