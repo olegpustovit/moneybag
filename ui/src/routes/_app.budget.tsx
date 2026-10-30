@@ -39,6 +39,6 @@ function Budget() {
     <span role="cell" className="num muted"><span className="tm-phone-only">Average </span><button type="button" className="tm-plain" onClick={() => openDetails({historyOf:l.id,target:{metric:`budget:${l.name}`,value:eur(l.actual),params:{month}},content:{title:l.name,value:eur(l.actual),subtitle:dateLabel(month),calculation:{summary:`Spent ${eur(l.actual)} against a limit of ${eur(l.limit)}. The average for ${windowLabel} is ${eur(l.avg6)}.`,entries:<Link to="/ledger" search={{t:month,accounts:l.accounts?.length ? l.accounts : undefined}}>See the entries</Link>},machine:(l.accounts ?? []).map(a => ({label:'Account ID',value:a}))}})}>{eur(l.avg6)}</button></span>
    </div>})}
   </div>
-  {(b.unmapped?.length ?? 0)>0 && <p className="tm-lede">{b.unmapped!.length} {b.unmapped!.length===1 ? 'spending account isn’t' : 'spending accounts aren’t'} in any budget line yet. An agent can add them.</p>}
+  {(b.unmapped?.length ?? 0)>0 && <p className="tm-lede">{b.unmapped!.length} {b.unmapped!.length===1 ? 'spending account isn’t' : 'spending accounts aren’t'} in any budget line yet. An agent can add {b.unmapped!.length===1 ? 'it' : 'them'}.</p>}
  </>
 }

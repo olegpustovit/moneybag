@@ -10,7 +10,7 @@ import { Empty, PageHead, RowsSkeleton } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/future')({errorComponent:p => <RouteError {...p}/>,component:Future})
 const HORIZON=120
-const runwayText=(months:number|null|undefined) => months===null || months===undefined ? 'Beyond the horizon' : months>=24 ? `${Math.round(months/12)} years` : `${Math.round(months)} months`
+const runwayText=(months:number|null|undefined) => months===null || months===undefined ? `Over ${Math.round(HORIZON/12)} years` : months>=24 ? `${Math.round(months/12)} years` : `${Math.round(months)} months`
 function Future() {
  const {session}=Route.useRouteContext()
  const data=useQuery({queryKey:['future',session.user.id],staleTime:60_000,queryFn:async () => {const model=await tool(session,'model_get',{}),ids=(model.scenarios ?? []).filter(s => !s.archived).map(s => s.id);if(!ids.length)return [];const out=[];for(let i=0;i<ids.length;i+=20)out.push(...((await tool(session,'forecast_run',{scenario_ids:ids.slice(i,i+20),horizon_months:HORIZON,value_in:'EUR'})).series ?? []));return out}})
