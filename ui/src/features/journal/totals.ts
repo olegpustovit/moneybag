@@ -1,4 +1,4 @@
-import { commodityLabel } from '../../lib/format'
+import { amountLabel } from '../../lib/format'
 
 type Amount={v:string;c:string}
 
@@ -14,7 +14,7 @@ export function postingTotals(amounts:(Amount|undefined)[]):string|undefined {
  }
  if(!totals.size)return undefined
  return [...totals].sort(([a],[b]) => a.localeCompare(b)).map(([currency,{value,scale}]) => {
-  const negative=value<0n,digits=(negative ? -value : value).toString().padStart(scale+1,'0'),whole=(scale ? digits.slice(0,-scale) : digits).replace(/\B(?=(\d{3})+(?!\d))/g,','),fraction=scale ? digits.slice(-scale).replace(/0+$/,'') : ''
-  return `${negative ? '−' : ''}${whole}${fraction ? `.${fraction}` : ''} ${commodityLabel(currency)}`
+  const negative=value<0n,digits=(negative ? -value : value).toString().padStart(scale+1,'0'),whole=scale ? digits.slice(0,-scale) : digits,fraction=scale ? digits.slice(-scale).replace(/0+$/,'') : ''
+  return amountLabel({v:`${negative ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`,c:currency})
  }).join(' · ')
 }

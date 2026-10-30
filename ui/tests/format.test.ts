@@ -2,7 +2,7 @@ import { strict as assert } from 'node:assert'
 import { accountLabel, amountLabel, commodityLabel, dateLabel, decimalLabel, fieldLabel, relativeTime } from '../src/lib/format'
 
 assert.equal(amountLabel({v:'-9007199254740993.123456789',c:'EUR'}),'−9,007,199,254,740,993.123456789 €')
-assert.equal(amountLabel({v:'0.00',c:'USD'}),'0.00 $')
+assert.equal(amountLabel({v:'0.00',c:'USD'}),'0.00 $ USD')
 assert.equal(decimalLabel('−1234.50'),'−1,234.50')
 assert.equal(commodityLabel('UAH'),'₴')
 assert.equal(commodityLabel('XAU_g'),'Gold (g)')

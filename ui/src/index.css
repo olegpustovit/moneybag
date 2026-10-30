@@ -25,6 +25,7 @@ body { margin:0; min-width:320px; }
 [data-sonner-toaster] [data-sonner-toast][data-styled="true"] { --normal-bg:var(--paper); --normal-text:var(--text); --normal-border:var(--bd); }
 :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
 .data, table, input[inputmode="decimal"] { font-feature-settings:"tnum", "ss03", "ss05", "ss09"; font-variant-numeric:tabular-nums; }
+.amount-code { color:var(--text2); }
 .readable-account { display:inline-flex; align-items:center; gap:4px; max-width:100%; }
 .account-trail { color:var(--text2); }
 .readable-account button { display:inline-flex; align-items:center; justify-content:center; width:24px; height:24px; flex:none; border:0; background:none; color:var(--text2); cursor:pointer; }

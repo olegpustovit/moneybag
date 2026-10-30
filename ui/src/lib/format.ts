@@ -12,7 +12,8 @@ export function decimalLabel(value:string):string {
  return `${negative ? '−' : ''}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}${fraction===undefined ? '' : `.${fraction}`}`
 }
 
-export const amountLabel=(amount:{v:string;c:string}) => `${decimalLabel(amount.v)} ${commodityLabel(amount.c)}`
+export const amountParts=(amount:{v:string;c:string}) => ({text:`${decimalLabel(amount.v)} ${commodityLabel(amount.c)}`,code:amount.c==='USD' ? amount.c : ''})
+export const amountLabel=(amount:{v:string;c:string}) => {const {text,code}=amountParts(amount);return code ? `${text} ${code}` : text}
 
 export function dateLabel(value:string):string {
  if(!/^\d{4}-\d{2}(-\d{2})?$/.test(value))return value
