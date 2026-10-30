@@ -226,7 +226,7 @@ Between 761px and 1100px the sidebar becomes a 56px icon rail. At 760px and belo
 
 ## Elevation & Depth
 
-Paper, recessed surfaces and fine borders establish hierarchy. Chart tooltips use a subtle shadow, and dialogs and sheets use a translucent backdrop.
+Paper, recessed surfaces and fine borders establish hierarchy. Overlays use ink borders without drop shadows; dialogs and sheets use a translucent backdrop.
 
 ### State Indicators
 

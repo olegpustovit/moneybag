@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-30T04:32:06.084517Z",
+  "generatedAt": "2026-10-30T04:56:53.312573Z",
   "title": "Design System: Moneybag",
   "extensions": {
     "colorMeta": {
@@ -636,11 +636,6 @@
         "name": "active-navigation",
         "value": "inset 3px 0 var(--ink)",
         "purpose": "Active navigation indicator."
-      },
-      {
-        "name": "chart-tooltip",
-        "value": "0 4px 12px #0002",
-        "purpose": "Separate tooltip from chart marks."
       }
     ],
     "motion": [

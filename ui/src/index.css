@@ -22,8 +22,9 @@
 * { box-sizing:border-box; }
 body { margin:0; min-width:320px; }
 ::selection { background:var(--sel); }
-[data-sonner-toaster] [data-sonner-toast][data-styled="true"] { --normal-bg:var(--paper); --normal-text:var(--text); --normal-border:var(--bd); }
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] { --normal-bg:var(--paper); --normal-text:var(--text); --normal-border:var(--ink); box-shadow:none; }
 :focus-visible { outline:2px solid var(--focus); outline-offset:2px; }
+[data-sonner-toaster] [data-sonner-toast]:focus-visible, [data-sonner-toaster] [data-close-button]:focus-visible { box-shadow:none; outline:2px solid var(--focus); outline-offset:2px; }
 .data, table, input[inputmode="decimal"] { font-feature-settings:"tnum", "ss03", "ss05", "ss09"; font-variant-numeric:tabular-nums; }
 .amount-code { color:var(--text2); }
 .readable-account { display:inline-flex; align-items:center; gap:4px; max-width:100%; }
@@ -377,7 +378,7 @@ th { color:var(--text2); font-weight:600; }
 .range-dialog .rdp-month_grid th, .range-dialog .rdp-month_grid td { padding:0; border:0; }
 .component-issues { color:var(--neg); overflow-wrap:anywhere; }
 .component-issues pre { white-space:pre-wrap; overflow-wrap:anywhere; font-family:var(--font-mono); }
-.chart-tooltip { min-width:10rem; padding:.6rem .75rem; background:var(--paper); border:1px solid var(--bd); color:var(--text); box-shadow:0 4px 12px #0002; }
+.chart-tooltip { min-width:10rem; padding:.6rem .75rem; background:var(--paper); border:1px solid var(--ink); color:var(--text); }
 .chart-tooltip > div { display:flex; justify-content:space-between; gap:1rem; margin-top:.25rem; font-variant-numeric:tabular-nums; }
 .chart-tooltip small { color:var(--text2); }
 .data-table-columns { margin:0 0 6px; color:var(--text2); font-size:12px; }
