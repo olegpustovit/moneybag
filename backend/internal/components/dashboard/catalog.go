@@ -5,6 +5,7 @@ import (
 	"maps"
 	"sort"
 
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
@@ -23,6 +24,26 @@ type Catalog struct {
 	Aggregates []expressions.Function `json:"aggregates"`
 	Variables  []string               `json:"variables"`
 	Sources    []CatalogSource        `json:"sources"`
+	Components []ComponentDoc         `json:"components"`
+	Metrics    []semantic.Metric      `json:"metrics"`
+	Dimensions []string               `json:"dimensions"`
+	Facts      []string               `json:"facts"`
+	TimeRanges []string               `json:"time_ranges"`
+	Params     map[string]string      `json:"params"`
+	Enums      map[string][]string    `json:"enums"`
+	LintRules  []LintRule             `json:"lint_rules"`
+}
+
+// Enums are the closed values of the spec; the schema resource and catalog_get both read them.
+var Enums = map[string][]string{"mark": Marks, "format": Formats, "tone": Tones, "column_type": ColumnTypes, "estimates": Policies, "compare": Compares, "x_type": {"time", "category"}, "drill_to": {"entries"}, "color_by": {"entity"}, "component_type": ComponentTypes}
+
+var paramsDoc = map[string]string{
+	"from":         "Start of the page clock as YYYY-MM-DD, empty for all history. Set by scope.time; a date picker overrides it.",
+	"to":           "End of the page clock as YYYY-MM-DD.",
+	"compare_from": "Start of the comparison period, empty when there is none. Set by scope.compare.",
+	"compare_to":   "End of the comparison period, empty when there is none.",
+	"compare":      "The active comparison: previous_period, previous_year or none.",
+	"month":        "YYYY-MM selected by a month picker; reads as the months and budget_lines sources' month.",
 }
 
 func (s *Service) Catalog(ctx context.Context, p principal.Principal, tableService *tables.Service) (Catalog, error) {
@@ -35,7 +56,12 @@ func (s *Service) Catalog(ctx context.Context, p principal.Principal, tableServi
 		if err != nil {
 			return nil, err
 		}
-		out := Catalog{Revision: revision, Functions: s.engine.Expr.Functions(), Variables: []string{"row", "data", "params", "computed", "rates"}, Aggregates: []expressions.Function{}, Sources: []CatalogSource{}}
+		out := Catalog{Revision: revision, Functions: s.engine.Expr.Functions(), Variables: []string{"row", "data", "params", "computed", "rates"}, Aggregates: []expressions.Function{}, Sources: []CatalogSource{}, Components: ComponentCatalog, Metrics: []semantic.Metric{}, Dimensions: semantic.Dimensions, Facts: semantic.FactKinds, TimeRanges: semantic.TimeGrammar, Params: paramsDoc, Enums: Enums, LintRules: LintRules}
+		if s.engine.Metrics != nil {
+			if out.Metrics, err = s.engine.Metrics.Metrics(ctx, p); err != nil {
+				return nil, err
+			}
+		}
 		for _, name := range []string{"sum", "avg", "mean", "min", "max", "count", "last", "median", "count_distinct", "percentile", "linear_slope"} {
 			args := "expr"
 			if name == "count" {

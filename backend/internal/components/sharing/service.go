@@ -93,6 +93,11 @@ type ScopedReader struct {
 	Expr      *expressions.Engine
 }
 
+// AllowsMetric lets a share read a metric only when its grant names it and no row filter limits it: a metric's total cannot honor a row filter.
+func (s ScopedReader) AllowsMetric(id string) bool {
+	return s.RowFilter == "" && slices.Contains(s.Sources, "metric:"+id)
+}
+
 func (s ScopedReader) Rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
 	if p.UserID != s.OwnerID || !slices.Contains(s.Sources, source) {
 		return nil, fmt.Errorf("source not granted: %s", source)
@@ -190,6 +195,11 @@ func (s *Service) Share(ctx context.Context, p principal.Principal, in ShareInpu
 		for _, q := range v.Spec.Data {
 			if q.From != "range" && !strings.HasPrefix(q.From, "query:") && !slices.Contains(sources, q.From) {
 				sources = append(sources, q.From)
+			}
+		}
+		for _, id := range v.Spec.MetricIDs() {
+			if !slices.Contains(sources, "metric:"+id) {
+				sources = append(sources, "metric:"+id)
 			}
 		}
 	}

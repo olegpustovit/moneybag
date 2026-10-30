@@ -175,6 +175,9 @@ func (x *execution) rows(c Component) ([]map[string]any, error) {
 	return rows, nil
 }
 func (x *execution) render(c Component) (string, any, error) {
+	if metricTypes[c.Type] {
+		return x.renderMetric(c)
+	}
 	switch c.Type {
 	case "kpi":
 		v, e := x.evalAt("value", c.Value, nil)
@@ -292,12 +295,18 @@ func (x *execution) render(c Component) (string, any, error) {
 			case "usd", "usd0", "eur", "eur0", "int", "number", "pct", "pct0", "mo":
 				align = "right"
 			}
+			switch col.Type {
+			case "money", "number", "pct", "days", "count":
+				align = "right"
+			case "text", "date":
+				align = "left"
+			}
 			if align == "right" {
 				b.WriteString(`<th class="r">` + escape(col.Label) + `</th>`)
 			} else {
 				b.WriteString(`<th>` + escape(col.Label) + `</th>`)
 			}
-			columns = append(columns, map[string]any{"key": fmt.Sprintf("c%d", i), "label": col.Label, "format": col.Format, "align": align})
+			columns = append(columns, map[string]any{"key": fmt.Sprintf("c%d", i), "label": col.Label, "format": col.Format, "align": align, "type": col.Type, "total": col.Total})
 		}
 		b.WriteString(`</tr></thead><tbody>`)
 		values := []map[string]any{}
@@ -413,7 +422,7 @@ func (x *execution) render(c Component) (string, any, error) {
 	case "chart":
 		return x.chart(c)
 	default:
-		return "", nil, fmt.Errorf("unknown component type %q", c.Type)
+		return "", nil, &EvalError{Field: "type", Hint: "types: " + strings.Join(ComponentTypes, ", ") + "; read catalog_get for each one's fields", Err: fmt.Errorf("unknown component type %q", c.Type)}
 	}
 }
 
@@ -451,7 +460,11 @@ func chartValue(c Component, points []chartPoint, names []string, reference *flo
 	for i, name := range names {
 		series = append(series, map[string]any{"name": name, "color_index": i % 5})
 	}
-	out := map[string]any{"type": "chart", "mark": c.Mark, "x": map[string]any{"field": field, "kind": kind}, "series": series, "points": points, "y_format": c.Format}
+	xType := ""
+	if c.X != nil {
+		xType = c.X.Type
+	}
+	out := map[string]any{"type": "chart", "mark": c.Mark, "x": map[string]any{"field": field, "kind": kind, "type": xType}, "series": series, "points": points, "y_format": c.Format}
 	if reference != nil {
 		out["rule"] = map[string]any{"y": *reference, "label": label}
 	}
