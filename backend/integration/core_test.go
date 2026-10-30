@@ -28,7 +28,7 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if e != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
 		t.Fatal("integration tests require the dedicated moneybag_test_ database")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
 	defer cancel()
 	client, e := mongodb.Connect(ctx, uri)
 	if e != nil {

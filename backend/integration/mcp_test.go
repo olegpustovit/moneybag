@@ -80,11 +80,18 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 	blocked := pa
 	blocked.Scopes = nil
 	denied := mcpSession(t, ctx, blocked, s, false)
-	tools, e := denied.ListTools(ctx, nil)
+	hidden, e := denied.ListTools(ctx, nil)
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(tools.Tools) != 81 {
+	if len(hidden.Tools) != 0 {
+		t.Fatal("a connection with no scopes sees tools", len(hidden.Tools))
+	}
+	tools, e := mcpSession(t, ctx, pa, s, false).ListTools(ctx, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(tools.Tools) != 96 {
 		t.Fatal("MCP tool catalog", len(tools.Tools))
 	}
 	for _, tool := range tools.Tools {
@@ -158,6 +165,7 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 	}
 	testHTTPAndStdio(t, ctx, db, pa, s)
 	testAgentEvalTasks(t, ctx, pa, s, db)
+	testTelemetryEval(t, ctx, pa, s, db)
 	other := mcpSession(t, ctx, pb, s, false)
 	result, e = other.CallTool(ctx, &mcp.CallToolParams{Name: "dashboard_get", Arguments: map[string]any{"id": "fixed"}})
 	if e != nil || !result.IsError {

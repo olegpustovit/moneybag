@@ -6,19 +6,23 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
 	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/feedback"
 	"github.com/olegpustovit/moneybag/backend/internal/components/history"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/imports"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/model"
+	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
 	previewcache "github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/components/semantic"
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
@@ -75,7 +79,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
+	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
+	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	check := &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
 	dash.Lint = check.SpecLint
 	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
@@ -592,7 +597,11 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("resolved assertion was stale", state, e)
 	}
 	testSingleSource(t, ctx, pa, book, budgets, sources)
-	testMCPWorkflows(t, ctx, pa, pb, mcpserver.Services{History: hist, Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Classify: classes, Imports: imp, Reconcile: rec, Sharing: shares, Logger: slog.Default(), Consistency: &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}}, db)
+	flags := feedback.NewService(feedback.NewMongoRepository(db), a)
+	people := admin.NewService(admin.NewMongoRepository(db), ids, oauth.NewService(oauth.NewMongoRepository(db), ids, "http://localhost:6459"), a, "http://localhost:6459")
+	hist.Semantic, hist.Feedback, hist.Admin = meaning, flags, people
+	imp.SetSecretKey(make([]byte, 32))
+	testMCPWorkflows(t, ctx, pa, pb, mcpserver.Services{Semantic: meaning, Feedback: flags, Admin: people, PublicURL: "http://localhost:6459", History: hist, Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Classify: classes, Imports: imp, Reconcile: rec, Sharing: shares, Logger: slog.Default(), Consistency: &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}}, db)
 	draftEntry, e := book.Post(ctx, pa, ledger.EntryInput{Date: "2026-10-28", Payee: "Draft commit test", Postings: []ledger.Posting{{Account: "assets:bank", Amount: ledger.Amount{Value: ledger.MustDecimal("-1"), Commodity: "EUR"}}, {Account: "expenses:food", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}})
 	if e != nil {
 		t.Fatal(e)
