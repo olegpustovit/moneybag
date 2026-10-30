@@ -35,22 +35,23 @@ const seriesKey=(p:CanvasProps) => JSON.stringify([p.kind,p.mark,p.height,p.zero
 // Bars and stacks draw through uPlot's series paths so its clip, order and pixel snapping still apply.
 function barPaths(model:{current:Model},order:number):uPlot.Series.PathBuilder {
  return (u,sidx,i0,i1) => {
-  const m=model.current,stacked=m.mark==='stack',count=stacked ? 1 : m.series.length,path=new Path2D(),left=u.bbox.left/uPlot.pxRatio,top=u.bbox.top/uPlot.pxRatio
+  // valToPos gives CSS pixels, but uPlot strokes these paths on its device-pixel canvas.
+  const m=model.current,stacked=m.mark==='stack',count=stacked ? 1 : m.series.length,path=new Path2D(),{left,top}=u.bbox,r=uPlot.pxRatio
   const values=u.data[sidx]
   for(let i=i0;i<=i1;i++){
    const v=values[i];if(v===null || v===undefined || v===0)continue
    const x0=u.valToPos(m.edges[i],'x'),x1=u.valToPos(m.edges[i+1],'x'),band=x1-x0,pad=band>6 ? band*.14 : band>3 ? .5 : 0,slot=(band-pad*2)/count,bx=x0+pad+slot*(stacked ? 0 : order)
    const lo=stacked ? m.stack!.lo[order][i] : Math.min(0,v as number),hi=stacked ? m.stack!.hi[order][i] : Math.max(0,v as number),y0=u.valToPos(hi,'y'),y1=u.valToPos(lo,'y')
-   path.rect(left+bx,top+y0,Math.max(1,slot-(count>1 && slot>3 ? 1 : 0)),Math.max(1,y1-y0))
+   path.rect(left+bx*r,top+y0*r,Math.max(1,slot-(count>1 && slot>3 ? 1 : 0))*r,Math.max(1,y1-y0)*r)
   }
   return {fill:path,stroke:path,clip:undefined} as uPlot.Series.Paths
  }
 }
 function stackedAreaPaths(model:{current:Model},order:number):uPlot.Series.PathBuilder {
  return (u,_sidx,i0,i1) => {
-  const m=model.current,s=m.stack!,path=new Path2D(),line=new Path2D(),left=u.bbox.left/uPlot.pxRatio,top=u.bbox.top/uPlot.pxRatio,x=u.data[0]
-  for(let i=i0;i<=i1;i++){const px=left+u.valToPos(x[i],'x'),py=top+u.valToPos(s.hi[order][i],'y');if(i===i0){path.moveTo(px,py);line.moveTo(px,py)}else {path.lineTo(px,py);line.lineTo(px,py)}}
-  for(let i=i1;i>=i0;i--)path.lineTo(left+u.valToPos(x[i],'x'),top+u.valToPos(s.lo[order][i],'y'))
+  const m=model.current,s=m.stack!,path=new Path2D(),line=new Path2D(),x=u.data[0]
+  for(let i=i0;i<=i1;i++){const px=u.valToPos(x[i],'x',true),py=u.valToPos(s.hi[order][i],'y',true);if(i===i0){path.moveTo(px,py);line.moveTo(px,py)}else {path.lineTo(px,py);line.lineTo(px,py)}}
+  for(let i=i1;i>=i0;i--)path.lineTo(u.valToPos(x[i],'x',true),u.valToPos(s.lo[order][i],'y',true))
   path.closePath();return {fill:path,stroke:line} as uPlot.Series.Paths
  }
 }

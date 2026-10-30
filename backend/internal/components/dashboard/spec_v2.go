@@ -331,11 +331,11 @@ func (x *execution) renderMetric(c Component) (map[string]any, error) {
 	}
 	switch c.Type {
 	case "stat":
-		spark := make([]string, len(res.Series))
+		spark, buckets := make([]string, len(res.Series)), make([]string, len(res.Series))
 		for i, point := range res.Series {
-			spark[i] = point.Value
+			spark[i], buckets[i] = point.Value, point.Bucket
 		}
-		value["sparkline"] = spark
+		value["sparkline"], value["sparkline_buckets"] = spark, buckets
 	case "sankey":
 		nodes, links := []string{res.Label}, []map[string]any{}
 		for _, point := range res.Series {

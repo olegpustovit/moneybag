@@ -7,7 +7,7 @@ const context=await browser.newContext({viewport:{width:1440,height:900},colorSc
 let failed=0,passed=0
 const check=(name,ok,detail='') => {if(ok)passed++;else failed++;console.log(`${ok ? 'ok  ' : 'FAIL'} ${name}${detail ? ` (${detail})` : ''}`)}
 // SECTION=a|b|c runs part of the script, because each browser run must fit its time limit.
-const SECTIONS={a:['home','data layer','nav','fixed','no chart library leftovers','details'],b:['filter and view','command bar','usage','hover prefetch'],c:['entries','changes','sign out'],d:['editing gone']},wanted=process.env.SECTION ? SECTIONS[process.env.SECTION] : null
+const SECTIONS={a:['home','data layer','nav','fixed','retina bars','no chart library leftovers','details'],b:['filter and view','command bar','usage','hover prefetch'],c:['entries','changes','sign out'],d:['editing gone']},wanted=process.env.SECTION ? SECTIONS[process.env.SECTION] : null
 const attempt=async (name,work) => {if(wanted && !wanted.includes(name) && !(process.env.SECTION==='d' && name.startsWith('redirect')))return;try {await work()} catch(error){failed++;console.log(`FAIL ${name}: ${String(error.message).split('\n')[0].slice(0,160)}`)}}
 page.on('response',async r => {if(r.url().endsWith('/api/feedback'))console.log('  feedback answered',r.status(),(await r.text().catch(() => '')).slice(0,160))})
 const errors=[],requests=[];page.on('pageerror',e => errors.push(e.message));page.on('request',r => {if(r.url().startsWith(base))requests.push({url:r.url().slice(base.length),method:r.method(),body:r.postData() ?? ''})})
@@ -27,6 +27,13 @@ for(const [from,to] of [['/activity?who=Demo','/changes?who=Demo'],['/journal?te
 }
 if(!process.env.SECTION || process.env.SECTION==='a' || process.env.SECTION==='b'){await page.goto(`${base}/dashboards/spending`);await page.locator('.u-over').first().waitFor({timeout:8000})}
 await attempt('fixed',async () => {check('fixed range is labelled',await page.getByText('Fixed range').count()===1)})
+// uPlot paints in device pixels, so a chart can look right at 1x and sit at half scale on a Retina screen.
+await attempt('retina bars',async () => {
+ const hi=await browser.newContext({viewport:{width:1440,height:900},colorScheme:'light',deviceScaleFactor:2,storageState:await context.storageState()}),p=await hi.newPage()
+ await p.goto(`${base}/dashboards/spending`);await p.locator('.u-over').first().waitFor({timeout:8000});await p.waitForTimeout(800)
+ const reach=await p.evaluate(() => {const c=document.querySelector('.u-wrap canvas'),o=document.querySelector('.u-over').getBoundingClientRect(),b=c.getBoundingClientRect(),r=c.width/b.width,W=Math.floor(o.width*r),H=Math.floor(o.height*r),d=c.getContext('2d').getImageData((o.left-b.left)*r,(o.top-b.top)*r,W,H).data;let x=0;for(let j=0;j<H;j+=2)for(let i=0;i<W;i+=2){const k=(j*W+i)*4;if(d[k+3]>200 && Math.max(d[k],d[k+1],d[k+2])-Math.min(d[k],d[k+1],d[k+2])>40)x=Math.max(x,i)}return x/W})
+ check('bars fill the plot at 2x',reach>.8,`reach ${reach.toFixed(2)}`);await hi.close()
+})
 await attempt('no chart library leftovers',async () => {check('no Recharts in the DOM',await page.locator('.recharts-surface').count()===0)})
 await attempt('details',async () => {
  await page.getByRole('button',{name:'How was Spending calculated?'}).click();const d=page.getByRole('dialog');await d.waitFor()

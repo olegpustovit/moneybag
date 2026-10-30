@@ -20,13 +20,15 @@ export type PanelCtx={cube:Cube|null;range:Range;win:CompareWindow|null;compareM
  setRange:(range:Range,meta:{final:boolean}) => void;stepOut:() => void;addPill:(pill:Pill) => void;tableLink?:(id:string) => ReactNode}
 type Comparison={from?:string;to?:string;total?:string;text?:string;delta_pct?:number|null;direction?:string;good?:boolean}
 type Point={bucket?:string;name:string;value:string;text:string;estimated?:boolean}
-type MetricValue={type:string;metric:string;from?:string;to?:string;unit?:string;label?:string;total?:string|number;text?:string;title?:string;fixed?:string;compare?:Comparison|null;estimates?:{share_pct?:number;text?:string};formula?:string;entries?:{from?:string;to?:string;accounts?:string[]|null;exclude?:string[]|null};series?:Point[]|null;sparkline?:string[]|null;mark?:string;x?:{type?:string};annotations?:{from:string;to:string;label:string}[]|null;nodes?:string[];links?:{from:string;to:string;value:string;text:string;estimated?:boolean}[];rows?:{entry:string;date:string;payee:string;account:string;value:string;text:string;tags?:string[]|null}[]|null;ref?:{from?:string;to?:string;accounts?:string[]|null}}
+type MetricValue={type:string;metric:string;from?:string;to?:string;unit?:string;label?:string;total?:string|number;text?:string;title?:string;fixed?:string;compare?:Comparison|null;estimates?:{share_pct?:number;text?:string};formula?:string;entries?:{from?:string;to?:string;accounts?:string[]|null;exclude?:string[]|null};series?:Point[]|null;sparkline?:string[]|null;sparkline_buckets?:string[]|null;mark?:string;x?:{type?:string};annotations?:{from:string;to:string;label:string}[]|null;nodes?:string[];links?:{from:string;to:string;value:string;text:string;estimated?:boolean}[];rows?:{entry:string;date:string;payee:string;account:string;value:string;text:string;tags?:string[]|null}[]|null;ref?:{from?:string;to?:string;accounts?:string[]|null}}
 const UNITS:Record<string,Unit>={eur:'eur',usd:'usd',int:'int',pct:'pct',mo:'mo',days:'days'}
 const isMetric=(v:unknown):v is MetricValue => typeof v==='object' && v!==null && typeof (v as MetricValue).metric==='string' && ['stat','time_chart','ranked_bars','sankey','entries'].includes((v as MetricValue).type)
 const tryNumber=(s:unknown) => {const n=Number(s);return Number.isFinite(n) ? n : 0}
 const fromIso=(s:string|undefined) => s ? dayFromIso(s) : NaN
 // Server text is for the first paint of the default view only; once someone moves the range the cube answers, so no figure is swapped a beat later.
 const isExact=(v:MetricValue,ctx:PanelCtx) => !!ctx.fresh && ctx.cube?.base!=='USD' && !ctx.filtering && !v.fixed && fromIso(v.from)===ctx.range.from && fromIso(v.to)===ctx.range.to && ctx.compareMode===ctx.defaultCompare
+// Hand-written CEL panels arrive from the server as finished euro text, so say so instead of silently ignoring the switch.
+const EUR_ONLY='In EUR: this panel does not convert.'
 const metricOf=(ctx:PanelCtx,id:string|undefined) => ctx.cube?.metrics.find(m => m.id===id)
 const metricText=(ctx:PanelCtx,m:CubeMetric,v:number) => m.unit==='int' ? Math.round(v).toLocaleString('en-US') : money(v,ctx.cube?.base)
 const fixedRange=(c:SpecComponent,ctx:PanelCtx):Range|null => {if(!c.fixed)return null;return parseRange(c.fixed.range ?? 'all',ctx.bounds)}
@@ -47,20 +49,23 @@ function Head({title,fixed,onDetails,note,children}:{title?:string;fixed?:string
  return <header className="tm-panel-head"><div>{title && <h2>{title}</h2>}{note && <p>{note}</p>}</div><div className="tm-panel-tools">{fixed && <span className="tm-badge" title={fixed}>Fixed range</span>}{children}{onDetails && <button type="button" className="tm-details-link" aria-label={`How was ${title ?? 'this'} calculated?`} onClick={onDetails}>Details</button>}</div></header>
 }
 function StatPanel({c,v,ctx}:{c:SpecComponent;v:MetricValue;ctx:PanelCtx}) {
- const m=metricOf(ctx,v.metric),canCube=!!ctx.cube && cubeCanCompute(m) && !c.fixed,exact=isExact(v,ctx)
+ const m=metricOf(ctx,v.metric),canCube=!!ctx.cube && cubeCanCompute(m) && (!c.fixed || ctx.cube.base==='USD'),exact=isExact(v,ctx)
  const label=v.title ?? v.label ?? ''
  let text=v.text ?? '',change:StatChange|null=null,comparison:string|undefined,spark:ArrayLike<number|null>=(v.sparkline ?? []).map(tryNumber),share=(v.estimates?.share_pct ?? 0)/100,sparkTip:((i:number) => string)|undefined
  if(canCube && m && ctx.cube){
-  const win=windowFor(c,ctx,ctx.range),q={range:ctx.range,pills:ctx.pills},now=metricTotal(ctx.cube,q,m,policyOf(c,m)),prev=win?.available ? metricTotal(ctx.cube,{range:win,pills:ctx.pills},m,policyOf(c,m)).total : null
+  const fixed=fixedRange(c,ctx),win=windowFor(c,ctx,ctx.range),q=fixed ? {range:fixed,pills:[]} : {range:ctx.range,pills:ctx.pills},now=metricTotal(ctx.cube,q,m,policyOf(c,m)),prev=win?.available ? metricTotal(ctx.cube,{range:win,pills:ctx.pills},m,policyOf(c,m)).total : null
   const fmt=(x:number) => metricText(ctx,m,x)
   if(!exact)text=fmt(now.total)
   change=changeBetween(now.total,prev,goodWhen(m),fmt);comparison=win?.label;share=now.total && m.unit!=='int' ? now.estimated/now.total : 0
-  const line=balanceField(m) ? {...balanceSeries(ctx.cube,ctx.range,{field:balanceField(m)!,maxPoints:60}),bucket:null} : (ts => ({xs:ts.xs,values:ts.total,bucket:ts.bucket}))(timeseries(ctx.cube,q,{measure:m,estimates:policyOf(c,m)}))
+  const line=balanceField(m) ? {...balanceSeries(ctx.cube,q.range,{field:balanceField(m)!,maxPoints:60}),bucket:null} : (ts => ({xs:ts.xs,values:ts.total,bucket:ts.bucket}))(timeseries(ctx.cube,q,{measure:m,estimates:policyOf(c,m)}))
   spark=line.values;sparkTip=i => `${line.bucket ? bucketLabel(line.xs[i],line.bucket) : dayLabel(line.xs[i])} · ${fmt(Number(line.values[i] ?? 0))}`
  } else if(v.compare && v.compare.direction){
   const pct=v.compare.delta_pct,dir=v.compare.direction==='up' ? 'up' as const : v.compare.direction==='down' ? 'down' as const : 'flat' as const
   change={direction:dir,good:dir==='flat' ? null : v.compare.good ?? null,text:pct===null || pct===undefined ? 'New' : `${dir==='up' ? '+' : dir==='down' ? '−' : ''}${percent(Math.abs(pct))}`,detail:v.compare.text ? `from ${v.compare.text}` : undefined};comparison=(c.compare ?? ctx.compareMode)==='previous_year' ? 'same period last year' : 'previous period'
  }
+ // A fixed range or a CEL metric skips the cube above, so its tip reads the server's buckets.
+ const buckets=v.sparkline_buckets
+ if(!sparkTip && buckets?.length===spark.length){const bucket=bucketFromIso(buckets);sparkTip=i => `${bucketLabel(toMs(buckets[i]),bucket)} · ${m ? metricText(ctx,m,Number(spark[i] ?? 0)) : v.sparkline?.[i] ?? ''}`}
  const showNo=(c.compare ?? ctx.compareMode)==='none'
  return <Stat label={label} value={text} change={showNo ? null : change} comparison={showNo ? undefined : comparison} spark={spark} sparkTip={sparkTip} sparkColor={m && goodWhen(m)==='down' ? 'var(--c4)' : 'var(--c0)'} estimatedShare={share>.005 ? share : undefined} fixedRange={c.fixed?.reason} onDetails={() => metricDetails(c,v,ctx,text)} entriesTo={v.entries?.accounts?.length ? <Link to="/ledger" search={drillSearch(v.entries,c.fixed ? undefined : ctx.range)} className="tm-stat-open" aria-label={`${label} ${text}. See the entries.`}><span className="tm-stat-value data">{text}</span></Link> : undefined}/>
 }
@@ -129,7 +134,7 @@ const legacyTotal=(c:GridColumn,rows:GridRow[]) => {const values=rows.map(r => {
 // Over 50 rows a table stops being something to read on a page; the panel shows the top and links to the rest.
 function TablePanel({c,v,ctx,title}:{c:SpecComponent;v:Extract<ComponentValue,{type:'table'|'scenario_compare'}>;ctx:PanelCtx;title?:string}) {
  const columns=legacyColumns(v.columns),rows=v.rows as GridRow[],long=rows.length>50,shown=long ? rows.slice(0,8) : rows
- return <><Head title={title} note={long ? `First 8 of ${rows.length.toLocaleString('en-US')} rows` : undefined}>{long && ctx.tableLink?.(c.id)}</Head><DataGrid label={title ?? 'Table'} columns={columns} rows={shown} rowKey={(_,i) => String(i)} totalText={long ? undefined : legacyTotal} emptyText="No matching rows."/></>
+ return <><Head title={title} note={long ? `First 8 of ${rows.length.toLocaleString('en-US')} rows` : ctx.cube?.base==='USD' && v.columns.some(col => col.format?.startsWith('eur')) ? EUR_ONLY : undefined}>{long && ctx.tableLink?.(c.id)}</Head><DataGrid label={title ?? 'Table'} columns={columns} rows={shown} rowKey={(_,i) => String(i)} totalText={long ? undefined : legacyTotal} emptyText="No matching rows."/></>
 }
 export function FullTable({value,title}:{value:unknown;title:string}) {
  const parsed=componentValue.safeParse(value)
@@ -145,7 +150,7 @@ function LegacyPanel({c,value,ctx}:{c:SpecComponent;value:ComponentValue;ctx:Pan
  switch(value.type){
   case 'kpi':{
    const d=value.delta,direction=d?.direction==='up' ? 'up' as const : d?.direction==='down' ? 'down' as const : 'flat' as const,good=value.tone==='ok' ? true : value.tone==='neg' ? false : null
-   return <Stat label={title ?? ''} value={value.text} change={d ? {text:d.text,direction,good} : null} note={value.sub_text ?? value.sub} spark={value.sparkline ?? []} hideEmptyCompare={!d} onDetails={details}/>
+   return <Stat label={title ?? ''} value={value.text} change={d ? {text:d.text,direction,good} : null} note={ctx.cube?.base==='USD' && value.text.startsWith('€') ? EUR_ONLY : value.sub_text ?? value.sub} spark={value.sparkline ?? []} hideEmptyCompare={!d} onDetails={details}/>
   }
   case 'table':case 'scenario_compare':return <TablePanel c={c} v={value} ctx={ctx} title={title}/>
   case 'budget':{
@@ -153,7 +158,7 @@ function LegacyPanel({c,value,ctx}:{c:SpecComponent;value:ComponentValue;ctx:Pan
    return <><Head title={title} onDetails={details}/><div className="tm-budget-bars">{value.rows.map(r => <div key={r.label} className="budget-row"><span className="n" title={r.label}>{r.label}</span><span className="budget-track" title={`${r.actual_text} of ${r.limit_text}`}><i className={r.status} style={{width:`${r.actual/peak*100}%`}}/><b style={{left:`${r.limit/peak*100}%`}}/></span><span className="t">{r.actual_text} / {r.limit_text}</span></div>)}</div></>
   }
   case 'text':return <><Head title={title}/><div className="note" dangerouslySetInnerHTML={{__html:value.html}}/></>
-  case 'chart':return <LegacyChart value={value} drilldown tableId={c.id} syncKey={ctx.syncKey} head={<Head title={title} onDetails={details}/>}/>
+  case 'chart':return <LegacyChart value={value} drilldown tableId={c.id} syncKey={ctx.syncKey} head={<Head title={title} onDetails={details} note={ctx.cube?.base==='USD' && value.y_format.startsWith('eur') ? EUR_ONLY : undefined}/>}/>
  }
 }
 function PanelError({c,dashboard}:{c:SpecComponent;dashboard:string}) {

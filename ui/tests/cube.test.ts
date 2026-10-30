@@ -41,6 +41,15 @@ assert.equal(pills([{field:'category',op:'is',values:['Food']},{field:'payee',op
 assert.equal(pills([{field:'category',op:'is',values:['Nope']}]),0)
 
 // Bucketing and split.
+// A chart with room for every category names them all; the ledger-wide ranking only decides the wider chart.
+{
+ const names=['A','B','C','D','E','F','G'],many=decodeCube({...wire,labels:{},annotations:[],accounts:names.map(n => ({...wire.accounts[0],id:`expenses:${n}`,label:n,category:n})),payees:['x'],tag_sets:[[]],flows:{d:[0,0,0,0,0,40,40],a:[0,1,2,3,4,5,6],p:[0,0,0,0,0,0,0],t:[0,0,0,0,0,0,0],v:[7000,6000,5000,4000,3000,2,1],n:[1,1,1,1,1,1,1]}})
+ const wide=timeseries(many,{range:{from:d('2024-01-01'),to:d('2024-03-31')}},{split:'category'}).series.map(x => x.key)
+ assert.ok(wide.includes('Other') && !wide.includes('F'))
+ const narrow=timeseries(many,{range:{from:d('2024-02-01'),to:d('2024-03-31')}},{split:'category'}).series
+ assert.deepEqual(narrow.map(x => x.key).sort(),['F','G']);assert.notEqual(narrow[0].color,narrow[1].color);assert.ok(narrow.every(x => x.color!=='--series-other'))
+ assert.equal(colorOf(many,'category','F'),'--series-other')
+}
 const months=timeseries(c,{range:all},{bucket:'month'})
 assert.deepEqual([...months.total],[1400,2500,6200])
 assert.equal(months.xs.length,3);assert.equal(months.bucket,'month')

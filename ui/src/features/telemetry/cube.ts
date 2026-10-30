@@ -198,7 +198,10 @@ export function timeseries(c:Cube,q:Query,{measure='spending',bucket,split,estim
   for(let i=lo;i<hi;i++){if(m && !m[i])continue;if(estimates==='exclude' && est[a[i]])continue;const k=w[a[i]];if(k)total[of[d[i]-loD]]+=mInt ? n[i] : k*v[i]}
   return {bucket:b,xs,total,series:[{key:'total',label:typeof measure==='object' ? measure.label : measure==='income' ? 'Money in' : measure==='net' ? 'Net' : 'Money out',color:typeof measure==='object' ? '--c0' : measure==='income' ? '--c2' : measure==='net' ? '--c3' : '--c4',values:total}]}
  }
- const {values,row}=dim(c,split),colors=entityColors(c,split),slot=new Int32Array(values.length+1).fill(-1),named:string[]=[]
+ const {values,row}=dim(c,split),colors=new Map(entityColors(c,split)),slot=new Int32Array(values.length+1).fill(-1),named:string[]=[]
+ // Small categories lose their colour on the ledger-wide ranking, but a chart with room for all of them should still name each one.
+ const present=new Set<number>();for(let i=lo;i<hi;i++)if((!m || m[i]) && row[i]>=0 && w[a[i]] && (estimates==='include' || !est[a[i]]))present.add(row[i])
+ if(present.size<=SLOTS.length){const used=[...present].map(i => colors.get(values[i])),free=SLOTS.filter(s => !used.includes(s));for(const i of present)if(!SLOTS.includes(colors.get(values[i]) ?? ''))colors.set(values[i],free.shift()!)}
  values.forEach((value,i) => {const color=colors.get(value);if(color && color!=='--series-other'){slot[i+1]=named.length;named.push(value)}})
  const otherIdx=named.length,estIdx=named.length+1,grid=Array.from({length:named.length+2},() => new Float64Array(len))
  for(let i=lo;i<hi;i++){
