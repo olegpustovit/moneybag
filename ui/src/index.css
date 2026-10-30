@@ -376,6 +376,7 @@ th { color:var(--text2); font-weight:600; }
 .data-table-columns label { display:inline-flex; align-items:center; gap:4px; margin:6px 12px 0 0; }
 .data-table-scroll { position:relative; }
 .data-table-scroll.virtual { max-height:352px; }
+.data-table-scroll.virtual .shared-data-table tbody tr[data-row] > td { padding-block:6.5px; }
 .shared-data-table { table-layout:fixed; width:max-content; min-width:100%; }
 .shared-data-table th { position:sticky; top:0; z-index:2; background:var(--paper); }
 .shared-data-table th:first-child,.shared-data-table td:first-child { position:sticky; left:0; background:var(--paper); z-index:1; }

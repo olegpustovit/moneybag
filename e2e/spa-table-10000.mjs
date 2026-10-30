@@ -21,6 +21,7 @@ for(const width of [1440,390]) {
  const page=await context.newPage(),errors=[];page.on('pageerror',error=>errors.push(error.message))
  await page.goto('http://127.0.0.1:5173/dashboards/large')
  const region=page.getByRole('region',{name:'Large table table'});await region.getByText('Item 00000',{exact:true}).waitFor()
+ assert.equal(await region.locator('tr[data-row]').first().evaluate(row=>row.getBoundingClientRect().height),32)
  await region.getByRole('button',{name:'Name',exact:true}).click();await page.waitForURL(/sort=name/)
  assert.equal(await region.getByRole('columnheader',{name:/Name/}).getAttribute('aria-sort'),'ascending')
  assert((await region.locator('tbody tr').count())<=60)
