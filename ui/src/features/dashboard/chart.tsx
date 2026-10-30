@@ -38,7 +38,8 @@ export default function DashboardChart({ value, drilldown = false, tableId = val
   const color = (index: number) => `var(--c${index % 5})`
   const axes = <><CartesianGrid vertical={false} stroke="var(--bd)"/><XAxis dataKey="x" tickLine={false} axisLine={false} minTickGap={20}/><YAxis tickLine={false} axisLine={false} width={55}/><Tooltip cursor={{stroke:'var(--text3)',strokeDasharray:'3 3'}} shared={value.mark==='bar' ? false : undefined} content={props => <ChartTip {...props} rows={rows} format={value.y_format} stack={value.mark==='stack'}/>} />{value.rule && <ReferenceLine y={value.rule.y} stroke="var(--text2)" strokeDasharray="4 4" label={value.rule.label}/>}</>
   const timeSeries=(value.x.kind==='date' || value.x.kind==='month' || value.x.kind==='number' && value.x.field==='month') && rows.length>24
-  const direct=series.length<=4
+  const visibleSeries=series.filter(item => !hidden.includes(item.name)).length
+  const direct=visibleSeries>0 && visibleSeries<=4
   const lines = series.map((item, index) => !hidden.includes(item.name) && (value.mark === 'area' ? <Area isAnimationActive={false} key={index} dataKey={`s${index}`} name={item.name || 'Value'} stroke={color(item.color_index)} fill={color(item.color_index)} fillOpacity={0.12} strokeWidth={2}/> : <Line isAnimationActive={false} key={index} dataKey={`s${index}`} name={item.name || 'Value'} stroke={color(item.color_index)} strokeWidth={2} dot={false}/>))
   const categories=[...new Set(value.points.map(point => point.x))]
   return <div className="dashboard-chart">
