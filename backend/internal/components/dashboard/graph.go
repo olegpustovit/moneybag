@@ -1,11 +1,14 @@
 package dashboard
 
 import (
+	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/tiendc/go-deepcopy"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -14,6 +17,49 @@ type sourceResult struct {
 	once sync.Once
 	rows []map[string]any
 	err  error
+}
+
+type queryResult struct {
+	value any
+	cost  uint64
+	count int
+}
+
+func (x *execution) cachedSourceQuery(q Query) (any, error) {
+	sources, ok := x.engine.Reader.(*Sources)
+	if !ok || sources.Snapshots == nil || (q.From != "postings" && q.From != "journal" && q.From != "effective_entries" && !strings.HasPrefix(q.From, "view:")) {
+		return x.query(q)
+	}
+	encoded, err := json.Marshal(x.vars["params"])
+	var canonical any
+	if err != nil || json.Unmarshal(encoded, &canonical) != nil || !reflect.DeepEqual(canonical, x.vars["params"]) {
+		return x.query(q)
+	}
+	key := struct {
+		Query  Query
+		Params any
+	}{q, x.vars["params"]}
+	value, err := sources.Snapshots.read(x.ctx, x.p, "query", q.From, key, func() (any, error) {
+		v, err := x.query(q)
+		return queryResult{v, x.cost, x.count}, err
+	}, func(v any) bool {
+		// shortcut: query snapshots are limited to 1 MiB; use byte-aware eviction before caching larger results.
+		return json.NewEncoder(&byteBudget{1024 * 1024}).Encode(v.(queryResult).value) == nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	result := value.(queryResult)
+	x.cost, x.count = result.cost, result.count
+	if result.value == nil {
+		return nil, nil
+	}
+	var copied any
+	if err := deepcopy.Copy(&copied, result.value); err != nil {
+		x.cost, x.count = 0, 0
+		return x.query(q)
+	}
+	return copied, nil
 }
 
 func (m *sourceMemo) read(key string, fn func() ([]map[string]any, error)) ([]map[string]any, error) {
@@ -122,7 +168,11 @@ func (x *execution) loadQueries(data map[string]Query, issue func(string, error)
 			i, query := i, data[key]
 			group.Go(func() error {
 				child := &execution{ctx: x.ctx, engine: x.engine, p: x.p, vars: x.vars, memo: x.memo}
-				results[i].value, results[i].err = child.query(query)
+				if len(deps[key]) == 0 {
+					results[i].value, results[i].err = child.cachedSourceQuery(query)
+				} else {
+					results[i].value, results[i].err = child.query(query)
+				}
 				results[i].cost, results[i].count = child.cost, child.count
 				return nil
 			})

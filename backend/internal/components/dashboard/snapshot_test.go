@@ -12,6 +12,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
+	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func testSnapshots() *Snapshots {
@@ -43,6 +44,44 @@ func TestSnapshotsInvalidateAcrossWriteAndIsolateOwners(t *testing.T) {
 	cache.Changed(a.UserID, true)
 	if read(a) != 5 || read(a) != 5 || read(b) != 2 {
 		t.Fatal("write did not invalidate owner only")
+	}
+}
+
+func TestCachedSourceQueryCopiesResultsAndChargesOriginalCost(t *testing.T) {
+	cache := testSnapshots()
+	p := testPrincipal("01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	q := Query{From: "postings", Where: "row.amount > 0"}
+	params := map[string]any{"month": "2026-10"}
+	key := struct {
+		Query  Query
+		Params any
+	}{q, params}
+	expires := time.Now().Add(time.Hour).Truncate(time.Second)
+	ctx := expressions.WithVolatility(context.Background())
+	_, err := cache.read(ctx, p, "query", q.From, key, func() (any, error) {
+		expressions.ExpireAt(ctx, expires)
+		return queryResult{value: []map[string]any{{"nested": map[string]any{"value": float64(1)}, "bson": bson.A{bson.D{{Key: "value", Value: 1}}}}}, cost: 17, count: 3}, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		ctx := expressions.WithVolatility(context.Background())
+		x := &execution{ctx: ctx, p: p, engine: &Engine{Reader: &Sources{Snapshots: cache}}, vars: map[string]any{"params": params}}
+		value, err := x.cachedSourceQuery(q)
+		if err != nil || x.cost != 17 || x.count != 3 || !expressions.Expiry(ctx).Equal(expires) {
+			t.Fatalf("cached accounting or expiry: %d %d %v %v", x.cost, x.count, expressions.Expiry(ctx), err)
+		}
+		nested := value.([]map[string]any)[0]["nested"].(map[string]any)
+		if nested["value"] != float64(1) {
+			t.Fatalf("cached value mutated: %v", nested)
+		}
+		nested["value"] = float64(999)
+		bsonValue := value.([]map[string]any)[0]["bson"].(bson.A)[0].(bson.D)
+		if bsonValue[0].Value != 1 {
+			t.Fatalf("cached BSON mutated: %v", bsonValue)
+		}
+		bsonValue[0].Value = 999
 	}
 }
 

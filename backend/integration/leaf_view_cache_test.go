@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -62,7 +63,7 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, v := range []dashboard.View{{ID: "leaf", Query: dashboard.Query{From: "postings"}}, {ID: "middle", Query: dashboard.Query{From: "view:leaf"}}, {ID: "left", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-left'"}}}, {ID: "right", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-right'"}}}, {ID: "cycle-a", Query: dashboard.Query{From: "view:cycle-b"}}, {ID: "cycle-b", Query: dashboard.Query{From: "view:cycle-a"}}} {
+	for _, v := range []dashboard.View{{ID: "leaf", Query: dashboard.Query{From: "postings"}}, {ID: "middle", Query: dashboard.Query{From: "view:leaf"}}, {ID: "dynamic", Query: dashboard.Query{From: "postings", Derive: map[string]string{"stamp": "now()"}}}, {ID: "left", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-left'"}}}, {ID: "right", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-right'"}}}, {ID: "cycle-a", Query: dashboard.Query{From: "view:cycle-b"}}, {ID: "cycle-b", Query: dashboard.Query{From: "view:cycle-a"}}} {
 		v.UserID = p.UserID
 		v.Key = p.UserID + ":" + v.ID
 		if _, err = db.Collection("views").InsertOne(ctx, v); err != nil {
@@ -114,6 +115,37 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	if _, err = engine.Evaluate(request, p, "1", map[string]dashboard.Query{"deep": {From: "view:deep-0"}}, nil); err == nil || !strings.Contains(err.Error(), "nest deeper") {
 		t.Fatalf("cached view bypassed nesting limit: %v", err)
 	}
+	query := map[string]dashboard.Query{"q": {From: "view:middle", Where: "row.payee == params.name"}}
+	first, err := engine.Evaluate(ctx, p, "data.q", query, map[string]any{"name": "Example"})
+	if err != nil {
+		t.Fatalf("first query: %v, %v", first.Value, err)
+	}
+	warm, err := engine.Evaluate(ctx, p, "data.q", query, map[string]any{"name": "Example"})
+	firstJSON, _ := json.Marshal(first.Value)
+	warmJSON, _ := json.Marshal(warm.Value)
+	if err != nil || string(firstJSON) != string(warmJSON) || warm.Cost != first.Cost {
+		t.Fatalf("warm query or cost changed: %v %v, %v", warm, first, err)
+	}
+	otherParams, err := engine.Evaluate(ctx, p, "size(data.q)", query, map[string]any{"name": "Other"})
+	if err != nil || otherParams.Value != float64(0) {
+		t.Fatalf("query parameter isolation: %v, %v", otherParams.Value, err)
+	}
+	typedQuery := map[string]dashboard.Query{"q": {From: "view:middle", Where: "type(params.n) == int"}}
+	for _, tc := range []struct {
+		value any
+		want  float64
+	}{{int64(1), 1}, {float64(1), 0}, {int64(1), 1}} {
+		result, err := engine.Evaluate(ctx, p, "size(data.q)", typedQuery, map[string]any{"n": tc.value})
+		if err != nil || result.Value != tc.want {
+			t.Fatalf("typed parameter %T: %v, %v", tc.value, result.Value, err)
+		}
+	}
+	for range 2 {
+		volatileCtx := expressions.WithVolatility(ctx)
+		if _, err = engine.Evaluate(volatileCtx, p, "size(data.q)", map[string]dashboard.Query{"q": {From: "view:dynamic"}}, nil); err != nil || !expressions.Volatile(volatileCtx) {
+			t.Fatalf("volatile view was cached: volatile=%t, %v", expressions.Volatile(volatileCtx), err)
+		}
+	}
 	cache.Changed(p.UserID, false)
 	_, err = db.Collection("views").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": "leaf"}, bson.M{"$set": bson.M{"query": dashboard.Query{From: "postings", Derive: map[string]string{"payee": "'Changed'"}}}})
 	cache.Changed(p.UserID, true)
@@ -123,6 +155,10 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	after, err := engine.Evaluate(request, p, "data.right[0].label", map[string]dashboard.Query{"right": {From: "view:right"}}, nil)
 	if err != nil || after.Value != "Changed-right" {
 		t.Fatalf("stale leaf after edit: %v, %v", after.Value, err)
+	}
+	fresh, err := engine.Evaluate(ctx, p, "size(data.q)", query, map[string]any{"name": "Example"})
+	if err != nil || fresh.Value != float64(0) {
+		t.Fatalf("stale query after edit: %v, %v", fresh.Value, err)
 	}
 	if _, err = engine.Evaluate(ctx, other, "size(data.left)", map[string]dashboard.Query{"left": {From: "view:left"}}, nil); err == nil {
 		t.Fatal("other owner read view")
