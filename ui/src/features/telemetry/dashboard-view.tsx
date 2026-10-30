@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import type { Cube, Pill } from './cube'
-import { dim, localFacts, suggestValues, totals, whatMoved, type Fact } from './cube'
+import { dim, localFacts, suggestValues, totals, type Fact } from './cube'
 import { addPill, decodePills, encodePills, FIELDS, type FieldDef } from './filters'
 import { DAY, canonicalText, dayLabel, defaultBounds, isoDay, type Range } from './time-grammar'
-import { currencySymbol, money } from './format'
+import { money } from './format'
 import { useTimeState, type TelemetrySearch } from './use-time-state'
 import type { DashboardSearch } from './search'
 import { TimeBar, defaultPresets } from './time-bar'
@@ -40,14 +40,12 @@ export function DashboardBody({view,cube:fullCube,search,onSearch,dashboardId,he
  const components=new Map<string,SpecComponent>((spec.components ?? []).map(c => [c.id,c])),range=time.range,win=time.window
  const q={range,pills},metric=spec.answer ? cube?.metrics.find(m => m.id===spec.answer!.metric) : undefined
  const fresh=!search.t,exactAnswer=fresh && currency==='EUR' && !pills.length && time.compare===defaultCompare && (!search.t || isoDay(range.from)===firstFrom(view) && isoDay(range.to)===firstTo(view))
- const server=serverFacts(view.values?.answer),facts:Fact[]|null=exactAnswer && server ? server : cube && (spec.answer || dims.length) ? localFacts(cube,q,win,metric) : server
+ const server=serverFacts(view.values?.answer),facts:Fact[]|null=!spec.answer ? null : exactAnswer && server ? server : cube ? localFacts(cube,q,win,metric) : server
  const ctx:PanelCtx={cube,range,win,compareMode:time.compare,defaultCompare,pills,filtering:pills.length>0,dashboard:dashboardId,syncKey:`dash-${dashboardId}`,bounds,explore:dims,readOnly:render,fresh,syncing:sync?.fetching,setRange:(r,{final}) => time.setRange(r,{final}),stepOut:time.zoomOut,addPill:p => setPills(addPill(pills,p)),
   tableLink:id => <button type="button" className="tm-details-link" onClick={() => onSearch({table:id},{push:true})}>See all rows</button>}
  const nav=cube ? {xs:netDays(cube).xs,values:netDays(cube).values,bands:cube.annotations.map(a => ({from:Date.parse(a.from),to:Date.parse(a.to),label:a.label})),label:'Net worth across all history'} : undefined
  const t=cube ? totals(cube,q) : null
  const title=spec.question || view.head.title
- const movedTop=cube && !render ? whatMoved(cube,{range},null,{limit:1})[0]?.label : undefined
- const asks=movedTop ? [`${movedTop} this year`,`Everything except ${movedTop}, no estimates`,`Charges above ${currencySymbol(cube!.base)}500 last 3 months`] : undefined
  const suggest=(field:Parameters<typeof suggestValues>[2],query:string) => cube ? suggestValues(cube,q,field,query) : []
  const tableComponent=search.table ? components.get(search.table) : undefined
  if(tableComponent){
@@ -66,7 +64,7 @@ export function DashboardBody({view,cube:fullCube,search,onSearch,dashboardId,he
    {sync?.fetching && <i className="tm-sync-line" aria-hidden="true"/>}
    {hasClock || (!render && !allFixed) ? <TimeBar state={time} bounds={bounds} presets={defaultPresets(bounds,scope?.time?.presets)} navigator={nav} currency={switchable ? currency : undefined} prefetch={prefetch}/> : null}
    {!hasClock && !render && !allFixed && <p className="tm-clock-note">The agent who built this page hasn’t connected its panels to the clock yet, so some may ignore the range.</p>}
-   {dims.length>0 && !render && <FilterBar pills={pills} onChange={setPills} fields={fields} suggest={suggest} formatTotal={c => money(c,cube?.base)} countAmount={(op,amount) => cube ? totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries : 0} asks={cube ? asks : undefined} ask={cube ? {dictionary:{category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values},bounds,onRange:text => time.setText(text)} : undefined} summary={t ? `${t.entries.toLocaleString('en-US')} entries · ${money(t.out,cube?.base)} out · ${money(t.in,cube?.base)} in` : undefined} onSaveView={() => promptSaveView(location.pathname,cleanState(search,canonicalText(range),pills),title)}/>}
+   {dims.length>0 && !render && <FilterBar pills={pills} onChange={setPills} fields={fields} suggest={suggest} formatTotal={c => money(c,cube?.base)} countAmount={(op,amount) => cube ? totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries : 0} ask={cube ? {dictionary:{category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values},bounds,onRange:text => time.setText(text)} : undefined} summary={t ? `${t.entries.toLocaleString('en-US')} entries · ${money(t.out,cube?.base)} out · ${money(t.in,cube?.base)} in` : undefined} onSaveView={() => promptSaveView(location.pathname,cleanState(search,canonicalText(range),pills),title)}/>}
    {facts && <Answer facts={facts} reserve={dims.includes('category')} onContributor={!render && dims.includes('category') ? key => setPills(addPill(pills.filter(p => p.field!=='category'),{field:'category',op:'is',values:[key]})) : undefined}/>}
   </div>
   {pages.length>1 && <nav className="page-tabs" aria-label="Pages in this dashboard">{pages.map(p => <button key={p.id} type="button" className={p.id===page?.id ? 'active' : ''} aria-current={p.id===page?.id ? 'page' : undefined} onClick={() => onSearch({page:p.id},{push:true})}>{p.title}</button>)}</nav>}

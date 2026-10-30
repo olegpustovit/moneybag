@@ -7,13 +7,13 @@ import './telemetry.css'
 
 export type FilterBarProps={pills:Pill[];onChange:(pills:Pill[]) => void;suggest:(field:Dimension,query:string) => Suggestion[];
  formatTotal:(cents:number) => string;countAmount?:(op:'over'|'under',amount:number) => number;fields?:FieldDef[];
- asks?:string[];ask?:{dictionary:Partial<Record<Dimension,string[]>>;bounds:Bounds;onRange:(text:string,range:Range) => void};
+ ask?:{dictionary:Partial<Record<Dimension,string[]>>;bounds:Bounds;onRange:(text:string,range:Range) => void};
  summary?:ReactNode;onSaveView?:() => void;placeholder?:string}
 type Item={head:string;label:string;hint?:string;run:() => void}
 const entries=(n:number) => `${n.toLocaleString('en-US')} ${n===1 ? 'entry' : 'entries'}`
 const AMOUNTS=[50,100,250,500,1000]
 
-export function FilterBar({pills,onChange,suggest,formatTotal,countAmount,fields=FIELDS,asks,ask,summary,onSaveView,placeholder='Filter by category, payee, account, trip, amount…'}:FilterBarProps) {
+export function FilterBar({pills,onChange,suggest,formatTotal,countAmount,fields=FIELDS,ask,summary,onSaveView,placeholder='Filter by category, payee, account, trip, amount…'}:FilterBarProps) {
  const [query,setQuery]=useState(''),[open,setOpen]=useState(false),[active,setActive]=useState(0),[field,setField]=useState<FieldDef|null>(null),[op,setOp]=useState<Op|null>(null),[advanced,setAdvanced]=useState(false),[cel,setCel]=useState<string|null>(null),[celError,setCelError]=useState('')
  const input=useRef<HTMLInputElement>(null),list=useRef<HTMLDivElement>(null),base=useId(),listId=`${base}-list`,optionId=(i:number) => `${base}-o${i}`
  const clearDraft=() => {setField(null);setOp(null);setQuery('')}
@@ -36,7 +36,7 @@ export function FilterBar({pills,onChange,suggest,formatTotal,countAmount,fields
    if(hits.length)items.push({head:'Matching values',label:`Payee contains “${q}”`,hint:entries(hits.reduce((n,s) => n+s.count,0)),run:() => commit('payee','contains',q)})
   }
   for(const f of fields)if(!ql || f.label.toLowerCase().startsWith(ql))items.push({head:'Filter by',label:f.label,hint:f.ops.join(' / '),run:() => choose(f)})
-  if(ask && ql.length>=4 && parseAsk(q,ask.dictionary,ask.bounds).understood)items.push({head:'Ask in plain words',label:`“${q}”`,hint:'Make filters from this',run:() => {runAsk(q)}})
+  if(ask && ql.length>=4 && parseAsk(q,ask.dictionary,ask.bounds).understood)items.push({head:'From your words',label:`“${q}”`,hint:'Make filters from this',run:() => {runAsk(q)}})
  } else if(!op){
   for(const o of field.ops)if(!ql || o.includes(ql))items.push({head:field.label,label:o,run:() => {setOp(o);setQuery('');setActive(0);setOpen(true)}})
  } else if(field.key==='amount'){
@@ -88,7 +88,6 @@ export function FilterBar({pills,onChange,suggest,formatTotal,countAmount,fields
    {heads.map(head => {const headId=`${base}-h${heads.indexOf(head)}`;return <div key={head} role="group" aria-labelledby={headId}><div className="head" id={headId} role="presentation">{head}</div>{items.filter(it => it.head===head).map(it => {index=items.indexOf(it);const i=index;return <div key={`${it.label}${i}`} id={optionId(i)} role="option" aria-selected={i===on} className={i===on ? 'on' : undefined} onMouseEnter={() => setActive(i)} onClick={it.run}><span>{it.label}</span>{it.hint && <small>{it.hint}</small>}</div>})}</div>})}
   </div>
   <div className="tm-filter-meta">
-   <div className="tm-chips">{asks?.length && ask ? <><span className="tm-chips-label">Ask in plain words:</span>{asks.map(text => <button key={text} type="button" className="tm-chip" onClick={() => runAsk(text)}>{text}</button>)}</> : null}</div>
    <div className="tm-filter-actions">
     {summary && <span className="tm-filter-summary" role="status">{summary}</span>}
     <button type="button" className="tm-btn small" aria-expanded={advanced} onClick={() => {setAdvanced(!advanced);setCel(null);setCelError('')}}>Advanced</button>

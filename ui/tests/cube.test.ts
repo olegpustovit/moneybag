@@ -141,3 +141,4 @@ assert.equal(at(fxg,'2026-01-01'),6000);assert.equal(at(fxg,'2026-01-06'),7000);
 console.log('cube ok')
 assert.deepEqual(alignCompare([0,5,6],2),[5,6])
 assert.deepEqual(alignCompare([5,6],3),[null,5,6])
+{const bank={...c,accounts:c.accounts};assert.ok(suggestValues(bank,{range:all},'account').every(x => !bank.accounts.find(a => a.label===x.value && (a.class==='expense' || a.class==='income'))),'account suggestions are where money sits, never spending categories')}

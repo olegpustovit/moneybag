@@ -145,7 +145,7 @@ describe('TimeBar',() => {
 
 function Filters({onSave}:{onSave?:() => void}) {
  const [pills,setPills]=useState<Pill[]>([])
- return <><FilterBar pills={pills} onChange={setPills} formatTotal={c => `€${c/100}`} onSaveView={onSave} countAmount={() => 7} suggest={(field,q) => field==='category' ? [{value:'Groceries',label:'Groceries',count:12,total:34500},{value:'Rent',label:'Rent',count:3,total:300000}].filter(s => s.label.toLowerCase().includes(q.toLowerCase())) : field==='payee' ? [{value:'Lidl',label:'Lidl',count:4,total:900}].filter(s => s.label.toLowerCase().includes(q.toLowerCase())) : []} asks={['Rent over €50']} ask={{dictionary:{category:['Rent']},bounds,onRange:() => {}}}/><output data-testid="pills">{JSON.stringify(pills)}</output></>
+ return <><FilterBar pills={pills} onChange={setPills} formatTotal={c => `€${c/100}`} onSaveView={onSave} countAmount={() => 7} suggest={(field,q) => field==='category' ? [{value:'Groceries',label:'Groceries',count:12,total:34500},{value:'Rent',label:'Rent',count:3,total:300000}].filter(s => s.label.toLowerCase().includes(q.toLowerCase())) : field==='payee' ? [{value:'Lidl',label:'Lidl',count:4,total:900}].filter(s => s.label.toLowerCase().includes(q.toLowerCase())) : []} ask={{dictionary:{category:['Rent']},bounds,onRange:() => {}}}/><output data-testid="pills">{JSON.stringify(pills)}</output></>
 }
 describe('FilterBar follows the ARIA combobox pattern',() => {
  const box=() => screen.getByRole('combobox',{name:'Add a filter'}) as HTMLInputElement
@@ -173,7 +173,7 @@ describe('FilterBar follows the ARIA combobox pattern',() => {
  })
  it('turns plain words into pills, and Advanced round-trips CEL',() => {
   const save=vi.fn();render(<Filters onSave={save}/>)
-  fireEvent.click(screen.getByRole('button',{name:'Rent over €50'}));expect(JSON.parse(screen.getByTestId('pills').textContent!).length).toBe(2)
+  fireEvent.change(screen.getByRole('combobox'),{target:{value:'Rent over €50'}});fireEvent.click(screen.getByRole('option',{name:/Rent over €50/}));expect(JSON.parse(screen.getByTestId('pills').textContent!).length).toBe(2)
   fireEvent.click(screen.getByRole('button',{name:'Advanced'}));const cel=screen.getByLabelText(/Same filter as CEL/) as HTMLTextAreaElement;expect(cel.value).toBe('row.amount > 50 && row.category == "Rent"')
   fireEvent.change(cel,{target:{value:'size(x) > 1'}});fireEvent.click(screen.getByRole('button',{name:'Apply'}));expect(screen.getByRole('alert').textContent).toContain('needs an agent')
   fireEvent.click(screen.getByRole('button',{name:'Save view'}));expect(save).toHaveBeenCalledOnce()

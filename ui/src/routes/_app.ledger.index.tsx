@@ -36,7 +36,7 @@ function mapFilters(cube:Cube|null,pills:Pill[],prefixes:string[]|undefined,q:st
    const value=p.field==='category' ? a.category : p.field==='account' ? a.label : p.field==='estimate' ? (a.estimated ? 'Estimated' : 'Recorded') : ''
    return p.values.includes(value)
   }
-  restrict(cube.accounts.filter(a => isFlow(a.id) && match(a)!==negative).map(a => a.id))
+  restrict(cube.accounts.filter(a => (p.field==='account' ? !isFlow(a.id) : isFlow(a.id)) && match(a)!==negative).map(a => a.id))
  }
  if(allowed){if(!allowed.size)out.none=true;out.input.accounts=[...allowed].slice(0,1000)}
  return out
@@ -80,14 +80,12 @@ function Ledger() {
    machine:[{label:'Entry',value:e.id},{label:'Bank text',value:e.payee || '—',mono:false},{label:'Status',value:e.status,mono:false},{label:'Sequence',value:String(e.seq)},...(e.tags?.length ? [{label:'Tags',value:e.tags.join(', ')}] : []),...(e.postings ?? []).map(p => ({label:'Account ID',value:p.account}))]}})
  }
  const summary=t ? `${t.entries.toLocaleString('en-US')} entries · ${money(t.out,cube?.base)} out · ${money(t.in,cube?.base)} in${estimateShare>.005 ? ` · ${percent(estimateShare*100,0)} estimated` : ''}` : undefined
- const asks=['Groceries over €50 last 3 months','Travel this year','Everything except rent, no estimates']
  return <>
   <PageHead title="Ledger" description="Show me the entries and the accounts."/>
   <SubNav of="ledger"/>
   <div className="tm-sheet">
    <TimeBar state={time} bounds={bounds} hideCompare/>
-   <FilterBar pills={pills} onChange={setPills} formatTotal={c => money(c,cube?.base)} suggest={(field,text) => cube ? suggestValues(cube,q,field,text) : []} countAmount={(op,amount) => cube ? totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries : 0} summary={summary}
-    asks={cube ? asks : undefined} ask={cube ? {dictionary:{category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values},bounds,onRange:text => time.setText(text)} : undefined}
+   <FilterBar pills={pills} onChange={setPills} formatTotal={c => money(c,cube?.base)} suggest={(field,text) => cube ? suggestValues(cube,q,field,text) : []} countAmount={(op,amount) => cube ? totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries : 0} summary={summary} ask={cube ? {dictionary:{category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values},bounds,onRange:text => time.setText(text)} : undefined}
     onSaveView={() => promptSaveView('/ledger',{t:canonicalText(range),...(encodePills(pills) ? {f:encodePills(pills)} : {})},'Entries')}/>
   </div>
   {entries.isPending && !mapped.none ? <RowsSkeleton rows={14}/> : entries.error ? <RouteError error={entries.error} reset={() => void entries.refetch()} title="Entries didn’t load"/> : !rows.length ? <Empty title="No entries here">{pills.length || params.q || params.accounts?.length ? 'Nothing matches this range and filter.' : 'Nothing was posted in this range.'}</Empty>

@@ -227,7 +227,8 @@ export function whatMoved(c:Cube,q:Query,win:CompareWindow|null,{by='category',m
 }
 export function suggestValues(c:Cube,q:Query,field:Dimension,prefix='',limit=10):Suggestion[] {
  const {values,row}=dim(c,field),[lo,hi]=span(c,q.range),others=q.pills?.filter(p => p.field!==field),m=pillMask(c,others),count=new Int32Array(values.length),sum=new Float64Array(values.length),{a,v,n,cls}=c
- for(let i=lo;i<hi;i++){if((m && !m[i]) || row[i]<0 || !cls[a[i]])continue;count[row[i]]+=n[i];sum[row[i]]+=Math.abs(v[i])}
+ for(let i=lo;i<hi;i++){// An account filter means where the money sat (a bank, cash), which the ledger shows; every other dimension describes money in or out.
+  if((m && !m[i]) || row[i]<0 || (field==='account' ? cls[a[i]] : !cls[a[i]]))continue;count[row[i]]+=n[i];sum[row[i]]+=Math.abs(v[i])}
  const needle=prefix.trim().toLowerCase(),out:Suggestion[]=[]
  values.forEach((value,i) => {if(!count[i])return;const text=label(c,value);if(needle && !text.toLowerCase().includes(needle))return;out.push({value,label:text,count:count[i],total:sum[i]})})
  return out.sort((x,y) => y.total-x.total).slice(0,limit)

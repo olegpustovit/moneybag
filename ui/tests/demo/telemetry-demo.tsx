@@ -27,7 +27,6 @@ const wire=syntheticCube({density:Number(params.get('density') ?? 1)})
 const cube=decodeCube(wire),bounds=cube.bounds,code=cube.base
 const eur=unitFormat('eur',{minor:true,code}),full=balanceSeries(cube,{from:bounds.start,to:bounds.today},{maxPoints:500}),trips=annotationBands(cube)
 const dictionary={category:dim(cube,'category').values,trip:dim(cube,'trip').values,account:dim(cube,'account').values,payee:dim(cube,'payee').values}
-const ASKS=['Groceries over €50 last 3 months','Travel this year','Everything except rent, no estimates','Charges above €500 since march']
 const m=(c:number) => money(c,code)
 // Arguments make the React Compiler re-run this whenever the inputs change, instead of caching one reading forever.
 const clock=(..._inputs:unknown[]) => performance.now()
@@ -74,7 +73,7 @@ function Demo() {
  return <main className="demo">
   <div className="demo-bar"><span>MONEYBAG · SPENDING &amp; NET WORTH</span><span>SYNTHETIC LEDGER · {cube.size.toLocaleString('en-US')} ROWS</span></div>
   <TimeBar state={time} bounds={bounds} navigator={{xs:full.xs,values:full.values,bands:trips,label:'Net worth across all history'}}/>
-  <FilterBar pills={pills} onChange={setPills} suggest={(field,query) => suggestValues(cube,q,field,query)} formatTotal={m} countAmount={(op,amount) => totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries} asks={ASKS} ask={{dictionary,bounds,onRange:text => time.setText(text)}} summary={summary} onSaveView={() => {window.__demo.saved++;setMessage('View saved.')}}/>
+  <FilterBar pills={pills} onChange={setPills} suggest={(field,query) => suggestValues(cube,q,field,query)} formatTotal={m} countAmount={(op,amount) => totals(cube,{range,pills:[...pills,{field:'amount',op,values:[String(amount)]}]}).entries} ask={{dictionary,bounds,onRange:text => time.setText(text)}} summary={summary} onSaveView={() => {window.__demo.saved++;setMessage('View saved.')}}/>
   <div className="tm-stats">
    <Stat label="Net worth, end of range" value={m(nwEnd)} change={changeBetween(nwEnd,nwStart,'up',m)} comparison="start of range" spark={nw.values.filter((_,i) => i%Math.ceil(nw.values.length/60)===0)} sparkColor="var(--c0)" sparkLabel="Net worth trend" href="#entries" onDetails={() => openDetails(statDetails('Net worth',m(nwEnd),'sum(balances.assets) + sum(balances.liabilities)'))}/>
    <Stat label="Money in" value={m(t.in)} change={changeBetween(t.in,prev?.in,'up',m)} comparison={compareName} spark={inn.total} sparkColor="var(--c2)" href="#entries" onDetails={() => openDetails(statDetails('Money in',m(t.in),'row.class == "income" && row.date >= params.from && row.date <= params.to'))}/>
