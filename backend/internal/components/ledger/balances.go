@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"math/big"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -71,13 +73,22 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 		postMatch["postings.account"] = bson.M{"$in": in.Accounts}
 	}
 	pipeline := bson.A{bson.M{"$match": match}, bson.M{"$unwind": "$postings"}, bson.M{"$match": postMatch}, bson.M{"$group": bson.M{"_id": bson.M{"account": "$postings.account", "commodity": "$postings.amount.c"}, "amount": bson.M{"$sum": "$postings.amount.v"}}}, bson.M{"$sort": bson.M{"_id.account": 1, "_id.commodity": 1}}, bson.M{"$limit": 5001}}
-	cur, e := db.Collection("journal").Aggregate(ctx, pipeline)
-	if e != nil {
-		return BalancesResult{}, e
+	var key strings.Builder
+	fmt.Fprintf(&key, "balances|%p|%d:%s|%s", db, len(p.UserID), p.UserID, in.At)
+	for _, account := range in.Accounts {
+		fmt.Fprintf(&key, "|%d:%s", len(account), account)
 	}
-	defer cur.Close(ctx)
-	var raw []rawBalance
-	if e = cur.All(ctx, &raw); e != nil {
+	raw, e := reqcache.Do(ctx, key.String(), func() ([]rawBalance, error) {
+		cur, err := db.Collection("journal").Aggregate(ctx, pipeline)
+		if err != nil {
+			return nil, err
+		}
+		defer cur.Close(ctx)
+		var rows []rawBalance
+		err = cur.All(ctx, &rows)
+		return rows, err
+	})
+	if e != nil {
 		return BalancesResult{}, e
 	}
 	if len(raw) > 5000 {

@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -183,5 +184,59 @@ func TestBalanceSeriesMatchesIndividualDates(t *testing.T) {
 	}
 	if _, err = sources.Ledger.BalanceSeries(ctx, p, []string{"2026-01-01", "2025-12-31"}, historyValuer{}); err == nil {
 		t.Fatal("unsorted dates accepted")
+	}
+}
+
+func TestBalanceReadMemoIsolation(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	ctx = reqcache.With(ctx)
+	reads.Store(0)
+	in := ledger.BalancesInput{At: "2026-01-01"}
+	var wg sync.WaitGroup
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, err := sources.Ledger.Balances(ctx, p, in, nil)
+			if err != nil {
+				errs <- err
+				return
+			}
+			if len(result.Rows) != 1 || result.Rows[0].Amounts[0].Value.String() != "20000" {
+				errs <- fmt.Errorf("unexpected balance: %v", result.Rows)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	if n := reads.Load(); n != 1 {
+		t.Fatalf("concurrent identical balances used %d reads", n)
+	}
+	grouped, err := sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: in.At, GroupBy: "commodity"}, nil)
+	if err != nil || len(grouped.Rows) != 1 || grouped.Rows[0].Key != "EUR" || reads.Load() != 1 {
+		t.Fatalf("grouped result: %v, %v, %d reads", grouped, err, reads.Load())
+	}
+	filtered, err := sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: in.At, Accounts: []string{"missing"}}, nil)
+	if err != nil || len(filtered.Rows) != 0 || reads.Load() != 2 {
+		t.Fatalf("filtered result: %v, %v, %d reads", filtered, err, reads.Load())
+	}
+	earlier, err := sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: "2025-12-31"}, nil)
+	if err != nil || len(earlier.Rows) != 0 || reads.Load() != 3 {
+		t.Fatalf("earlier result: %v, %v, %d reads", earlier, err, reads.Load())
+	}
+	other := p
+	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+	theirs, err := sources.Ledger.Balances(ctx, other, in, nil)
+	if err != nil || len(theirs.Rows) != 1 || theirs.Rows[0].Amounts[0].Value.String() != "1" || reads.Load() != 4 {
+		t.Fatalf("other user: %v, %v, %d reads", theirs, err, reads.Load())
+	}
+	grouped.Rows[0].Key = "changed"
+	again, err := sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: in.At, GroupBy: "commodity"}, nil)
+	if err != nil || again.Rows[0].Key != "EUR" || reads.Load() != 4 {
+		t.Fatalf("result isolation: %v, %v, %d reads", again, err, reads.Load())
 	}
 }
