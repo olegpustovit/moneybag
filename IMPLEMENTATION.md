@@ -284,3 +284,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `b5a09ae4ac07-20261030025144` passed its public health check and the service is active.
 
 - MCP console filters: `db_query`, `db_delete_rows` and `tags_set` now use the formula editor for their CEL `where` arguments. Database filter checks and suggestions follow the entered table ID; tag filters use the journal source. Desktop/mobile synthetic tests verified the source sent for live checks, submitted arguments for all three tools and `expr_eval`, and state reset on tool changes. The broader shell test and `make check` passed. The test mocks tool execution and formula checking; full SPA/P0 acceptance remains open.
+  Deployment: release `c4af167fe9bf-20261030025407` passed its public health check and the service is active.
