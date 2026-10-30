@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { keepPreviousData, useInfiniteQuery } from '@tanstack/react-query'
 import { RouteError } from '../features/telemetry/route-error'
 import { createFileRoute } from '@tanstack/react-router'
@@ -20,6 +21,15 @@ function open(g:ChangeGroup) {
   sourceRows:events.length ? {columns:['When','What'],rows:events.slice(0,50).map(e => [time(e.at),e.summary || verbFor(e.tool)])} : undefined,
   machine:[...(g.batch_id ? [{label:'Batch',value:g.batch_id}] : []),...events.slice(0,12).flatMap(e => [{label:'Tool',value:e.tool},{label:'Target',value:`${e.target?.coll ?? ''} ${e.target?.id ?? ''}`.trim()},{label:'Hash',value:e.hash},...(e.reason ? [{label:'Reason',value:e.reason,mono:false}] : [])])]}})
 }
+function Row({g}:{g:ChangeGroup}) {
+ const [more,setMore]=useState(false),events=g.events ?? []
+ return <li onClick={() => open(g)}>
+  <time dateTime={g.at}>{time(g.at)}</time>
+  <div className="what"><strong>{summaryOf(g)}</strong><small>{g.actor.label}{g.count>1 ? ` · ${g.count.toLocaleString('en-US')} changes together` : ''}{g.routine ? ' · Routine' : ''}{g.status==='failed' ? ' · Failed' : ''}</small>
+   {more && <ul className="evs">{events.slice(0,50).map(e => <li key={e.id}><time dateTime={e.at}>{time(e.at)}</time> {e.summary || verbFor(e.tool)}</li>)}{events.length>50 && <li>and {(events.length-50).toLocaleString('en-US')} more</li>}</ul>}</div>
+  <div className="acts" onClick={e => e.stopPropagation()}>{g.count>1 && <button type="button" className="tm-details-link" aria-expanded={more} onClick={() => setMore(!more)}>{more ? 'Hide' : 'Show'} each change</button>}<button type="button" className="tm-details-link" onClick={() => open(g)}>See what changed</button>{g.undoable && <button type="button" className="tm-details-link" onClick={() => askAgent(undoQuestion(g))}>Ask to undo</button>}</div>
+ </li>
+}
 function Changes() {
  const params=Route.useSearch(),navigate=Route.useNavigate(),set=(next:Partial<typeof params>) => {void navigate({search:old => ({...old,...next}),replace:true,resetScroll:false})}
  const from=params.since ? new Date(Date.now()-Number(params.since)*DAY).toISOString().slice(0,10) : undefined,q=[params.what,params.item].filter(Boolean).join(' ')
@@ -39,10 +49,6 @@ function Changes() {
    <label className="tm-check"><input type="checkbox" checked={!!params.routine} onChange={e => set({routine:e.target.checked || undefined})}/>Show routine updates</label>
   </form>
   {feed.isPending ? <RowsSkeleton rows={10}/> : feed.error ? <RouteError error={feed.error} reset={() => void feed.refetch()} title="Changes didn’t load"/> : !groups.length ? <Empty title="No changes here">{q || params.who ? 'Nothing matches these filters.' : 'When an agent or a person changes something, it appears here.'}</Empty>
-  : <div className="tm-feed">{[...days.entries()].map(([day,items]) => <section key={day}><h2>{dayHead(day)}</h2><ol>{items.map(g => <li key={g.id}>
-    <time dateTime={g.at}>{time(g.at)}</time>
-    <div className="what"><strong>{summaryOf(g)}</strong><small>{g.actor.label}{g.count>1 ? ` · ${g.count.toLocaleString('en-US')} changes together` : ''}{g.routine ? ' · Routine' : ''}{g.status==='failed' ? ' · Failed' : ''}</small></div>
-    <div className="acts"><button type="button" className="tm-details-link" onClick={() => open(g)}>See what changed</button>{g.undoable && <button type="button" className="tm-details-link" onClick={() => askAgent(undoQuestion(g))}>Ask to undo</button>}</div>
-   </li>)}</ol></section>)}{feed.hasNextPage && <div className="tm-more"><button type="button" className="tm-btn" disabled={feed.isFetchingNextPage} onClick={() => void feed.fetchNextPage()}>{feed.isFetchingNextPage ? 'Loading…' : 'Show earlier changes'}</button></div>}</div>}
+  : <div className="tm-feed">{[...days.entries()].map(([day,items]) => <section key={day}><h2>{dayHead(day)}</h2><ol>{items.map(g => <Row key={g.id} g={g}/>)}</ol></section>)}{feed.hasNextPage && <div className="tm-more"><button type="button" className="tm-btn" disabled={feed.isFetchingNextPage} onClick={() => void feed.fetchNextPage()}>{feed.isFetchingNextPage ? 'Loading…' : 'Show earlier changes'}</button></div>}</div>}
  </>
 }

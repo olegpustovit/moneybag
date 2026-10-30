@@ -8,7 +8,7 @@ import { Input } from '../components/ui/input'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
 import { deleteView, savedViewsQuery, settingsPost, settingsQuery, type Session } from '../lib/api'
 import { clearCached } from '../features/telemetry/cube-store'
-import { describePage } from '../features/telemetry/shell-store'
+import { describePage, searchKey } from '../features/telemetry/shell-store'
 import { RowsSkeleton, humanKey } from '../features/telemetry/page-bits'
 
 export const Route=createFileRoute('/_app/settings')({errorComponent:p => <RouteError {...p}/>,component:Settings})
@@ -49,7 +49,7 @@ function Account({session}:{session:Session}) {
 function SavedViews({session}:{session:Session}) {
  const client=useQueryClient(),views=useQuery(savedViewsQuery(session)),remove=useMutation({mutationFn:(id:string) => deleteView(session,id),onSuccess:() => client.invalidateQueries({queryKey:savedViewsQuery(session).queryKey})})
  if(!views.data?.length)return null
- return <section className="settings-section"><h2>Saved views</h2><p>Yours alone. Open them from search with ⌘K.</p><ul className="tm-list static">{views.data.map(v => <li key={v.id}><div><a className="n" href={`${v.page}?${new URLSearchParams(v.state ?? {})}`}>{v.name}</a><Button size="sm" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate(v.id)}>Delete</Button></div></li>)}</ul></section>
+ return <section className="settings-section"><h2>Saved views</h2><p>Yours alone. Open them from search with {searchKey}.</p><ul className="tm-list static">{views.data.map(v => <li key={v.id}><div><a className="n" href={`${v.page}?${new URLSearchParams(v.state ?? {})}`}>{v.name}</a><Button size="sm" variant="outline" disabled={remove.isPending} onClick={() => remove.mutate(v.id)}>Delete</Button></div></li>)}</ul></section>
 }
 function Settings() {
  const {session}=Route.useRouteContext(),data=useQuery(settingsQuery(session))

@@ -113,17 +113,17 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
      onKeyDown={e => {if(e.key==='Enter'){if(parsed?.ok){state.setText(draft!);setDraft(null);e.currentTarget.blur()}else if(draft===null)e.currentTarget.blur()}else if(e.key==='Escape'){setDraft(null);e.currentTarget.blur()}}}/>
     <div id={statusId} className={`tm-time-status${invalid ? ' err' : ''}`} aria-live="polite">{status}</div>
    </div>
-   <div className="tm-time-side">
-    <div className="tm-row">
-     <button type="button" className="tm-btn square" aria-label="Previous period" title="Previous period ( [ )" onClick={() => state.step(-1)}>←</button>
-     <button type="button" className="tm-btn square" aria-label="Next period" title="Next period ( ] )" onClick={() => state.step(1)}>→</button>
-     <button type="button" className="tm-btn" title="Zoom out ( z )" onClick={state.zoomOut}>Zoom out</button>
-     <button type="button" className="tm-btn" disabled={!state.canUndo} onClick={state.undo}>Undo zoom</button>
-    </div>
-    {!hideCompare && <div className="tm-row"><label className="tm-compare-label" htmlFor={compareId}>Compare to</label><select id={compareId} className="tm-btn tm-select" value={state.compare} onChange={e => state.setCompare(e.target.value as CompareMode)}><option value="previous_period">Previous period</option><option value="previous_year">Same period last year</option><option value="none">Nothing</option></select></div>}
+   <div className="tm-arrows">
+    <button type="button" className="tm-btn square" aria-label="Previous period" title="Previous period ( [ )" onClick={() => state.step(-1)}>←</button>
+    <button type="button" className="tm-btn square" aria-label="Next period" title="Next period ( ] )" onClick={() => state.step(1)}>→</button>
+   </div>
+   <div className="tm-presets" role="group" aria-label="Quick ranges">{list.map(p => <button key={p.text} type="button" className="tm-btn" aria-pressed={activePreset?.text===p.text} onClick={() => state.setText(p.text)}>{p.label}</button>)}</div>
+   <div className="tm-zoom">
+    <button type="button" className="tm-btn" title="Zoom out ( z )" onClick={state.zoomOut}>Zoom out</button>
+    <button type="button" className="tm-btn" disabled={!state.canUndo} onClick={state.undo}>Undo zoom</button>
+    {!hideCompare && <><label className="tm-compare-label" htmlFor={compareId}>Compare to</label><select id={compareId} className="tm-btn tm-select" value={state.compare} onChange={e => state.setCompare(e.target.value as CompareMode)}><option value="previous_period">Previous period</option><option value="previous_year">Same period last year</option><option value="none">Nothing</option></select></>}
    </div>
   </div>
-  <div className="tm-presets" role="group" aria-label="Quick ranges">{list.map(p => <button key={p.text} type="button" className="tm-btn" aria-pressed={activePreset?.text===p.text} onClick={() => state.setText(p.text)}>{p.label}</button>)}</div>
   {navigator && <HistoryNavigator bounds={bounds} range={state.range} onChange={(range,{final}) => state.setRange(range,{final})} xs={navigator.xs} values={navigator.values} bands={navigator.bands} label={navigator.label}/>}
  </section>
 }

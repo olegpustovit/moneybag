@@ -11,7 +11,7 @@ export function Sparkline({values,color='var(--c0)',label,height=30}:{values:Arr
 
 export type RankedRow={key:string;label:string;value:number;text:string;compare?:number;compareText?:string;color?:string;estimated?:boolean;note?:string}
 // Sorted by size with direct labels. Rows too small to read collapse into one line that expands on request.
-export function RankedBars({rows,onSelect,selectLabel='Filter by',collapseBelow=.01,maxRows=10,noun='items',barColor='var(--c0)',emptyText='Nothing to rank in this range.',ariaLabel}:{rows:RankedRow[];onSelect?:(key:string) => void;selectLabel?:string;collapseBelow?:number;maxRows?:number;noun?:string;barColor?:string;emptyText?:string;ariaLabel?:string}) {
+export function RankedBars({rows,onSelect,selectLabel='Filter by',collapseBelow=.01,maxRows=10,noun='items',barColor='var(--text3)',emptyText='Nothing to rank in this range.',ariaLabel}:{rows:RankedRow[];onSelect?:(key:string) => void;selectLabel?:string;collapseBelow?:number;maxRows?:number;noun?:string;barColor?:string;emptyText?:string;ariaLabel?:string}) {
  const [expanded,setExpanded]=useState(false)
  if(!rows.length)return <p className="tm-empty">{emptyText}</p>
  const sorted=[...rows].sort((a,b) => Math.abs(b.value)-Math.abs(a.value)),peak=Math.max(1e-9,...sorted.flatMap(r => [Math.abs(r.value),Math.abs(r.compare ?? 0)]))
