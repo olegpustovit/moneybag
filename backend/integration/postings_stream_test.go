@@ -15,6 +15,7 @@ import (
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -238,5 +239,99 @@ func TestBalanceReadMemoIsolation(t *testing.T) {
 	again, err := sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: in.At, GroupBy: "commodity"}, nil)
 	if err != nil || again.Rows[0].Key != "EUR" || reads.Load() != 4 {
 		t.Fatalf("result isolation: %v, %v, %d reads", again, err, reads.Load())
+	}
+}
+
+func TestBalanceSeriesSharesCurrentBalance(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	dates := []string{"2025-12-31", "2026-01-01"}
+	wantBalance, err := sources.Ledger.Balances(ctx, p, ledger.BalancesInput{At: dates[1]}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSeries, err := sources.Ledger.BalanceSeries(ctx, p, dates, historyValuer{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := ledger.WithBalanceSeries(reqcache.With(ctx), dates)
+	reads.Store(0)
+	var gotBalance ledger.BalancesResult
+	var gotSeries []ledger.BalancesResult
+	var balanceErr, seriesErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		gotBalance, balanceErr = sources.Ledger.Balances(shared, p, ledger.BalancesInput{At: dates[1]}, nil)
+	}()
+	go func() {
+		defer wg.Done()
+		gotSeries, seriesErr = sources.Ledger.BalanceSeries(shared, p, dates, historyValuer{})
+	}()
+	wg.Wait()
+	got, _ := json.Marshal([]any{gotBalance, gotSeries})
+	want, _ := json.Marshal([]any{wantBalance, wantSeries})
+	if balanceErr != nil || seriesErr != nil || string(got) != string(want) {
+		t.Fatalf("shared balance differs: %v / %v", balanceErr, seriesErr)
+	}
+	if n := reads.Load(); n != 2 {
+		t.Fatalf("shared series and balance used %d reads, expected one aggregate and one account read", n)
+	}
+	gotBalance.Rows[0].Amounts[0].Value = ledger.MustDecimal("999")
+	again, err := sources.Ledger.Balances(shared, p, ledger.BalancesInput{At: dates[1]}, nil)
+	if err != nil || again.Rows[0].Amounts[0].Value.String() != "20000" || reads.Load() != 2 {
+		t.Fatal("shared results were mutable")
+	}
+	other := p
+	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+	theirs, err := sources.Ledger.Balances(shared, other, ledger.BalancesInput{At: dates[1]}, nil)
+	if err != nil || len(theirs.Rows) != 1 || theirs.Rows[0].Amounts[0].Value.String() != "1" || reads.Load() != 3 {
+		t.Fatal("shared balances crossed user boundaries")
+	}
+	filtered, err := sources.Ledger.Balances(shared, p, ledger.BalancesInput{At: dates[1], Accounts: []string{"missing"}}, nil)
+	if err != nil || len(filtered.Rows) != 0 || reads.Load() != 4 {
+		t.Fatal("filtered balance did not use its own read")
+	}
+	empty := p
+	empty.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+	emptyBalance, err := sources.Ledger.Balances(shared, empty, ledger.BalancesInput{At: dates[1]}, nil)
+	if err != nil || len(emptyBalance.Rows) != 0 || reads.Load() != 5 {
+		t.Fatal("empty balance did not reuse its series read")
+	}
+	emptySeries, err := sources.Ledger.BalanceSeries(shared, empty, dates, historyValuer{})
+	if err != nil || len(emptySeries) != len(dates) || reads.Load() != 6 {
+		t.Fatal("empty balance series did not reuse its journal read")
+	}
+	denied := p
+	denied.Scopes = nil
+	if _, err := sources.Ledger.Balances(shared, denied, ledger.BalancesInput{At: dates[1]}, nil); err == nil {
+		t.Fatal("shared result bypassed authorization")
+	}
+}
+
+func TestDashboardSharesAccountsAndBalanceHistory(t *testing.T) {
+	ctx, p, _, _ := postingsFixture(t)
+	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
+	var journalReads atomic.Int64
+	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
+		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
+			journalReads.Add(1)
+		}
+	}}
+	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")).SetMonitor(monitor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
+	book := ledger.NewService(ledger.NewMongoRepository(db), nil)
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := dashboard.Engine{Expr: expr, Reader: &dashboard.Sources{Ledger: book, Valuer: historyValuer{}}}
+	result, err := engine.Evaluate(ctx, p, "size(data.accounts) + size(data.history)", map[string]dashboard.Query{"accounts": {From: "accounts"}, "history": {From: "balance_history"}}, nil)
+	if err != nil || result.Value == nil || journalReads.Load() != 1 {
+		t.Fatalf("dashboard used %d journal aggregates: %v", journalReads.Load(), err)
 	}
 }

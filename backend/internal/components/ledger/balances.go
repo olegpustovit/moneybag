@@ -78,18 +78,34 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 	for _, account := range in.Accounts {
 		fmt.Fprintf(&key, "|%d:%s", len(account), account)
 	}
-	raw, e := reqcache.Do(ctx, key.String(), func() ([]rawBalance, error) {
-		cur, err := db.Collection("journal").Aggregate(ctx, pipeline)
-		if err != nil {
-			return nil, err
+	var raw []rawBalance
+	usedSeries := false
+	dates, hinted := ctx.Value(balanceSeriesKey{}).([]string)
+	if hinted && len(dates) > 0 && len(in.Accounts) == 0 && in.At == dates[len(dates)-1] {
+		var series [][]rawBalance
+		series, e = s.balanceSeriesRows(ctx, p, dates)
+		if e == nil {
+			raw = series[len(series)-1]
+			usedSeries = true
 		}
-		defer cur.Close(ctx)
-		var rows []rawBalance
-		err = cur.All(ctx, &rows)
-		return rows, err
-	})
-	if e != nil {
-		return BalancesResult{}, e
+		if e != nil && ctx.Err() != nil {
+			return BalancesResult{}, e
+		}
+	}
+	if !usedSeries {
+		raw, e = reqcache.Do(ctx, key.String(), func() ([]rawBalance, error) {
+			cur, err := db.Collection("journal").Aggregate(ctx, pipeline)
+			if err != nil {
+				return nil, err
+			}
+			defer cur.Close(ctx)
+			var rows []rawBalance
+			err = cur.All(ctx, &rows)
+			return rows, err
+		})
+		if e != nil {
+			return BalancesResult{}, e
+		}
 	}
 	if len(raw) > 5000 {
 		return BalancesResult{}, fmt.Errorf("balance result exceeds 5000 rows")

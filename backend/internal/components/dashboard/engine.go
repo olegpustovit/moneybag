@@ -539,6 +539,19 @@ func (x *execution) evalAt(field, expr string, row map[string]any) (any, error) 
 	return v, nil
 }
 
+func shareBalanceHistory(ctx context.Context, data map[string]Query) context.Context {
+	var hasAccounts, hasHistory bool
+	for _, q := range data {
+		hasAccounts = hasAccounts || q.From == "accounts"
+		hasHistory = hasHistory || q.From == "balance_history"
+	}
+	if !hasAccounts || !hasHistory {
+		return ctx
+	}
+	dates := balanceHistoryDates(time.Now())
+	return context.WithValue(ledger.WithBalanceSeries(ctx, dates), balanceDatesKey{}, dates)
+}
+
 func shareBudgetMonths(ctx context.Context, data map[string]Query, params map[string]any) context.Context {
 	var hasLines, hasMonths bool
 	for _, q := range data {
@@ -571,7 +584,7 @@ func (e *Engine) Execute(ctx context.Context, p principal.Principal, spec Spec) 
 	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
-	ctx = context.WithValue(shareBudgetMonths(ctx, spec.Data, spec.Params), paramsKey{}, spec.Params)
+	ctx = context.WithValue(shareBalanceHistory(shareBudgetMonths(ctx, spec.Data, spec.Params), spec.Data), paramsKey{}, spec.Params)
 	result := Rendered{Values: map[string]any{}, Validation: Validation{OK: true, Errors: []Issue{}, Warnings: []Issue{}}}
 	issue := func(path string, err error) {
 		i := Issue{Path: path, Msg: err.Error()}
@@ -884,7 +897,7 @@ func (e *Engine) Evaluate(ctx context.Context, p principal.Principal, expr strin
 	ctx = ledger.WithAccountCache(rates.WithQuoteCache(reqcache.With(ctx))) // sources, quotes and accounts are read once per request
 	ctx, cancel := context.WithTimeout(ctx, evalBudget)
 	defer cancel()
-	ctx = context.WithValue(shareBudgetMonths(ctx, data, params), paramsKey{}, params)
+	ctx = context.WithValue(shareBalanceHistory(shareBudgetMonths(ctx, data, params), data), paramsKey{}, params)
 	spec := Spec{Data: data, Computed: map[string]string{"result": expr}, Params: params}
 	raw, err := json.Marshal(spec)
 	if err != nil {

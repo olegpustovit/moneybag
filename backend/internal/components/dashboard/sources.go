@@ -139,6 +139,20 @@ func cloneSourceValue(v any) any {
 	}
 }
 
+type balanceDatesKey struct{}
+
+func balanceHistoryDates(today time.Time) []string {
+	dates := make([]string, 0, 12)
+	for i := 11; i >= 0; i-- {
+		end := time.Date(today.Year(), today.Month()-time.Month(i)+1, 0, 0, 0, 0, 0, time.UTC)
+		if i == 0 {
+			end = today
+		}
+		dates = append(dates, end.Format("2006-01-02"))
+	}
+	return dates
+}
+
 func (s *Sources) rows(ctx context.Context, p principal.Principal, source string) ([]map[string]any, error) {
 	params, _ := ctx.Value(paramsKey{}).(map[string]any)
 	month, _ := params["month"].(string)
@@ -334,15 +348,9 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 	case strings.HasPrefix(source, "view:"):
 		return s.viewRows(ctx, p, strings.TrimPrefix(source, "view:"))
 	case source == "balance_history":
-		// Month-end USD totals for the last 12 months (today for the current month).
-		today := time.Now()
-		dates := make([]string, 0, 12)
-		for i := 11; i >= 0; i-- {
-			end := time.Date(today.Year(), today.Month()-time.Month(i)+1, 0, 0, 0, 0, 0, time.UTC)
-			if i == 0 {
-				end = today
-			}
-			dates = append(dates, end.Format("2006-01-02"))
+		dates, _ := ctx.Value(balanceDatesKey{}).([]string)
+		if dates == nil {
+			dates = balanceHistoryDates(time.Now())
 		}
 		history, e := s.Ledger.BalanceSeries(ctx, p, dates, s.Valuer)
 		if e != nil {
