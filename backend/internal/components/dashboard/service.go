@@ -15,6 +15,7 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+	"log/slog"
 	"regexp"
 	"strconv"
 	"strings"
@@ -146,6 +147,9 @@ func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string
 	if errors.Is(e, mongo.ErrNoDocuments) {
 		e = principal.ErrNotFound
 	}
+	if e != nil {
+		return GetResult{}, e
+	}
 	status := "superseded"
 	if n == h.DraftVersion {
 		status = "draft"
@@ -160,6 +164,23 @@ func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string
 	result := GetResult{Spec: v.Spec, Version: n, Status: status, Author: v.Author, Note: v.Note}
 	if status == "published" {
 		result.PublishedAt = h.PublishedAt
+		if result.PublishedAt == nil && s.audit != nil {
+			event, err := s.audit.LatestCompleted(ctx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id})
+			if err != nil {
+				if ctx.Err() != nil {
+					return GetResult{}, ctx.Err()
+				}
+				slog.Warn("legacy dashboard publication time unavailable", "error", err)
+			} else if event != nil && event.Actor == result.Author {
+				var published struct {
+					Version int `json:"published_version"`
+				}
+				if json.Unmarshal(event.Outcome.After, &published) == nil && published.Version == n && !event.Outcome.At.IsZero() {
+					at := event.Outcome.At
+					result.PublishedAt = &at
+				}
+			}
+		}
 	}
 	return result, e
 }

@@ -432,8 +432,12 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if _, e = db.Collection("dashboards").UpdateOne(ctx, bson.M{"user_id": pa.UserID, "id": "undo-publish"}, bson.M{"$unset": bson.M{"published_at": ""}}); e != nil {
 		t.Fatal(e)
 	}
-	if legacy, err := dash.Get(ctx, pa, "undo-publish", "published"); err != nil || legacy.PublishedAt != nil {
-		t.Fatal("legacy publication has no invented timestamp", legacy.PublishedAt, err)
+	legacyEvents, err := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_publish", Target: "undo-publish", Limit: 1})
+	if err != nil || len(legacyEvents.Events) != 1 || legacyEvents.Events[0].Outcome == nil {
+		t.Fatal("legacy publication event", legacyEvents, err)
+	}
+	if legacy, err := dash.Get(ctx, pa, "undo-publish", "published"); err != nil || legacy.PublishedAt == nil || !legacy.PublishedAt.Equal(legacyEvents.Events[0].Outcome.At) {
+		t.Fatal("legacy publication time", legacy.PublishedAt, err)
 	}
 	edited, e := dash.Add(ctx, pa, dashboard.AddInput{DashboardID: "undo-publish", Component: dashboard.Component{ID: "note", Type: "text", MD: "v2"}})
 	if e != nil {

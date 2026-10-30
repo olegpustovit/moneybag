@@ -224,6 +224,42 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 }
 
 // HasLaterTarget reports whether a later write was recorded for the same target.
+// LatestCompleted finds the newest completed attempt for a specific owned target.
+func (s *Service) LatestCompleted(ctx context.Context, p principal.Principal, tool string, target Target) (*Event, error) {
+	if err := p.Require("ledger:read"); err != nil {
+		return nil, err
+	}
+	db, err := mongodb.Shared(s.repo.DB, p)
+	if err != nil {
+		return nil, err
+	}
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{"user_id": p.UserID, "tool": tool, "target.coll": target.Collection, "target.id": target.ID}}},
+		{{Key: "$sort", Value: bson.D{{Key: "seq", Value: -1}}}},
+		{{Key: "$lookup", Value: bson.M{"from": "audit_outcomes", "localField": "_id", "foreignField": "_id", "as": "result"}}},
+		{{Key: "$unwind", Value: "$result"}},
+		{{Key: "$match", Value: bson.M{"result.user_id": p.UserID, "result.status": "completed"}}},
+		{{Key: "$limit", Value: 1}},
+	}
+	cursor, err := db.Collection("events").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(2))
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+	if !cursor.Next(ctx) {
+		return nil, cursor.Err()
+	}
+	var row struct {
+		Event  `bson:",inline"`
+		Result Outcome `bson:"result"`
+	}
+	if err := cursor.Decode(&row); err != nil {
+		return nil, err
+	}
+	row.Event.Outcome = &row.Result
+	return &row.Event, nil
+}
+
 // shortcut: failed or interrupted attempts also block undo, upgrade when outcomes can be checked efficiently.
 func (s *Service) HasLaterTarget(ctx context.Context, p principal.Principal, target Target, seq int64) (bool, error) {
 	if err := p.Require("ledger:read"); err != nil {
