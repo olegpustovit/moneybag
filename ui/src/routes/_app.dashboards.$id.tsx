@@ -35,9 +35,9 @@ export const Route = createFileRoute('/_app/dashboards/$id')({
   errorComponent: DashboardError,
   component: Dashboard,
 })
-function DashboardError({ reset }: { reset: () => void }) {
+function DashboardError({ error, reset }: { error: unknown; reset: () => void }) {
   const router = useRouter()
-  return <section className="dashboard-error"><h1>Could not load this dashboard</h1><p>It may have been removed or you may not have access.</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section>
+  return <section className="dashboard-error"><h1>Could not load this dashboard</h1><p>{error instanceof Error ? error.message : String(error)}</p><Button onClick={() => { reset(); void router.invalidate() }}>Try again</Button></section>
 }
 function Dashboard() {
   const { session } = Route.useRouteContext()
