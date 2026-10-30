@@ -63,4 +63,16 @@ func TestDashboardPatchPreviewWritesNothing(t *testing.T) {
 	if _, err := service.PatchPreview(ctx, p, "apply", missing); err == nil || !strings.Contains(err.Error(), "read valid paths") {
 		t.Fatalf("missing path: %v", err)
 	}
+	stale, _ := json.Marshal([]map[string]any{{"op": "test", "path": "/version", "value": 1}, {"op": "replace", "path": "/title", "value": "Stale"}})
+	if _, err := service.Patch(ctx, p, "apply", stale); err == nil || !strings.Contains(err.Error(), "the draft changed") {
+		t.Fatalf("stale if_version accepted: %v", err)
+	}
+	current, _ := json.Marshal([]map[string]any{{"op": "test", "path": "/version", "value": 2}, {"op": "replace", "path": "/title", "value": "Edited"}})
+	if _, err := service.Patch(ctx, p, "apply", current); err != nil {
+		t.Fatalf("current if_version rejected: %v", err)
+	}
+	edited, err := service.Get(ctx, p, "apply", "")
+	if err != nil || edited.Spec.Title != "Edited" {
+		t.Fatalf("current write missing: %+v %v", edited, err)
+	}
 }
