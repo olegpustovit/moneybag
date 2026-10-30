@@ -298,7 +298,6 @@ th { color:var(--text2); font-weight:600; }
 .scenario-panel { border:1px solid var(--border); padding:1.25rem; margin-bottom:1.5rem; }
 .scenario-panel h2 { font-size:1.05rem; font-weight:600; }
 .scenario-panel p { color:var(--muted-foreground); margin:.5rem 0; }
-.scenario-table { position:relative; }
 .scenario-item { display:flex; justify-content:space-between; padding:.5rem 0; }
 .scenario-dialog { max-width:44rem; max-height:90vh; overflow:auto; border-radius:0; }
 .scenario-editor { display:flex; flex-direction:column; gap:.75rem; }
