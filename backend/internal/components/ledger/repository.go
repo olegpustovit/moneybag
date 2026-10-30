@@ -3,6 +3,7 @@ package ledger
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
@@ -243,25 +244,65 @@ func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (
 	})
 }
 
+type sharedPostedKey struct{}
+
+// WithSharedPostedStream allows identical journal sources to reuse bounded raw documents for one read request.
+func WithSharedPostedStream(ctx context.Context) context.Context {
+	return context.WithValue(ctx, sharedPostedKey{}, true)
+}
+
 // PostedStream reads posted journal entries without paging or joining tags.
 func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principal, from, to string, fn func(Entry) error) error {
-	db, err := r.db(p)
-	if err != nil {
-		return err
+	if shared, _ := ctx.Value(sharedPostedKey{}).(bool); shared {
+		db, err := r.db(p)
+		if err != nil {
+			return err
+		}
+		key := fmt.Sprintf("posted-raw|%p|%d:%s", db, len(p.UserID), p.UserID)
+		raw, err := reqcache.Do(ctx, key, func() ([]bson.Raw, error) {
+			cur, err := r.postedCursor(ctx, p, "", "")
+			if err != nil {
+				return nil, err
+			}
+			defer cur.Close(ctx)
+			var rows []bson.Raw
+			size := 0
+			for cur.Next(ctx) {
+				size += len(cur.Current)
+				// shortcut: cache at most 32 MiB or 250,000 entries; fall back to streaming for larger journals.
+				if size > 32<<20 || len(rows) >= 250000 {
+					return nil, errors.New("shared journal exceeds cache limit")
+				}
+				rows = append(rows, append(bson.Raw(nil), cur.Current...))
+			}
+			return rows, cur.Err()
+		})
+		if err == nil {
+			for _, doc := range raw {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				if from != "" || to != "" {
+					date, ok := doc.Lookup("date").StringValueOK()
+					if !ok || from != "" && date < from || to != "" && date > to {
+						continue
+					}
+				}
+				var entry Entry
+				if err := bson.Unmarshal(doc, &entry); err != nil {
+					return err
+				}
+				if err := fn(entry); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if ctx.Err() != nil {
+			return err
+		}
 	}
-	filter := bson.M{"user_id": p.UserID, "status": "posted"}
-	dates := bson.M{}
-	if from != "" {
-		dates["$gte"] = from
-	}
-	if to != "" {
-		dates["$lte"] = to
-	}
-	if len(dates) > 0 {
-		filter["date"] = dates
-	}
-	pipeline := bson.A{bson.M{"$match": filter}, bson.M{"$project": bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}}}
-	cur, err := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(250000))
+	cur, err := r.postedCursor(ctx, p, from, to)
 	if err != nil {
 		return err
 	}
@@ -276,6 +317,26 @@ func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principa
 		}
 	}
 	return cur.Err()
+}
+
+func (r *MongoRepository) postedCursor(ctx context.Context, p principal.Principal, from, to string) (*mongo.Cursor, error) {
+	db, err := r.db(p)
+	if err != nil {
+		return nil, err
+	}
+	filter := bson.M{"user_id": p.UserID, "status": "posted"}
+	dates := bson.M{}
+	if from != "" {
+		dates["$gte"] = from
+	}
+	if to != "" {
+		dates["$lte"] = to
+	}
+	if len(dates) > 0 {
+		filter["date"] = dates
+	}
+	pipeline := bson.A{bson.M{"$match": filter}, bson.M{"$project": bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}}}
+	return db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(250000))
 }
 
 func (r *MongoRepository) tagOverlays(ctx context.Context, p principal.Principal) (map[string][]string, error) {

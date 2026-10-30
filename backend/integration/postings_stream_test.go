@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -333,5 +334,138 @@ func TestDashboardSharesAccountsAndBalanceHistory(t *testing.T) {
 	result, err := engine.Evaluate(ctx, p, "size(data.accounts) + size(data.history)", map[string]dashboard.Query{"accounts": {From: "accounts"}, "history": {From: "balance_history"}}, nil)
 	if err != nil || result.Value == nil || journalReads.Load() != 1 {
 		t.Fatalf("dashboard used %d journal aggregates: %v", journalReads.Load(), err)
+	}
+}
+
+func TestPostedSourcesShareJournal(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	digest := func(ctx context.Context, p principal.Principal, from, to string, effective, mutate bool) (string, int, error) {
+		hash := sha256.New()
+		encoder := json.NewEncoder(hash)
+		n := 0
+		err := sources.Ledger.PostedStream(ctx, p, from, to, effective, func(entry ledger.Entry) error {
+			if err := encoder.Encode(entry); err != nil {
+				return err
+			}
+			n++
+			if mutate {
+				if len(entry.Postings) > 0 {
+					entry.Postings[0].Account = "modified"
+				}
+				if len(entry.Tags) > 0 {
+					entry.Tags[0] = "modified"
+				}
+				if len(entry.Links) > 0 {
+					entry.Links[0].ID = "modified"
+				}
+			}
+			return nil
+		})
+		return fmt.Sprintf("%x", hash.Sum(nil)), n, err
+	}
+	full, fullCount, err := digest(ctx, p, "", "", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	effective, effectiveCount, err := digest(ctx, p, "2026-01-01", "2026-01-01", true, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared := ledger.WithSharedPostedStream(reqcache.With(ctx))
+	reads.Store(0)
+	var wg sync.WaitGroup
+	var a, b string
+	var an, bn int
+	var ae, be error
+	wg.Add(2)
+	go func() { defer wg.Done(); a, an, ae = digest(shared, p, "", "", false, true) }()
+	go func() { defer wg.Done(); b, bn, be = digest(shared, p, "2026-01-01", "2026-01-01", true, false) }()
+	wg.Wait()
+	if ae != nil || be != nil || a != full || b != effective || an != fullCount || bn != effectiveCount {
+		t.Fatalf("shared stream differs: %v / %v", ae, be)
+	}
+	if n := reads.Load(); n != 3 {
+		t.Fatalf("shared streams used %d reads, expected journal, reversals and tags", n)
+	}
+	again, count, err := digest(shared, p, "", "", false, false)
+	if err != nil || again != full || count != fullCount || reads.Load() != 3 {
+		t.Fatal("callback mutation leaked into the shared stream")
+	}
+	_, count, err = digest(shared, p, "2026-01-02", "2026-01-31", false, false)
+	if err != nil || count != 0 || reads.Load() != 3 {
+		t.Fatal("date filter was not preserved")
+	}
+	other := p
+	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
+	_, count, err = digest(shared, other, "", "", false, false)
+	if err != nil || count != 1 {
+		t.Fatal("shared stream crossed user boundaries")
+	}
+	denied := p
+	denied.Scopes = nil
+	if _, _, err = digest(shared, denied, "", "", false, false); err == nil {
+		t.Fatal("shared stream bypassed authorization")
+	}
+	n := 0
+	err = sources.Ledger.PostedStream(shared, p, "", "", false, func(ledger.Entry) error { n++; return fmt.Errorf("synthetic callback failure") })
+	if err == nil || n != 1 {
+		t.Fatal("callback error was not propagated")
+	}
+}
+
+func TestDashboardSharesJournalAndPostings(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := dashboard.Engine{Expr: expr, Reader: sources}
+	data := map[string]dashboard.Query{"journal": {From: "journal", Agg: map[string]string{"n": "count()"}}, "postings": {From: "postings", Agg: map[string]string{"n": "count()"}}}
+	reads.Store(0)
+	result, err := engine.Evaluate(ctx, p, "size(data.journal) + size(data.postings)", data, nil)
+	if err != nil || result.Value == nil || reads.Load() != 4 {
+		t.Fatalf("dashboard used %d reads: %v", reads.Load(), err)
+	}
+}
+
+func TestPostedStreamLargeCacheFallback(t *testing.T) {
+	ctx, p, sources, reads := postingsFixture(t)
+	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
+	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Disconnect(context.Background())
+	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
+	p.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
+	text := strings.Repeat("x", 1<<20)
+	docs := make([]any, 33)
+	for i := range docs {
+		date := "2025-01-01"
+		if i == 0 {
+			date = "2026-01-01"
+		}
+		docs[i] = ledger.Entry{ID: fmt.Sprintf("large-%d", i), UserID: p.UserID, Date: date, Seq: int64(i + 1), Status: "posted", Kind: "entry", Payee: text}
+	}
+	if _, err = db.Collection("journal").InsertMany(ctx, docs); err != nil {
+		t.Fatal(err)
+	}
+	shared := ledger.WithSharedPostedStream(reqcache.With(ctx))
+	reads.Store(0)
+	for i := 0; i < 2; i++ {
+		n := 0
+		err := sources.Ledger.PostedStream(shared, p, "2026-01-01", "2026-01-01", false, func(entry ledger.Entry) error {
+			n++
+			if entry.ID != "large-0" || len(entry.Payee) != len(text) {
+				return fmt.Errorf("wrong fallback entry")
+			}
+			return nil
+		})
+		if err != nil || n != 1 {
+			t.Fatalf("fallback %d failed: %v", i, err)
+		}
+	}
+	if reads.Load() < 4 {
+		t.Fatalf("large journal did not fall back to streaming: %d reads", reads.Load())
 	}
 }

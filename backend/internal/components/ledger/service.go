@@ -252,7 +252,7 @@ func (s *Service) PostedStream(ctx context.Context, p principal.Principal, from,
 			return nil
 		}
 		if overlay, ok := tags[entry.ID]; ok && overlay != nil {
-			entry.Tags = overlay
+			entry.Tags = slices.Clone(overlay)
 		}
 		return fn(entry)
 	})
