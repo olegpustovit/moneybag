@@ -259,8 +259,8 @@ i.tm-dash { width:14px; height:0; border-top:2px dashed var(--text3); background
  .tm-time-status { display:none; }
  .tm-time-entry input { flex:1 1 auto; font-size:16px; }
  .tm-arrows { grid-column:2; grid-row:1; }
- .tm-zoom { grid-column:1 / -1; grid-row:3; }
- .tm-zoom .tm-select { flex:1; min-width:0; }
+ .tm-zoom { grid-column:1 / -1; grid-row:3; flex-wrap:wrap; }
+ .tm-zoom .tm-select { flex:1 1 150px; min-width:0; }
  .tm-btn, .tm-time .tm-arrows .tm-btn, .tm-time .tm-zoom .tm-btn { height:36px; }
  .tm-presets { grid-column:1 / -1; grid-row:2; flex-wrap:nowrap; overflow-x:auto; scroll-snap-type:x proximity; overscroll-behavior-x:contain; scrollbar-width:none; }
  .tm-presets .tm-btn { flex:none; height:32px; padding:0 10px; scroll-snap-align:start; }
