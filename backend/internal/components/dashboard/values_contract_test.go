@@ -78,7 +78,7 @@ func TestTemplateComponentValuesContract(t *testing.T) {
 	}
 	for _, mark := range []string{"bar", "line", "area", "stack", "donut"} {
 		chart := values["chart-"+mark]
-		if chart["type"] != "chart" || chart["mark"] != mark || len(chart["points"].([]any)) != 2 || chart["y_format"] != "usd0" || mark != "donut" && chart["rule"].(map[string]any)["y"] != float64(15) {
+		if chart["type"] != "chart" || chart["mark"] != mark || len(chart["points"].([]any)) != 2 || chart["points"].([]any)[0].(map[string]any)["y_text"] != "$20" || chart["y_format"] != "usd0" || mark != "donut" && chart["rule"].(map[string]any)["y"] != float64(15) {
 			t.Fatal(chart)
 		}
 	}
@@ -103,6 +103,31 @@ func TestSparklineValidation(t *testing.T) {
 		if !tc.valid && (len(out.Validation.Errors) == 0 || out.Validation.Errors[0].Field != "sparkline") {
 			t.Fatalf("missing sparkline error location: %+v", out.Validation)
 		}
+	}
+}
+
+func TestChartNumberRounding(t *testing.T) {
+	for _, tc := range []struct {
+		value        float64
+		format, want string
+	}{
+		{2.5, "int", "2"}, {3.5, "int", "4"}, {-2.5, "int", "−2"}, {2.675, "usd", "$2.67"}, {1.005, "eur", "€1.00"}, {-0.0001, "eur", "€−0.00"},
+	} {
+		if got := format(tc.value, tc.format); got != tc.want {
+			t.Fatalf("format(%v, %s) = %s, want %s", tc.value, tc.format, got, tc.want)
+		}
+	}
+	expr, err := expressions.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := (&Engine{Expr: expr, Reader: fixtureReader{}}).Execute(context.Background(), principal.Principal{}, Spec{Data: map[string]Query{"points": {From: "range", N: "1", Derive: map[string]string{"amount": "2.5"}}}, Pages: []Page{{ID: "main"}}, Components: []Component{{ID: "c", Type: "chart", Mark: "bar", Rows: "points", Format: "int", Encoding: &Encoding{X: Axis{Field: "i"}, Y: Axis{Field: "amount"}}}}})
+	if err != nil || !out.Validation.OK {
+		t.Fatalf("chart: %v %+v", err, out.Validation)
+	}
+	points := out.Values["c"].(map[string]any)["points"].([]chartPoint)
+	if len(points) != 1 || points[0].Y != 2.5 || points[0].YText != "2" {
+		t.Fatalf("chart value: %+v", points)
 	}
 }
 

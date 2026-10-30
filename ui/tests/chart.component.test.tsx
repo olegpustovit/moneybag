@@ -11,6 +11,13 @@ vi.mock('recharts', () => {
 })
 afterEach(() => { cleanup(); localStorage.clear() })
 
+it('shows the server-formatted chart value in its data table', () => {
+ const value={type:'chart' as const,title:'Rounding',mark:'line' as const,x:{field:'date',kind:'date'},y_format:'int',series:[{name:'',color_index:0}],points:[{x:'2024-01-01',series:'',y:2.5,y_text:'Server rounded value'}]}
+ render(<DashboardChart value={value}/>)
+ fireEvent.click(screen.getByRole('button',{name:'Table'}))
+ expect(within(screen.getByRole('table')).getByText('Server rounded value',{exact:true})).toBeTruthy()
+})
+
 it('keeps series colors and filters chart-table rows when toggled', () => {
  const value={type:'chart' as const,title:'Test chart',mark:'line' as const,x:{field:'date',kind:'date'},y_format:'number',series:[{name:'Alpha',color_index:0},{name:'Beta',color_index:1}],points:[{x:'2024-01-01',series:'Alpha',y:1},{x:'2024-01-01',series:'Beta',y:2}]}
  render(<DashboardChart value={value}/>)

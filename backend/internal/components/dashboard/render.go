@@ -421,6 +421,7 @@ func (x *execution) render(c Component) (string, any, error) {
 type chartPoint struct {
 	X      string  `json:"x"`
 	Y      float64 `json:"y"`
+	YText  string  `json:"y_text"`
 	Series string  `json:"series"`
 }
 
@@ -511,7 +512,7 @@ func (x *execution) chart(c Component) (string, any, error) {
 			}
 			seriesName = fmt.Sprint(v)
 		}
-		p := chartPoint{X: fmt.Sprint(v), Y: n, Series: seriesName}
+		p := chartPoint{X: fmt.Sprint(v), Y: n, YText: format(n, c.Format), Series: seriesName}
 		points = append(points, p)
 		if !byX[p.X] {
 			categories = append(categories, p.X)

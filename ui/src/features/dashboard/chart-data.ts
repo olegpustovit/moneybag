@@ -14,14 +14,23 @@ export function journalFilter(axis:ChartValue['x'],x:string):{from?:string;to?:s
 }
 export function chartRows(points:ChartValue['points'],series:ChartValue['series']):ChartRow[] {
  const rows:ChartRow[]=[],byX=new Map<string,ChartRow[]>(),indices=new Map(series.map((item,index) => [item.name,index]))
- for(const point of points){const key=`s${indices.get(point.series) ?? 0}`;let bucket=byX.get(point.x);if(!bucket){bucket=[];byX.set(point.x,bucket)}let row=bucket.findLast(item => item[key]===undefined);if(!row){row={x:point.x};bucket.push(row);rows.push(row)}row[key]=point.y}
+ for(const point of points){const index=indices.get(point.series) ?? 0,key=`s${index}`;let bucket=byX.get(point.x);if(!bucket){bucket=[];byX.set(point.x,bucket)}let row=bucket.findLast(item => item[key]===undefined);if(!row){row={x:point.x};bucket.push(row);rows.push(row)}row[key]=point.y;if(point.y_text!==undefined)row[`t${index}`]=point.y_text}
  return rows
 }
 export function previousValue(rows:ChartRow[],index:number,key:string):number|undefined {for(let i=index-1;i>=0;i--){const value=rows[i][key];if(typeof value==='number')return value}return undefined}
 export function chartNumber(value:number,format:string):string {
  const digits=format==='usd0' || format==='eur0' || format==='int' || format==='pct0' ? 0 : format==='pct' || format==='mo' ? 1 : format==='usd' || format==='eur' ? 2 : Number.isInteger(value) ? 0 : 2
- const number=new Intl.NumberFormat('en-US',{minimumFractionDigits:digits,maximumFractionDigits:digits}).format(value).replace('-', '−')
- return `${format.startsWith('usd') || format==='USD' ? '$' : format.startsWith('eur') || format==='EUR' ? '€' : ''}${number}${format.startsWith('pct') ? '%' : format==='mo' ? ' mo' : ''}`
+ if(!Number.isFinite(value))return String(value)
+ // Match Go's binary float rounding for derived totals and deltas.
+ const view=new DataView(new ArrayBuffer(8));view.setFloat64(0,Math.abs(value))
+ const high=view.getUint32(0),exponent=(high>>>20)&0x7ff,fraction=(BigInt(high&0xfffff)<<32n)|BigInt(view.getUint32(4))
+ const mantissa=exponent===0 ? fraction : (1n<<52n)|fraction,shift=exponent===0 ? -1074 : exponent-1023-52
+ let scaled=mantissa*10n**BigInt(digits)
+ if(shift>=0)scaled<<=BigInt(shift)
+ else {const divisor=1n<<BigInt(-shift),quotient=scaled/divisor,remainder=scaled%divisor;scaled=quotient+(remainder*2n>divisor || remainder*2n===divisor && quotient%2n===1n ? 1n : 0n)}
+ const raw=scaled.toString().padStart(digits+1,'0'),whole=digits ? raw.slice(0,-digits) : raw,decimal=digits ? `.${raw.slice(-digits)}` : ''
+ const number=`${value<0 ? '−' : Object.is(value,-0) ? '-' : ''}${whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')}${decimal}`
+ return `${format==='usd' || format==='usd0' ? '$' : format==='eur' || format==='eur0' ? '€' : ''}${number}${format==='pct' || format==='pct0' ? '%' : format==='mo' ? ' mo' : ''}`
 }
 
 // Fold overflow series or donut categories into a single additive Other mark.
@@ -38,7 +47,7 @@ export function foldChart(value:ChartValue):ChartValue {
   let index=0
   if(!donut){let byX=counts.get(name);if(!byX){byX=new Map();counts.set(name,byX)}index=byX.get(x) ?? 0;byX.set(x,index+1)}
   let group=groups.get(x);if(!group){group=[];groups.set(x,group)}
-  if(!group[index]){group[index]={...point,x,series:donut ? point.series : 'Other',y:0};points.push(group[index])}
+  if(!group[index]){group[index]={...point,x,series:donut ? point.series : 'Other',y:0,y_text:undefined};points.push(group[index])}
   group[index].y+=point.y
   // shortcut: unrepresentable sums keep the original chart; use decimal chart values if extreme values matter.
   if(!Number.isFinite(group[index].y))return value
