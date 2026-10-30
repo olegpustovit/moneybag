@@ -350,3 +350,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `a38cab3b5642-20261030043608` passed public health and the service is active.
 
 - Query preview shortcut: Ctrl/⌘-Enter now runs the query preview in the capture phase so CodeMirror does not also insert a blank line; repeated shortcuts while a preview is pending are ignored. Shift-Enter still inserts a line. The original browser test reproduced the unwanted extra line, and the corrected desktop/mobile tests covered both shortcuts, Shift-Enter and undo; shared-editor tests also exercised Ctrl-Enter. `make check` passed. Other SPA/P0 acceptance gates remain open.
+  Deployment: release `bb0e2011939c-20261030043852` passed public health and the service is active.
