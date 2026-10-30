@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Telemetry kit demo</title>
+    <script>
+      // Dev-only harness. vite.config.ts lists its production inputs explicitly, so this page never ships.
+      const theme = new URLSearchParams(location.search).get('theme')
+      document.documentElement.classList.toggle('dark', theme === 'dark' || (!theme && matchMedia('(prefers-color-scheme: dark)').matches))
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/tests/demo/telemetry-demo.tsx"></script>
+  </body>
+</html>
