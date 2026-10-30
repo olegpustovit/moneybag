@@ -194,7 +194,7 @@ func (s *Service) movers(ctx context.Context, p principal.Principal, b *book, m 
 			delta.Sub(delta, v)
 		}
 		if m.Kind == "rate" || m.Additivity == "avg" {
-			delta.Quo(delta, big.NewRat(monthsBetween(req.from, req.to), 1))
+			delta.Quo(delta, monthsBetween(req.from, req.to))
 		}
 		deltas[name] = delta
 		absolute.Add(absolute, new(big.Rat).Abs(delta))
