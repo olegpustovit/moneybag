@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { useState, type ReactNode } from 'react'
 import LegacyChart from '../src/features/telemetry/legacy-chart'
 import { TimeChart } from '../src/features/telemetry/time-chart'
-import { TimeBar } from '../src/features/telemetry/time-bar'
+import { TimeBar, defaultPresets } from '../src/features/telemetry/time-bar'
 import { FilterBar } from '../src/features/telemetry/filter-bar'
 import { Stat, StatSkeleton, changeBetween } from '../src/features/telemetry/stat'
 import { Answer } from '../src/features/telemetry/answer'
@@ -106,6 +106,12 @@ function Bar({initial={}}:{initial?:TelemetrySearch}) {
 describe('TimeBar',() => {
  const field=() => screen.getByLabelText('Time range. Type anything') as HTMLInputElement
  it('shows a friendly name and the resolved dates',() => {render(<Bar/>);expect(field().value).toBe('Last 12 months');expect(screen.getByText(/31 Oct 2025 to 30 Oct 2026/)).toBeTruthy()})
+ it('offers This month after 30 days, even when a page lists other presets',() => {
+  expect(defaultPresets(bounds,['90d','30d','ytd']).map(p => p.label)).toEqual(['90D','30D','This month','YTD'])
+  expect(defaultPresets(bounds,['30d','this month']).map(p => p.label)).toEqual(['30D','This month'])
+  render(<Bar/>);expect(screen.getAllByRole('button').map(b => b.textContent).slice(2,6)).toEqual(['30D','This month','90D','6M'])
+  fireEvent.click(screen.getByRole('button',{name:'This month'}));expect(screen.getByTestId('t').textContent).toBe('this month');expect(screen.getByText(/1 Oct 2026 to 30 Oct 2026/)).toBeTruthy()
+ })
  it('parses live, reports errors through aria, and applies on Enter',() => {
   render(<Bar/>)
   fireEvent.change(field(),{target:{value:'q2 2026'}});expect(screen.getByText(/1 Apr 2026 to 30 Jun 2026 · 91 days · press Enter/)).toBeTruthy();expect(field().getAttribute('aria-invalid')).toBe('false')

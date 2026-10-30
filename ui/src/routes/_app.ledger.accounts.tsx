@@ -8,6 +8,7 @@ import { amountLabel } from '../lib/format'
 import { Stat } from '../features/telemetry/stat'
 import { money, moneyExact } from '../features/telemetry/format'
 import { useCube } from '../features/telemetry/cube-store'
+import { CurrencySwitch, useCurrencyCube } from '../features/telemetry/currency'
 import { balanceAt } from '../features/telemetry/cube'
 import { describePage, openDetails } from '../features/telemetry/shell-store'
 import { Empty, PageHead, RowsSkeleton, SubNav, humanKey } from '../features/telemetry/page-bits'
@@ -32,7 +33,7 @@ function Group({title,rows,currency}:{title:string;rows:Row[];currency:string}) 
  </section>
 }
 function Accounts() {
- const {session,bootstrap}=Route.useRouteContext(),cube=useCube(session.user.id),currency=cube?.base ?? 'EUR'
+ const {session,bootstrap}=Route.useRouteContext(),{cube,currency,switchable}=useCurrencyCube(useCube(session.user.id))
  const accounts=useQuery({queryKey:['accounts',session.user.id],staleTime:60_000,queryFn:() => allAccounts(session)})
  const balances=useQuery({queryKey:['balances',session.user.id,currency],staleTime:60_000,
   // One commodity with no quote must not hide every account: fall back to native amounts and say so per row.
@@ -47,7 +48,7 @@ function Accounts() {
  for(const [key,items] of [...groups])if(key!=='Debts' && Math.abs(items.reduce((n,r) => n+r.value,0))<1){groups.delete(key);groups.set(EMPTY,[...(groups.get(EMPTY) ?? []),...items])}
  const net=cube ? balanceAt(cube,cube.bounds.today) : null,sorted=[...groups.entries()].sort((a,b) => Math.abs(b[1].reduce((n,r) => n+r.value,0))-Math.abs(a[1].reduce((n,r) => n+r.value,0)))
  return <>
-  <PageHead title="Ledger" description="Show me the entries and the accounts."/>
+  <PageHead title="Ledger" description="Show me the entries and the accounts.">{switchable && <CurrencySwitch value={currency}/>}</PageHead>
   <SubNav of="ledger"/>
   {net!==null && <div className="tm-stats tm-account-net"><Stat label="Net worth today" value={money(net,currency)} hideEmptyCompare/></div>}
   {sorted.length ? <div className="tm-account-groups">{sorted.map(([title,items]) => <Group key={title} title={title} rows={items} currency={currency}/>)}</div> : <Empty title="No accounts yet">An agent sets these up when it imports your first statement.</Empty>}

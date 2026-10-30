@@ -2,14 +2,16 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEve
 import { DAY, dayLabel, parseRange, parseTime, rangeDays, rangeLabel, type Bounds, type CompareMode, type Range } from './time-grammar'
 import { ignoreShortcut, type TimeState } from './use-time-state'
 import type { Band } from './chart-core'
+import { CurrencySwitch, type Currency } from './currency'
 import './telemetry.css'
 
 export type Preset={label:string;text:string}
 const presetName=(text:string) => {const m=text.match(/^(\d+)(d|mo|w|y)$/);if(m)return `${m[1]}${m[2]==='mo' ? 'M' : m[2].toUpperCase()}`;return text==='ytd' ? 'YTD' : text==='all' ? 'All' : text.replace(/^./,c => c.toUpperCase())}
 export function defaultPresets(bounds:Bounds,spec?:string[]):Preset[] {
- if(spec?.length)return spec.map(text => ({label:presetName(text),text}))
+ // This month is always offered, right after the 30-day preset, so a page that omits it still has it.
+ if(spec?.length){const at=spec.indexOf('30d')+1,list=spec.includes('this month') ? spec : [...spec.slice(0,at),'this month',...spec.slice(at)];return list.map(text => ({label:presetName(text),text}))}
  const year=new Date(bounds.today).getUTCFullYear(),first=new Date(bounds.start).getUTCFullYear(),years=[year-1,year-2].filter(y => y>=first).map(y => String(y))
- return ['30d','90d','6mo','12mo','ytd','last month','last quarter',...years,'all'].map(text => ({label:presetName(text),text}))
+ return ['30d','this month','90d','6mo','12mo','ytd','last month','last quarter',...years,'all'].map(text => ({label:presetName(text),text}))
 }
 // What the field shows for a saved range. Anything else someone typed stays exactly as they typed it.
 const UNITS:Record<string,string>={d:'day',w:'week',mo:'month',y:'year'}
@@ -86,7 +88,7 @@ export function HistoryNavigator({bounds,range,onChange,xs,values,bands,label='F
  </div>
 }
 
-export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time range. Type anything'}:{state:TimeState;bounds:Bounds;presets?:Preset[];navigator?:{xs:number[];values:ArrayLike<number>;bands?:Band[];label?:string};hideCompare?:boolean;label?:string}) {
+export function TimeBar({state,bounds,presets,navigator,hideCompare,currency,label='Time range. Type anything'}:{state:TimeState;bounds:Bounds;presets?:Preset[];navigator?:{xs:number[];values:ArrayLike<number>;bands?:Band[];label?:string};hideCompare?:boolean;currency?:Currency;label?:string}) {
  const [draft,setDraft]=useState<string|null>(null),input=useRef<HTMLInputElement>(null),fieldId=useId(),statusId=useId(),compareId=useId()
  const list=presets ?? defaultPresets(bounds)
  const isCanonical=/^\d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}$/.test(state.text),activePreset=list.find(p => {const r=parseRange(p.text,bounds);return r && r.from===state.range.from && r.to===state.range.to})
@@ -119,6 +121,7 @@ export function TimeBar({state,bounds,presets,navigator,hideCompare,label='Time 
    </div>
    <div className="tm-presets" role="group" aria-label="Quick ranges">{list.map(p => <button key={p.text} type="button" className="tm-btn" aria-pressed={activePreset?.text===p.text} onClick={() => state.setText(p.text)}>{p.label}</button>)}</div>
    <div className="tm-zoom">
+    {currency && <CurrencySwitch value={currency}/>}
     <button type="button" className="tm-btn" title="Zoom out ( z )" onClick={state.zoomOut}>Zoom out</button>
     <button type="button" className="tm-btn" disabled={!state.canUndo} onClick={state.undo}>Undo zoom</button>
     {!hideCompare && <><label className="sr-only" htmlFor={compareId}>Compare to</label><select id={compareId} title="Compare to" className="tm-btn tm-select" value={state.compare} onChange={e => state.setCompare(e.target.value as CompareMode)}><option value="previous_period">Previous period</option><option value="previous_year">Same period last year</option><option value="none">Nothing</option></select></>}

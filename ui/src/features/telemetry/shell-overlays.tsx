@@ -17,7 +17,7 @@ function useMetricDetails(session:Session,request:DetailsRequest,metric:MetricRe
  const accounts=data?.entries?.accounts ?? []
  return {...request.content,value:data?.text ?? request.content.value,
   calculation:{
-   summary:exact.isPending ? 'Asking the ledger for the exact figure…' : exact.error ? 'The exact figure could not be read just now. The number on the page comes from the same entries.' : `Exact figure from the ledger${metric.from && metric.to ? `, ${humanDate(metric.from)} to ${humanDate(metric.to)}` : ''}.${data?.compare?.text ? ` Before that it was ${data.compare.text}.` : ''}${data?.estimates?.share_pct ? ` ${Math.round(data.estimates.share_pct)}% of it is estimated.` : ''}`,
+   summary:exact.isPending ? 'Asking the ledger for the exact figure…' : exact.error ? 'The exact figure could not be read just now. The number on the page comes from the same entries.' : `Exact figure from the ledger${metric.from && metric.to ? `, ${humanDate(metric.from)} to ${humanDate(metric.to)}` : ''}.${metric.usd ? ' Exact figure in EUR; the USD shown uses the EUR/USD rate on each entry’s date.' : ''}${data?.compare?.text ? ` Before that it was ${data.compare.text}.` : ''}${data?.estimates?.share_pct ? ` ${Math.round(data.estimates.share_pct)}% of it is estimated.` : ''}`,
    formula:data?.formula,
    rates:request.content.calculation?.rates,
    entries:data?.entries ? <Link to="/ledger" search={{t:data.entries.from && data.entries.to ? `${data.entries.from} to ${data.entries.to}` : undefined,accounts:accounts.length ? accounts : undefined}} onClick={closeDetails}>See the entries behind this</Link> : undefined,

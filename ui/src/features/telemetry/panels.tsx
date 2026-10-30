@@ -24,7 +24,7 @@ const UNITS:Record<string,Unit>={eur:'eur',usd:'usd',int:'int',pct:'pct',mo:'mo'
 const isMetric=(v:unknown):v is MetricValue => typeof v==='object' && v!==null && typeof (v as MetricValue).metric==='string' && ['stat','time_chart','ranked_bars','sankey','entries'].includes((v as MetricValue).type)
 const tryNumber=(s:unknown) => {const n=Number(s);return Number.isFinite(n) ? n : 0}
 const fromIso=(s:string|undefined) => s ? dayFromIso(s) : NaN
-const isExact=(v:MetricValue,ctx:PanelCtx) => !ctx.filtering && !v.fixed && fromIso(v.from)===ctx.range.from && fromIso(v.to)===ctx.range.to && ctx.compareMode===ctx.defaultCompare
+const isExact=(v:MetricValue,ctx:PanelCtx) => ctx.cube?.base!=='USD' && !ctx.filtering && !v.fixed && fromIso(v.from)===ctx.range.from && fromIso(v.to)===ctx.range.to && ctx.compareMode===ctx.defaultCompare
 const metricOf=(ctx:PanelCtx,id:string|undefined) => ctx.cube?.metrics.find(m => m.id===id)
 const metricText=(ctx:PanelCtx,m:CubeMetric,v:number) => m.unit==='int' ? Math.round(v).toLocaleString('en-US') : money(v,ctx.cube?.base)
 const fixedRange=(c:SpecComponent,ctx:PanelCtx):Range|null => {if(!c.fixed)return null;return parseRange(c.fixed.range ?? 'all',ctx.bounds)}
@@ -34,7 +34,7 @@ const drillSearch=(entries:MetricValue['entries'],range?:Range) => ({t:range ? `
 
 function metricDetails(c:SpecComponent,v:MetricValue,ctx:PanelCtx,text:string):void {
  const compare=(c.compare ?? ctx.compareMode)==='none' ? undefined : (c.compare ?? ctx.compareMode)
- const metric:MetricRequest={id:v.metric,from:isoDay(c.fixed ? (fromIso(v.from) || ctx.range.from) : ctx.range.from),to:isoDay(c.fixed ? (fromIso(v.to) || ctx.range.to) : ctx.range.to),compare,filters:ctx.pills.flatMap(toServerFilter)}
+ const metric:MetricRequest={id:v.metric,usd:ctx.cube?.base==='USD',from:isoDay(c.fixed ? (fromIso(v.from) || ctx.range.from) : ctx.range.from),to:isoDay(c.fixed ? (fromIso(v.to) || ctx.range.to) : ctx.range.to),compare,filters:ctx.pills.flatMap(toServerFilter)}
  const content:DetailsContent={title:v.title ?? v.label ?? 'This number',value:text,subtitle:c.fixed ? `Fixed range: ${c.fixed.reason}` : rangeLabel(ctx.range)}
  openDetails({content,metric,target:{dashboard:ctx.dashboard,component:c.id,metric:v.metric,value:text,params:{from:metric.from ?? '',to:metric.to ?? ''}}})
 }

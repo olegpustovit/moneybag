@@ -409,3 +409,6 @@ i.tm-dash { width:14px; height:0; border-top:2px dashed var(--text3); background
  .tm-account-net { max-width:none; }
  .tm-change-filters label { flex-basis:calc(50% - 6px); }
 }
+.tm-seg { display:flex; }
+.tm-seg .tm-btn { height:28px; padding:0 8px; margin:0 -1px 0 0; font-size:12.5px; }
+.tm-seg .tm-btn:focus-visible { position:relative; z-index:1; }

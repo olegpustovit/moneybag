@@ -151,6 +151,15 @@ export function totals(c:Cube,q:Query):Totals {
  for(let i=lo;i<hi;i++){if(m && !m[i])continue;const k=cls[a[i]];if(k===EXPENSE){out+=v[i];if(est[a[i]])estimated+=v[i];entries+=n[i]}else if(k===INCOME){inn-=v[i];entries+=n[i]}}
  return {in:inn,out,net:inn-out,estimated,entries}
 }
+// The cube in USD cents: each row at the EUR/USD quote at or before its date (the first quote before any). Memoized per cube; rows are date-sorted, so one pointer walk does it.
+const usdCubes=new WeakMap<Cube,Cube>()
+export function inCurrency(c:Cube,code:'EUR'|'USD'):Cube {
+ const r=c.rates['EUR/USD'];if(code!=='USD' || c.base!=='EUR' || !r?.d.length)return c
+ const hit=usdCubes.get(c);if(hit)return hit
+ const convert=(days:Int32Array,from:Float64Array) => {const out=new Float64Array(from.length);let k=0;for(let i=0;i<out.length;i++){while(k+1<r.d.length && r.d[k+1]<=days[i])k++;out[i]=Math.round(from[i]*r.v[k])}return out}
+ const b=c.balances,out:Cube={...c,base:'USD',v:convert(c.d,c.v),balances:{...b,net:convert(b.d,b.net),assets:convert(b.d,b.assets),liabilities:convert(b.d,b.liabilities)},mask:null}
+ usdCubes.set(c,out);return out
+}
 // Colour follows the entity: slots go by all-time rank across the whole cube, so a range or filter can never reshuffle them.
 const SLOTS=['--c0','--c1','--c2','--c3','--c4']
 export function entityColors(c:Cube,key:Dimension):Map<string,string> {

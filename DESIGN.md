@@ -272,7 +272,7 @@ The recessed sidebar holds the agent-set navigation (Now, Spending, Income, Budg
 
 ### Instruments
 
-`TimeBar` is one per page: a typed date field with live parsing, presets, step and zoom, compare, and a full-history navigator with a draggable brush, all in the URL. `FilterBar` turns dimensions the agent declared into pills with click-to-change operators and value suggestions with counts and totals, with plain-words chips and an Advanced view of the same filter as CEL. `Stat` shows value, change, comparison period and sparkline at a fixed height, whether loaded or not, and its tone follows meaning: lower spending is green. `Answer` renders the server's sentence and a "What moved" list that filters when clicked.
+`TimeBar` is one per page: a typed date field with live parsing, presets (30D then This month), a small EUR / USD segmented switch (hidden without rates; the same switch heads Accounts and Future), step and zoom, compare, and a full-history navigator with a draggable brush, all in the URL. `FilterBar` turns dimensions the agent declared into pills with click-to-change operators and value suggestions with counts and totals, with plain-words chips and an Advanced view of the same filter as CEL. `Stat` shows value, change, comparison period and sparkline at a fixed height, whether loaded or not, and its tone follows meaning: lower spending is green. `Answer` renders the server's sentence and a "What moved" list that filters when clicked.
 
 ### Reading rules
 
