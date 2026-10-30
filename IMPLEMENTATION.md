@@ -303,3 +303,4 @@ The new proposal's P0–P6 gates remain open; the earlier completion ledger abov
   Deployment: release `5c2868043946-20261030031820` passed its public health check and the service is active.
 
 - Chart table parity: chart tables now include only visible series or donut categories and use the chart's value formatter, while keeping raw numeric values for sorting and totals. Synthetic browser checks covered hidden and restored series, hidden donut categories, formatted negative currency, drilldowns and virtualized table sorting; scenario, desktop/tablet/mobile shell and `make check` regressions passed. The first test selector matched both the cell and total and passed after scoping it to the body. Chart label collision, real-data table verification and full SPA/P0 acceptance remain open.
+  Deployment: release `ef1b15419b98-20261030032047` passed its public health check and the service is active.
