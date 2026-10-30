@@ -19,10 +19,12 @@ jobs:
       - run: make check
       - run: make build
   speed-budget:
-    runs-on: ubuntu-latest
+    # MongoDB crashes on Linux 6.19 through 7.0.13 (SERVER-121912); move back to ubuntu-latest when its kernel is past that.
+    runs-on: ubuntu-22.04
     services:
       mongo:
         image: mongo:8
+        options: --ulimit nofile=64000:64000
         ports:
           - 27017:27017
     steps:
