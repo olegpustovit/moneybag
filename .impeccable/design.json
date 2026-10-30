@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-28T19:35:39.744706Z",
+  "generatedAt": "2026-10-30T04:14:54.517524Z",
   "title": "Design System: Moneybag",
   "extensions": {
     "colorMeta": {
@@ -162,56 +162,56 @@
         "role": "tertiary",
         "displayName": "Chart amber",
         "tonalRamp": [
-          "oklch(0.150 0.0331 82.97)",
-          "oklch(0.250 0.0992 82.97)",
-          "oklch(0.370 0.1653 82.97)",
-          "oklch(0.490 0.1653 82.97)",
-          "oklch(0.610 0.1653 82.97)",
-          "oklch(0.730 0.1653 82.97)",
-          "oklch(0.850 0.0992 82.97)",
-          "oklch(0.950 0.0331 82.97)"
+          "oklch(0.150 0.0420 78.83)",
+          "oklch(0.250 0.0700 78.83)",
+          "oklch(0.370 0.1036 78.83)",
+          "oklch(0.490 0.1372 78.83)",
+          "oklch(0.610 0.1092 78.83)",
+          "oklch(0.730 0.0756 78.83)",
+          "oklch(0.850 0.0420 78.83)",
+          "oklch(0.950 0.0140 78.83)"
         ]
       },
       "c2": {
         "role": "tertiary",
         "displayName": "Chart cyan",
         "tonalRamp": [
-          "oklch(0.150 0.0237 211.38)",
-          "oklch(0.250 0.0711 211.38)",
-          "oklch(0.370 0.1185 211.38)",
-          "oklch(0.490 0.1185 211.38)",
-          "oklch(0.610 0.1185 211.38)",
-          "oklch(0.730 0.1185 211.38)",
-          "oklch(0.850 0.0711 211.38)",
-          "oklch(0.950 0.0237 211.38)"
+          "oklch(0.150 0.0320 213.04)",
+          "oklch(0.250 0.0533 213.04)",
+          "oklch(0.370 0.0789 213.04)",
+          "oklch(0.490 0.1044 213.04)",
+          "oklch(0.610 0.0831 213.04)",
+          "oklch(0.730 0.0575 213.04)",
+          "oklch(0.850 0.0320 213.04)",
+          "oklch(0.950 0.0107 213.04)"
         ]
       },
       "c3": {
         "role": "tertiary",
         "displayName": "Chart violet",
         "tonalRamp": [
-          "oklch(0.150 0.0344 300.66)",
-          "oklch(0.250 0.1032 300.66)",
-          "oklch(0.370 0.1719 300.66)",
-          "oklch(0.490 0.1719 300.66)",
-          "oklch(0.610 0.1719 300.66)",
-          "oklch(0.730 0.1719 300.66)",
-          "oklch(0.850 0.1032 300.66)",
-          "oklch(0.950 0.0344 300.66)"
+          "oklch(0.150 0.0551 298.77)",
+          "oklch(0.250 0.0918 298.77)",
+          "oklch(0.370 0.1359 298.77)",
+          "oklch(0.490 0.1799 298.77)",
+          "oklch(0.610 0.1432 298.77)",
+          "oklch(0.730 0.0991 298.77)",
+          "oklch(0.850 0.0551 298.77)",
+          "oklch(0.950 0.0184 298.77)"
         ]
       },
       "c4": {
         "role": "tertiary",
         "displayName": "Chart orange",
         "tonalRamp": [
-          "oklch(0.150 0.0320 44.72)",
-          "oklch(0.250 0.0960 44.72)",
-          "oklch(0.370 0.1600 44.72)",
-          "oklch(0.490 0.1600 44.72)",
-          "oklch(0.610 0.1600 44.72)",
-          "oklch(0.730 0.1600 44.72)",
-          "oklch(0.850 0.0960 44.72)",
-          "oklch(0.950 0.0320 44.72)"
+          "oklch(0.150 0.0501 43.63)",
+          "oklch(0.250 0.0836 43.63)",
+          "oklch(0.370 0.1237 43.63)",
+          "oklch(0.490 0.1638 43.63)",
+          "oklch(0.610 0.1304 43.63)",
+          "oklch(0.730 0.0902 43.63)",
+          "oklch(0.850 0.0501 43.63)",
+          "oklch(0.950 0.0167 43.63)"
         ]
       },
       "other": {
@@ -428,70 +428,70 @@
         "role": "primary",
         "displayName": "Data blue · dark",
         "tonalRamp": [
-          "oklch(0.150 0.0357 264.64)",
-          "oklch(0.250 0.1072 264.64)",
-          "oklch(0.370 0.1786 264.64)",
-          "oklch(0.490 0.1786 264.64)",
-          "oklch(0.610 0.1786 264.64)",
-          "oklch(0.730 0.1786 264.64)",
-          "oklch(0.850 0.1072 264.64)",
-          "oklch(0.950 0.0357 264.64)"
+          "oklch(0.150 0.0555 264.40)",
+          "oklch(0.250 0.0925 264.40)",
+          "oklch(0.370 0.1369 264.40)",
+          "oklch(0.490 0.1812 264.40)",
+          "oklch(0.610 0.1443 264.40)",
+          "oklch(0.730 0.0999 264.40)",
+          "oklch(0.850 0.0555 264.40)",
+          "oklch(0.950 0.0185 264.40)"
         ]
       },
       "c1-dark": {
         "role": "tertiary",
         "displayName": "Chart amber · dark",
         "tonalRamp": [
-          "oklch(0.150 0.0300 86.14)",
-          "oklch(0.250 0.0900 86.14)",
-          "oklch(0.370 0.1500 86.14)",
-          "oklch(0.490 0.1500 86.14)",
-          "oklch(0.610 0.1500 86.14)",
-          "oklch(0.730 0.1500 86.14)",
-          "oklch(0.850 0.0900 86.14)",
-          "oklch(0.950 0.0300 86.14)"
+          "oklch(0.150 0.0396 84.11)",
+          "oklch(0.250 0.0660 84.11)",
+          "oklch(0.370 0.0977 84.11)",
+          "oklch(0.490 0.1294 84.11)",
+          "oklch(0.610 0.1030 84.11)",
+          "oklch(0.730 0.0713 84.11)",
+          "oklch(0.850 0.0396 84.11)",
+          "oklch(0.950 0.0132 84.11)"
         ]
       },
       "c2-dark": {
         "role": "tertiary",
         "displayName": "Chart cyan · dark",
         "tonalRamp": [
-          "oklch(0.150 0.0238 209.64)",
-          "oklch(0.250 0.0714 209.64)",
-          "oklch(0.370 0.1190 209.64)",
-          "oklch(0.490 0.1190 209.64)",
-          "oklch(0.610 0.1190 209.64)",
-          "oklch(0.730 0.1190 209.64)",
-          "oklch(0.850 0.0714 209.64)",
-          "oklch(0.950 0.0238 209.64)"
+          "oklch(0.150 0.0331 211.35)",
+          "oklch(0.250 0.0551 211.35)",
+          "oklch(0.370 0.0816 211.35)",
+          "oklch(0.490 0.1080 211.35)",
+          "oklch(0.610 0.0860 211.35)",
+          "oklch(0.730 0.0595 211.35)",
+          "oklch(0.850 0.0331 211.35)",
+          "oklch(0.950 0.0110 211.35)"
         ]
       },
       "c3-dark": {
         "role": "tertiary",
         "displayName": "Chart violet · dark",
         "tonalRamp": [
-          "oklch(0.150 0.0293 301.24)",
-          "oklch(0.250 0.0878 301.24)",
-          "oklch(0.370 0.1464 301.24)",
-          "oklch(0.490 0.1464 301.24)",
-          "oklch(0.610 0.1464 301.24)",
-          "oklch(0.730 0.1464 301.24)",
-          "oklch(0.850 0.0878 301.24)",
-          "oklch(0.950 0.0293 301.24)"
+          "oklch(0.150 0.0487 298.49)",
+          "oklch(0.250 0.0811 298.49)",
+          "oklch(0.370 0.1201 298.49)",
+          "oklch(0.490 0.1590 298.49)",
+          "oklch(0.610 0.1266 298.49)",
+          "oklch(0.730 0.0876 298.49)",
+          "oklch(0.850 0.0487 298.49)",
+          "oklch(0.950 0.0162 298.49)"
         ]
       },
       "c4-dark": {
         "role": "tertiary",
         "displayName": "Chart orange · dark",
         "tonalRamp": [
-          "oklch(0.150 0.0284 47.01)",
-          "oklch(0.250 0.0851 47.01)",
-          "oklch(0.370 0.1419 47.01)",
-          "oklch(0.490 0.1419 47.01)",
-          "oklch(0.610 0.1419 47.01)",
-          "oklch(0.730 0.1419 47.01)",
-          "oklch(0.850 0.0851 47.01)",
-          "oklch(0.950 0.0284 47.01)"
+          "oklch(0.150 0.0446 46.48)",
+          "oklch(0.250 0.0743 46.48)",
+          "oklch(0.370 0.1100 46.48)",
+          "oklch(0.490 0.1456 46.48)",
+          "oklch(0.610 0.1159 46.48)",
+          "oklch(0.730 0.0802 46.48)",
+          "oklch(0.850 0.0446 46.48)",
+          "oklch(0.950 0.0149 46.48)"
         ]
       },
       "other-dark": {
@@ -596,11 +596,11 @@
     "typographyMeta": {
       "headline": {
         "displayName": "Headline",
-        "purpose": "Application page title; reduces to 22px on mobile."
+        "purpose": "Application page title."
       },
       "title": {
         "displayName": "Title",
-        "purpose": "Settings section heading."
+        "purpose": "Section heading."
       },
       "body": {
         "displayName": "Body",
@@ -612,7 +612,7 @@
       },
       "label": {
         "displayName": "Label",
-        "purpose": "Uppercase operational data-panel title."
+        "purpose": "Monospace navigation group label."
       },
       "identifier": {
         "displayName": "Identifier",
@@ -634,44 +634,30 @@
     "shadows": [
       {
         "name": "active-navigation",
-        "value": "inset 3px 0 0 var(--ink)",
-        "purpose": "Desktop active link indicator; no elevation."
+        "value": "inset 3px 0 var(--ink)",
+        "purpose": "Active navigation indicator."
       },
       {
-        "name": "active-navigation-mobile",
-        "value": "inset 0 -2px 0 var(--ink)",
-        "purpose": "Mobile active link indicator."
-      },
-      {
-        "name": "editable-cell-focus",
-        "value": "inset 0 0 0 2px var(--focus)",
-        "purpose": "Keyboard focus in an editable grid cell."
-      },
-      {
-        "name": "invalid-cell",
-        "value": "inset 0 0 0 1px var(--neg)",
-        "purpose": "Validation error in a grid cell."
+        "name": "chart-tooltip",
+        "value": "0 4px 12px #0002",
+        "purpose": "Separate tooltip from chart marks."
       }
     ],
     "motion": [
       {
         "name": "reduced-motion",
-        "value": "@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}",
-        "purpose": "Honor reduced motion. No decorative transition is introduced."
+        "value": "@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}",
+        "purpose": "Honor reduced-motion preferences."
       }
     ],
     "breakpoints": [
       {
-        "name": "compact-desktop",
+        "name": "tablet",
         "value": "1100px"
       },
       {
-        "name": "tablet",
-        "value": "860px"
-      },
-      {
         "name": "mobile",
-        "value": "620px"
+        "value": "760px"
       }
     ]
   },
@@ -680,92 +666,60 @@
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "Compact ink-filled workspace action.",
-      "html": "<button class=\"ds-button-primary\">Save draft</button>",
-      "css": ".ds-button-primary{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ink,#111214);padding:7px 14px;font:500 13px var(--font,system-ui,sans-serif);border-radius:0;cursor:pointer;background:var(--ink,#111214);color:var(--bg,#ffffff)}.ds-button-primary:hover{opacity:.88}.ds-button-primary:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:3px;}.ds-button-primary:disabled{opacity:.5;cursor:wait}"
+      "description": "Default action.",
+      "html": "<button class=\"ds-button\">Save changes</button>",
+      "css": ".ds-button{height:32px;display:inline-flex;align-items:center;justify-content:center;padding:0 10px;border:1px solid transparent;border-radius:0;background:var(--ink,#111214);color:var(--bg,#fff);font:500 14px Geist,system-ui,sans-serif;cursor:pointer}.ds-button:hover{opacity:.8}.ds-button:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
       "name": "Ghost Button",
       "kind": "button",
       "refersTo": "button-ghost",
-      "description": "Secondary action with the same square ink border.",
-      "html": "<button class=\"ds-button-ghost\">View spec</button>",
-      "css": ".ds-button-ghost{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--ink,#111214);padding:7px 14px;font:500 13px var(--font,system-ui,sans-serif);border-radius:0;cursor:pointer;background:transparent;color:var(--text,#111214)}.ds-button-ghost:hover{opacity:.88}.ds-button-ghost:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:3px;}.ds-button-ghost:disabled{opacity:.5;cursor:wait}"
+      "description": "Low-emphasis action.",
+      "html": "<button class=\"ds-ghost\">Cancel</button>",
+      "css": ".ds-ghost{height:32px;padding:0 10px;border:1px solid transparent;border-radius:0;background:transparent;color:var(--text,#111214);font:500 14px Geist,system-ui,sans-serif;cursor:pointer}.ds-ghost:hover{background:var(--hover,#f1f2f4)}.ds-ghost:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
-      "name": "Text Field",
+      "name": "Input",
       "kind": "input",
       "refersTo": "input",
-      "description": "Visible label and compact square field with focus-border feedback.",
-      "html": "<label class=\"ds-field\">Name<input class=\"ds-input\" value=\"Monthly overview\"></label>",
-      "css": ".ds-field{display:flex;flex-direction:column;gap:6px;color:var(--text,#111214);font:13px var(--font,system-ui,sans-serif)}.ds-input{border:1px solid var(--bd,#e4e5e8);background:var(--paper,#ffffff);color:var(--text,#111214);padding:7px 10px;font:13px var(--font,system-ui,sans-serif);border-radius:0;caret-color:var(--c0,#2f6bff);outline:none}.ds-input:focus{border-color:var(--focus,#2f6bff)}"
+      "description": "Text entry.",
+      "html": "<label class=\"ds-field\">Name<input class=\"ds-input\" value=\"Example\"></label>",
+      "css": ".ds-field{display:grid;gap:6px;font:13px Geist,system-ui,sans-serif;color:var(--text,#111214)}.ds-input{height:32px;padding:4px 10px;border:1px solid var(--bd,#e4e5e8);border-radius:0;background:transparent;color:inherit;font:14px Geist,system-ui,sans-serif}.ds-input:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
-      "name": "Workspace Navigation",
+      "name": "Navigation",
       "kind": "nav",
       "refersTo": "navigation",
-      "description": "Recessed links with a paper active row and an inset ink stripe.",
-      "html": "<nav class=\"ds-nav\" aria-label=\"Workspace example\"><a class=\"ds-nav-link ds-current\" href=\"#overview\" aria-current=\"page\">Monthly overview</a><a class=\"ds-nav-link\" href=\"#accounts\">Accounts</a></nav>",
-      "css": ".ds-nav{background:var(--sunk,#f6f6f7);border:1px solid var(--bd,#e4e5e8);font:13.5px/1.6 var(--font,system-ui,sans-serif)}.ds-nav-link{display:flex;gap:8px;padding:5px 14px;color:var(--text2,#55595f);text-decoration:none}.ds-nav-link:hover{background:var(--hover,#f1f2f4);color:var(--text,#111214)}.ds-nav-link.ds-current{background:var(--paper,#ffffff);color:var(--text,#111214);box-shadow:inset 3px 0 0 var(--ink,#111214)}.ds-nav-link:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:3px;}@media(max-width:620px){.ds-nav{display:flex;overflow-x:auto}.ds-nav-link{white-space:nowrap;padding:8px 12px}.ds-nav-link.ds-current{box-shadow:inset 0 -2px 0 var(--ink,#111214)}}"
-    },
-    {
-      "name": "Permission Chip",
-      "kind": "chip",
-      "refersTo": "chip",
-      "description": "Outlined operational scope label.",
-      "html": "<span class=\"ds-chip\">read</span>",
-      "css": ".ds-chip{display:inline-block;font:500 11px var(--mono,ui-monospace,monospace);padding:1px 6px;border:1px solid var(--bd,#e4e5e8);color:var(--text2,#55595f);margin:1px 2px 1px 0;white-space:nowrap;border-radius:0}"
-    },
-    {
-      "name": "Dashboard Panel",
-      "kind": "card",
-      "refersTo": "dashboard-panel",
-      "description": "Bordered paper panel with a compact data header and tabular KPI.",
-      "html": "<section class=\"ds-panel\"><div class=\"ds-panel-title\">Available balance</div><div class=\"ds-kpi\">€1,250</div><div class=\"ds-kpi-detail\">Synthetic example</div></section>",
-      "css": ".ds-panel{border:1px solid var(--bd,#e4e5e8);background:var(--paper,#ffffff);padding:14px 16px;color:var(--text,#111214);border-radius:0;font:15px/1.6 var(--font,system-ui,sans-serif)}.ds-panel-title{font:600 11px var(--mono,ui-monospace,monospace);text-transform:uppercase;letter-spacing:.06em;color:var(--text3,#646a73);margin-bottom:8px;line-height:1.5}.ds-kpi{font-size:26px;font-weight:600;letter-spacing:-.015em;font-variant-numeric:tabular-nums}.ds-kpi-detail{font-size:12px;color:var(--text3,#646a73)}@media(max-width:1100px){.ds-panel{padding:12px}}"
+      "description": "Workspace links with active marker.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-link ds-current\" href=\"#\">Dashboards</a><a class=\"ds-link\" href=\"#\">Journal</a></nav>",
+      "css": ".ds-nav{background:var(--sunk,#f6f6f7);font:13px Geist,system-ui,sans-serif}.ds-link{display:block;min-height:32px;padding:6px 16px;color:var(--text2,#55595f);text-decoration:none}.ds-link:hover{background:var(--hover,#f1f2f4)}.ds-current{background:var(--paper,#fff);color:var(--text,#111214);box-shadow:inset 3px 0 var(--ink,#111214)}.ds-link:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:2px}"
     },
     {
       "name": "Draft Badge",
       "kind": "chip",
       "refersTo": "badge-draft",
-      "description": "Amber status text with a matching fine border; dark mode uses chart amber.",
-      "html": "<span class=\"ds-draft\">draft v2</span>",
-      "css": ".ds-draft{font:500 11px var(--mono,ui-monospace,monospace);border:1px solid #a16f00;padding:1px 6px;color:#946600;border-radius:0}:host-context([data-theme=dark]) .ds-draft{border-color:var(--c1,#f5c242);color:var(--c1,#f5c242)}@media(prefers-color-scheme:dark){:host-context(:root:not([data-theme=light])) .ds-draft{border-color:var(--c1,#f5c242);color:var(--c1,#f5c242)}}"
+      "description": "Outlined draft status.",
+      "html": "<span class=\"ds-draft\">Draft</span>",
+      "css": ".ds-draft{border:1px solid #a16f00;padding:2px 5px;color:#946600;font:10px \"Geist Mono\",ui-monospace,monospace;border-radius:0}:host-context(.dark) .ds-draft{color:#e3bd6e}"
     },
     {
-      "name": "Published Badge",
-      "kind": "chip",
-      "refersTo": "badge-published",
-      "description": "Green publication state, with a written status and version.",
-      "html": "<span class=\"ds-published\">published v1</span>",
-      "css": ".ds-published{font:500 11px var(--mono,ui-monospace,monospace);border:1px solid var(--ok,#17783f);padding:1px 6px;color:var(--ok,#17783f);border-radius:0}"
-    },
-    {
-      "name": "Data Grid",
-      "kind": "custom",
-      "refersTo": "data-grid",
-      "description": "Editable paper cells and recessed calculated cells with local scrolling.",
-      "html": "<div class=\"ds-grid\" role=\"region\" tabindex=\"0\" aria-label=\"Example budget table\"><table class=\"ds-table\"><thead><tr><th scope=\"col\">Category</th><th scope=\"col\">Limit</th></tr></thead><tbody><tr><td class=\"ds-edit\" contenteditable=\"plaintext-only\" aria-label=\"Edit category\" tabindex=\"0\">Example</td><td class=\"ds-calc\" tabindex=\"0\">€100</td></tr></tbody></table></div>",
-      "css": ".ds-grid{border:1px solid var(--bd,#e4e5e8);background:var(--paper,#ffffff);overflow-x:auto;color:var(--text,#111214)}.ds-table{border-collapse:collapse;width:100%;font:13.5px/1.6 var(--font,system-ui,sans-serif);font-variant-numeric:tabular-nums}.ds-table th,.ds-table td{border-top:1px solid var(--bd2,#efeff1);border-right:1px solid var(--bd2,#efeff1);padding:7px 10px;text-align:left}.ds-table th{border-top:0;background:var(--sunk,#f6f6f7);font:600 11px var(--mono,ui-monospace,monospace);letter-spacing:.05em;text-transform:uppercase;color:var(--text3,#646a73)}.ds-edit{background:var(--paper,#ffffff);outline:none;cursor:text}.ds-edit:focus{box-shadow:inset 0 0 0 2px var(--focus,#2f6bff)}.ds-calc{background:var(--sunk,#f6f6f7);color:var(--text2,#55595f);text-align:right!important}.ds-grid:focus-visible,.ds-calc:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:3px;}"
-    },
-    {
-      "name": "Chart Data Disclosure",
-      "kind": "custom",
-      "refersTo": "chart",
-      "description": "Native disclosure exposes the chart values through a captioned table.",
-      "html": "<details class=\"ds-chart-data\"><summary class=\"ds-chart-summary\">View chart data</summary><div class=\"ds-chart-table-region\" tabindex=\"0\" role=\"region\" aria-label=\"Example chart data\"><table class=\"ds-chart-table\"><caption>Example chart data</caption><thead><tr><th scope=\"col\">Period</th><th scope=\"col\">Value</th></tr></thead><tbody><tr><td>Example month</td><td>100</td></tr></tbody></table></div></details>",
-      "css": ".ds-chart-data{margin-top:12px;font:12px/1.6 var(--font,system-ui,sans-serif);color:var(--text,#111214)}.ds-chart-summary{cursor:pointer;color:var(--text2,#55595f);padding:4px 0}.ds-chart-summary:focus-visible,.ds-chart-table-region:focus-visible{outline:2px solid var(--focus,#2f6bff);outline-offset:3px;}.ds-chart-table-region{border:1px solid var(--bd,#e4e5e8);background:var(--paper,#ffffff);overflow-x:auto}.ds-chart-table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}.ds-chart-table caption{text-align:left;padding:8px 12px;color:var(--text2,#55595f)}.ds-chart-table th,.ds-chart-table td{padding:9px 14px;text-align:left;vertical-align:top;border-top:1px solid var(--bd2,#efeff1)}.ds-chart-table th{border-top:0;font:600 11px var(--mono,ui-monospace,monospace);color:var(--text3,#646a73);text-transform:uppercase;letter-spacing:.05em;background:var(--sunk,#f6f6f7)}"
+      "name": "Dashboard Panel",
+      "kind": "card",
+      "refersTo": "dashboard-panel",
+      "description": "A KPI inside the dashboard grid.",
+      "html": "<section class=\"ds-panel\"><h2>Balance</h2><div class=\"ds-value\">1,250.00</div><p>Example</p></section>",
+      "css": ".ds-panel{padding:14px 16px;border:1px solid var(--bd,#e4e5e8);background:var(--paper,#fff);color:var(--text,#111214);font-family:Geist,system-ui,sans-serif}.ds-panel h2{margin:0 0 14px;color:var(--text2,#55595f);font-size:12px;font-weight:600}.ds-value{font-size:26px;font-weight:600;letter-spacing:-.015em;font-variant-numeric:tabular-nums}.ds-panel p{margin:5px 0 0;color:var(--text2,#55595f);font-size:12px}"
     }
   ],
   "narrative": {
     "northStar": "The Moneybag workspace",
-    "overview": "The Moneybag workspace is square, quiet and dense: a practical finance interface for repeated reading, editing and comparison. Its visual authority is the supplied Moneybag artifact and the durable brand commitments in PRODUCT.md. The implementation uses flat paper and recessed surfaces, fine shared borders, compact controls and restrained semantic color.\n\nThe same workspace survives light, dark and system themes. Responsive layouts preserve task access with a scrolling workspace navigation, single-column panels and locally scrolling data. System sans serves interface text; system monospace distinguishes operational labels, identifiers and code. There is no separate display-type role or decorative image layer.",
+    "overview": "The Moneybag workspace is square, quiet and dense: a practical finance interface for repeated reading, editing and comparison. Flat paper and recessed surfaces, fine borders, compact controls and restrained semantic color keep data in focus.\n\nLight, dark and system themes share the same interface. Geist serves interface text and Geist Mono distinguishes operational labels and code. The desktop sidebar becomes an icon rail on tablet and a navigation sheet on mobile.",
     "keyCharacteristics": [
       "Square geometry and shared 1px borders.",
-      "Compact system typography with tabular financial numbers.",
+      "Compact Geist typography with tabular financial numbers.",
       "Blue chart data, green within budget, red over budget and amber drafts.",
       "Flat light/dark surfaces and visible keyboard focus.",
-      "Readable mobile charts with expandable semantic data tables."
+      "Charts with a data-table toggle and local scrolling."
     ],
     "rules": [
       {
@@ -788,14 +742,14 @@
       "Do use the final application theme overrides recorded in the frontmatter, including the stronger muted-text and financial-status colors.",
       "Do preserve square corners, fine shared borders and the observed compact spacing rhythm.",
       "Do keep amounts tabular and align numeric table columns to the right.",
-      "Do preserve all workspace tasks on mobile through scrolling navigation and single-column panels.",
-      "Do pair charts with labelled, keyboard-focusable scroll regions and expandable semantic chart-data tables.",
+      "Do preserve all workspace tasks on mobile through the navigation sheet and single-column panels.",
+      "Do pair charts with labelled, keyboard-focusable scroll regions and the chart table toggle.",
       "Do use synthetic records in public examples and screenshots."
     ],
     "donts": [
       "Don't add rounded cards, pill controls or decorative drop shadows to this workspace.",
-      "Don't replace the pinned system body and operational type with an unrelated display identity.",
-      "Don't shrink mobile charts until their labels become unreadable; retain the scrolling chart canvas.",
+      "Don't replace the pinned Geist body and operational type with an unrelated display identity.",
+      "Don't shrink mobile charts until their labels become unreadable; retain local chart scrolling.",
       "Don't communicate a financial status through color alone; retain values, labels and legends.",
       "Don't copy financial data or private reference material into public documentation."
     ]
