@@ -1,12 +1,14 @@
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
+import { z } from 'zod'
 import { Button } from '../components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '../components/ui/field'
 import { Input } from '../components/ui/input'
 import { Skeleton } from '../components/ui/skeleton'
 import { LoadingTable } from '../components/loading-table'
 import { FormulaInput } from '../components/formula/input'
+import { QueryEditor } from '../features/dashboard/query-editor'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
 import { invokeTool, listTools, settingsPost, tool, type Session, type ToolInfo } from '../lib/api'
@@ -96,6 +98,8 @@ function PasswordForm({ session }: { session: Session }) {
 function textType(type: string | string[] | undefined) {
   return type === 'string' || Array.isArray(type) && type.length === 2 && type.includes('null') && type.includes('string')
 }
+const viewQuerySchema=z.object({from:z.string(),where:z.string().optional(),derive:z.record(z.string(),z.string()).optional(),group:z.array(z.string()).nullable().optional(),agg:z.record(z.string(),z.string()).optional(),sort:z.array(z.string()).nullable().optional(),limit:z.number().optional(),as:z.string().optional(),key:z.string().optional(),value:z.string().optional(),n:z.string().optional(),hide_zero:z.boolean().optional()}).passthrough()
+function viewQuery(text:string) {try {const result=viewQuerySchema.safeParse(JSON.parse(text));return result.success ? result.data : undefined} catch {return undefined}}
 function ToolConsole({ session }: { session: Session }) {
   const client = useQueryClient()
   const catalog = useQuery({ queryKey: ['tool-catalog', session.user.id], queryFn: () => listTools(session) })
@@ -103,9 +107,11 @@ function ToolConsole({ session }: { session: Session }) {
   const [parseError, setParseError] = useState('')
   const [expression, setExpression] = useState('')
   const [database, setDatabase] = useState('')
+  const [queryText, setQueryText] = useState('')
   const run = useMutation({ mutationFn: ({toolName,args}: {toolName:string;args:Record<string,unknown>;readOnly:boolean}) => invokeTool(session, toolName, args), onSettled: async (_result,_error,variables) => { if(!variables.readOnly) await client.invalidateQueries({predicate:query => query.queryKey[1]===session.user.id && query.queryKey[0]!=='tool-catalog'}) } })
   const selected: ToolInfo | undefined = catalog.data?.find((item) => item.name === name)
   const formulaKey = name === 'expr_eval' ? 'expr' : ['db_query', 'db_delete_rows', 'tags_set'].includes(name) ? 'where' : ''
+  const view = name==='view_upsert' ? viewQuery(queryText) : undefined
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const data = new FormData(event.currentTarget)
@@ -122,5 +128,5 @@ function ToolConsole({ session }: { session: Session }) {
       run.mutate({toolName:name,args,readOnly:selected?.annotations?.readOnlyHint===true})
     } catch { setParseError('Enter valid JSON for non-text values.') }
   }
-  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setExpression(''); setDatabase(''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={key === formulaKey ? undefined : `tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel>{key === formulaKey ? <FormulaInput session={session} label={key} role={key === 'where' ? 'where' : 'value'} from={name === 'tags_set' ? 'journal' : database ? `table:${database}` : undefined} value={expression} onChange={setExpression}/> : <Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={textType(schema.type) ? undefined : 'JSON value'} onChange={key === 'db' && formulaKey === 'where' ? event => setDatabase(event.target.value) : undefined} />}<p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
+  return <div className="settings-console"><p>Choose a tool and provide its arguments. Operations run with your account permissions.</p>{catalog.isLoading ? <p>Loading tools…</p> : catalog.error ? <Message error={catalog.error}/> : <><Field><FieldLabel htmlFor="tool-name">Tool</FieldLabel><Select value={name} onValueChange={(value) => { setName(value ?? ''); setExpression(''); setDatabase(''); setQueryText(''); setParseError(''); run.reset() }}><SelectTrigger id="tool-name"><SelectValue placeholder="Choose a tool" /></SelectTrigger><SelectContent><SelectGroup>{catalog.data?.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>{selected && <form key={name} className="settings-form vertical" onSubmit={submit}><p>{selected.description}</p><FieldGroup>{Object.entries(selected.inputSchema.properties ?? {}).map(([key, schema]) => <Field key={key}><FieldLabel htmlFor={key === formulaKey ? undefined : `tool-${key}`}>{key}{selected.inputSchema.required?.includes(key) ? '' : ' (optional)'}</FieldLabel>{key === formulaKey ? <FormulaInput session={session} label={key} role={key === 'where' ? 'where' : 'value'} from={name === 'tags_set' ? 'journal' : database ? `table:${database}` : undefined} value={expression} onChange={setExpression}/> : <Input id={`tool-${key}`} name={key} required={selected.inputSchema.required?.includes(key)} placeholder={textType(schema.type) ? undefined : 'JSON value'} value={name==='view_upsert' && key==='query' ? queryText : undefined} onChange={name==='view_upsert' && key==='query' ? event => setQueryText(event.target.value) : key === 'db' && formulaKey === 'where' ? event => setDatabase(event.target.value) : undefined} />}{name==='view_upsert' && key==='query' && <details onToggle={event => {if(event.currentTarget.open && !queryText) setQueryText('{"from":"journal"}')}}><summary>Edit view query</summary>{view ? <QueryEditor fixed session={session} spec={{id:'view',title:'View',version:1,data:{view},pages:[],components:[]}} onChange={spec => setQueryText(JSON.stringify(spec.data.view))}/> : <p>Enter a valid query object to edit its expressions.</p>}</details>}<p>{schema.description}</p></Field>)}</FieldGroup><Button type="submit" size="sm" disabled={run.isPending}>Run tool</Button>{parseError && <p role="alert">{parseError}</p>}<Message error={run.error}/>{run.isSuccess && <pre className="console-result">{JSON.stringify(run.data, null, 2)}</pre>}</form>}</>}</div>
 }
