@@ -2,7 +2,8 @@ import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../../components/ui/dialog'
-import { flagNumber, saveView, savedViewsQuery, tool, type Session } from '../../lib/api'
+import { bootstrapQuery, flagNumber, saveView, savedViewsQuery, tool, type Session } from '../../lib/api'
+import { humanKey } from './page-bits'
 import { DetailsDrawer, type DetailsContent } from './details-drawer'
 import { closeDetails, closeSaveView, useShell, type DetailsRequest, type MetricRequest } from './shell-store'
 import { humanDate } from './format'
@@ -26,9 +27,33 @@ function useMetricDetails(session:Session,request:DetailsRequest,metric:MetricRe
   machine:[...(request.content.machine ?? []),{label:'Metric',value:metric.id},...(accounts.length ? [{label:'Accounts',value:accounts.join(', ')}] : []),...(data?.entries?.exclude?.length ? [{label:'Left out',value:data.entries.exclude.join(', ')}] : [])],
  }
 }
+const NAME_FIELDS=['label','name','legal_name','brand','raw_name','_row_id']
+const cellText=(v:unknown):string => {
+ if(v===null || v===undefined)return ''
+ if(typeof v!=='object')return String(v)
+ // An expanded reference reads as its name, not its id.
+ const named=NAME_FIELDS.map(k => (v as Record<string,unknown>)[k]).find(x => typeof x==='string' && x)
+ return typeof named==='string' ? named : JSON.stringify(v)
+}
+// Rows in data tables that explain an entry, such as receipt line items, one table each.
+async function explainedRows(session:Session,entry:string,heads:Map<string,{name:string;refs:string[]}>) {
+ const details=await tool(session,'entry_get',{id:entry})
+ const tables=await Promise.all((details.explained_by ?? []).map(async ({db}) => {
+  // join_entry makes row.entry the linked entry column whatever it is called.
+  const data=await tool(session,'db_query',{db,where:`row.entry == ${JSON.stringify(entry)}`,join_entry:true,expand:heads.get(db)?.refs,limit:500}).catch(() => null)
+  if(!data?.rows?.length)return null
+  // Hide columns nobody filled in, so the amounts fit the drawer.
+  const columns=(data.columns ?? []).filter(c => c.type!=='entry' && c.type!=='json' && !c.id.startsWith('_') && data.rows!.some(r => cellText(r.cells[c.id])!==''))
+  const rows=[...data.rows].sort((a,b) => Number(a.cells.line ?? 0)-Number(b.cells.line ?? 0)).map(r => columns.map(c => cellText(r.cells[c.id])))
+  return {title:heads.get(db)?.name ?? humanKey(db),columns:columns.map(c => humanKey(c.id)),rows}
+ }))
+ return tables.filter(t => t!==null)
+}
 function Drawer({session,request}:{session:Session;request:DetailsRequest}) {
  const history=useQuery({queryKey:['history',session.user.id,request.historyOf],enabled:!!request.historyOf,staleTime:60_000,retry:false,queryFn:() => tool(session,'history_of',{target_id:request.historyOf!})})
- const content={...request.content,history:request.content.history ?? (history.data?.events ?? []).slice(0,8).map(e => ({at:whenLabel(e.at),actor:e.actor.kind==='agent' ? 'An agent' : e.actor.kind==='system' ? 'System' : 'You',summary:e.summary || verbFor(e.tool)}))}
+ const tables=new Map((useQuery(bootstrapQuery).data?.tables ?? []).map(t => [t.id,{name:t.name,refs:(t.columns ?? []).filter(c => c.type==='ref').map(c => c.id)}]))
+ const explained=useQuery({queryKey:['explained',session.user.id,request.entry],enabled:!!request.entry,staleTime:30_000,retry:false,queryFn:() => explainedRows(session,request.entry!,tables)})
+ const content={...request.content,explained:request.content.explained ?? explained.data,history:request.content.history ?? (history.data?.events ?? []).slice(0,8).map(e => ({at:whenLabel(e.at),actor:e.actor.kind==='agent' ? 'An agent' : e.actor.kind==='system' ? 'System' : 'You',summary:e.summary || verbFor(e.tool)}))}
  return <DetailsDrawer open onOpenChange={next => {if(!next)closeDetails()}} content={content} target={request.target} onFlag={async flag => {await flagNumber(session,flag.target,flag.note)}}/>
 }
 function MetricDrawer({session,request,metric}:{session:Session;request:DetailsRequest;metric:MetricRequest}) {

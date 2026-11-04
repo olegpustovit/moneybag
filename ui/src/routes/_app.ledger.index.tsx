@@ -78,7 +78,7 @@ function Ledger() {
  const open=(row:GridRow) => {
   const e=byId.get(String(row.id));if(!e)return
   const account=(id:string) => cube?.accounts.find(a => a.id===id)?.label ?? id
-  openDetails({historyOf:e.id,target:{value:typeof row.amount==='object' && row.amount && 't' in row.amount ? row.amount.t : undefined,params:{entry:e.id}},content:{title:String(row.payee),value:typeof row.amount==='object' && row.amount && 't' in row.amount ? row.amount.t : undefined,subtitle:`${String(row.category)} · ${String(row.source)}`,
+  openDetails({historyOf:e.id,entry:e.id,target:{value:typeof row.amount==='object' && row.amount && 't' in row.amount ? row.amount.t : undefined,params:{entry:e.id}},content:{title:String(row.payee),value:typeof row.amount==='object' && row.amount && 't' in row.amount ? row.amount.t : undefined,subtitle:`${String(row.category)} · ${String(row.source)}`,
    sourceRows:{columns:['Account','Amount','Memo'],rows:(e.postings ?? []).map(p => [account(p.account),amountOf(p.amount).text,p.memo ?? ''])},
    machine:[{label:'Entry',value:e.id},{label:'Bank text',value:e.payee || '—',mono:false},{label:'Status',value:e.status,mono:false},{label:'Sequence',value:String(e.seq)},...(e.tags?.length ? [{label:'Tags',value:e.tags.join(', ')}] : []),...(e.postings ?? []).map(p => ({label:'Account ID',value:p.account}))]}})
  }

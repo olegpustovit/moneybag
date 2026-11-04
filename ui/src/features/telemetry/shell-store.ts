@@ -4,7 +4,7 @@ import type { FlagTarget } from '../../lib/api'
 
 // One drawer and one dialog for the whole app, opened from anywhere without threading props through every panel.
 export type MetricRequest={id:string;usd?:boolean;from?:string;to?:string;compare?:string;split?:string;filters?:{field:string;op:string;values:string[]}[]}
-export type DetailsRequest={content:DetailsContent;target?:FlagTarget;metric?:MetricRequest;historyOf?:string}
+export type DetailsRequest={content:DetailsContent;target?:FlagTarget;metric?:MetricRequest;historyOf?:string;entry?:string}
 export type ShellState={details:DetailsRequest|null;saveView:{page:string;state:Record<string,string>;suggested:string}|null}
 let state:ShellState={details:null,saveView:null}
 const listeners=new Set<() => void>()
