@@ -93,6 +93,11 @@ func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner pr
 		}
 		entries := []string{}
 		for i, country := range []string{"HR", "DE", "US", "HR"} {
+			// The same discoverable playbook/schema must work for every country.
+			if string(call("db_templates", map[string]any{})) != string(catalog) {
+				t.Fatal("country workflow changed the shared template or playbook")
+			}
+
 			currency, expense, bank := "EUR", "expenses:food", "assets:bank"
 			if country == "US" {
 				currency, expense, bank = "USD", "expenses:receipt_usd", "assets:receipt_usd"
@@ -127,6 +132,9 @@ func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner pr
 				{DB: "receipt_items", Upsert: &tables.RowUpsert{RowID: entry.Entry.ID + ":1", Cells: map[string]any{"entry": entry.Entry.ID, "line": float64(1), "raw_name": "Synthetic goods", "product": "gtin:6291041500213", "qty": "2", "unit_price": "5", "amount": "10", "kind": "item", "category": expense}}},
 				{DB: "receipt_items", Upsert: &tables.RowUpsert{RowID: entry.Entry.ID + ":2", Cells: map[string]any{"entry": entry.Entry.ID, "line": float64(2), "raw_name": "Synthetic adjustment", "amount": "2.50", "kind": kind, "category": expense}}},
 			}
+			if country == "HR" {
+				ops[0].Upsert.Cells["brand"] = "Konzum"
+			}
 			var dry tables.BatchResult
 			_ = json.Unmarshal(call("db_batch", tables.BatchInput{DryRun: true, Ops: ops}), &dry)
 			if len(dry.Violations) != 0 {
@@ -153,6 +161,10 @@ func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner pr
 			if !strings.Contains(string(details), `"db":"receipt_items"`) {
 				t.Fatal(string(details))
 			}
+		}
+		merchants, err := s.Tables.Query(ctx, p, tables.QueryInput{DB: "merchants", Where: "row.country=='HR'"})
+		if err != nil || len(merchants.Rows) != 1 || merchants.Rows[0].Cells["brand"] != "Konzum" {
+			t.Fatalf("Croatian Konzum fixture was not reused: %#v %v", merchants, err)
 		}
 		stores, err := s.Tables.Query(ctx, p, tables.QueryInput{DB: "stores"})
 		if err != nil || len(stores.Rows) != 3 {

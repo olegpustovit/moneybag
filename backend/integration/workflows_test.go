@@ -67,7 +67,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	prices := rates.NewService(rates.NewMongoRepository(db), a)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	tab.Ledger = book
- tab.Rates=prices
+	tab.Rates = prices
 	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	for _, p := range []principal.Principal{pa, pb} {
