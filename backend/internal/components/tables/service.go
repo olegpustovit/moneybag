@@ -417,6 +417,42 @@ func normalizeCells(columns []Column, cells map[string]any) error {
 	return nil
 }
 
+var typeHints = map[string]string{
+	"decimal":  `a decimal string such as "2.52"`,
+	"datetime": `an RFC 3339 string with offset such as "2026-11-03T18:42:00+01:00"`,
+	"date":     `a "YYYY-MM-DD" string`,
+	"number":   "a finite number",
+	"bool":     "true or false",
+	"string":   "a string up to 10000 bytes",
+	"entry":    "a ledger entry id string",
+	"account":  "an account id string such as expenses:food",
+	"ref":      "a row id string from the referenced table",
+	"list":     "an array of strings",
+	"json":     "an object up to 16 KB",
+}
+
+// cellHint tells the caller which rule a rejected cell broke and what to send instead.
+func cellHint(c Column, v any) string {
+	if v == nil || v == "" {
+		if c.Required {
+			return "required"
+		}
+	}
+	plain := c
+	plain.Enum, plain.Pattern = nil, ""
+	if c.Type != "formula" && !validValue(plain, v) {
+		return "expects " + typeHints[c.Type]
+	}
+	if len(c.Enum) > 0 {
+		allowed, _ := json.Marshal(c.Enum)
+		return "must be one of " + string(allowed)
+	}
+	if c.Pattern != "" {
+		return "must match pattern " + c.Pattern
+	}
+	return "invalid value"
+}
+
 func validateCells(columns []Column, cells map[string]any) error {
 	for _, column := range columns {
 		valid := validValue(column, cells[column.ID])
@@ -424,7 +460,7 @@ func validateCells(columns []Column, cells map[string]any) error {
 			valid = validConstraints(column, cells[column.ID])
 		}
 		if !valid {
-			return fmt.Errorf("column %s: invalid type, required value, enum or pattern", column.ID)
+			return fmt.Errorf("column %s: %s", column.ID, cellHint(column, cells[column.ID]))
 		}
 	}
 	return nil
@@ -480,7 +516,7 @@ func (s *Service) update(ctx context.Context, p principal.Principal, in UpdateIn
 	}
 	ops := make([]BatchOp, 0, len(in.Updates))
 	for _, update := range in.Updates {
-		ops = append(ops, BatchOp{DB: in.DB, Upsert: &RowUpsert{RowID: update.RowID, Cells: map[string]any{update.Column: update.Value}, Version: update.Version}})
+		ops = append(ops, BatchOp{DB: in.DB, Upsert: &RowUpsert{RowID: update.RowID, Cells: map[string]any{update.Column: update.Value}, Version: update.Version}, revive: true})
 	}
 	return s.changeRows(ctx, p, in.DB, ops)
 }

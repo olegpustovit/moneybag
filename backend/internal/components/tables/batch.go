@@ -26,6 +26,7 @@ type BatchOp struct {
 	Upsert      *RowUpsert `json:"upsert,omitempty"`
 	DeleteWhere string     `json:"delete_where,omitempty"`
 	deleteIDs   []string
+	revive      bool // legacy db_update_cells keeps a deleted row's old cells
 }
 type BatchInput struct {
 	DryRun bool      `json:"dry_run,omitempty"`
@@ -112,7 +113,11 @@ func (s *Service) Batch(ctx context.Context, p principal.Principal, in BatchInpu
 	}
 	var invalid batchInvalid
 	if errors.As(err, &invalid) {
-		err = nil
+		// Nothing was written, so there is no event to undo or cite.
+		err, result.EventID = nil, ""
+	}
+	if result.Warnings == nil {
+		result.Warnings = []Violation{}
 	}
 	return result, err
 }
@@ -184,6 +189,10 @@ func (s *Service) prepareBatch(ctx context.Context, p principal.Principal, ops [
 			if upsert.Version != nil && *upsert.Version != row.Version {
 				add(op.DB, row.ID, "", "version conflict; read the row and retry")
 				continue
+			}
+			if row.Archived && !op.revive {
+				// A deleted row id is reused as a new row, so stale cells must not leak into it.
+				row.Cells = map[string]any{}
 			}
 			columns := map[string]Column{}
 			for _, column := range tables[op.DB].Columns {

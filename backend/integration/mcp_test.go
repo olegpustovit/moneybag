@@ -169,6 +169,7 @@ func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Princi
 	testValidatedTables(t, ctx, pa, s, db)
 	testTableReferences(t, ctx, pa, pb, s, db)
 	testTableConstraints(t, ctx, pa, s, db)
+	testReceiptAgentWorkflow(t, ctx, pa, s)
 	testReceiptTemplate(t, ctx, pa, pb, s, db)
 	testLargeTableQuery(t, ctx, pa, s, db)
 	testTelemetryEval(t, ctx, pa, s, db)
