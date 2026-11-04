@@ -65,7 +65,37 @@ func testReceiptAgentWorkflow(t *testing.T, ctx context.Context, owner principal
 		}
 		ops = append(base, line(1, map[string]any{"raw_name": "MLIJEKO", "qty": "2", "unit_price": "1.26", "amount": "2.52", "kind": "item", "product": "gtin:4006381333931"}),
 			line(2, map[string]any{"raw_name": "KRUH", "amount": "20.10", "kind": "item"}))
+		// A sum-only mismatch must be refused on a real commit, with nothing saved.
+		short := append(base, line(1, map[string]any{"raw_name": "MLIJEKO", "amount": "2.52", "kind": "item"}),
+			line(2, map[string]any{"raw_name": "KRUH", "amount": "20.00", "kind": "item"}))
+		if refused, _ := json.Marshal(call("db_batch", map[string]any{"ops": short})); !strings.Contains(string(refused), "rows sum to 22.52 EUR; entry postings are 22.62 EUR") || !strings.Contains(string(refused), `"rows_written":0`) {
+			t.Fatalf("mismatched lines were not refused: %s", refused)
+		}
+		if saved := call("db_query", map[string]any{"db": "receipt_items"}); len(saved["rows"].([]any)) != 0 {
+			t.Fatalf("refused batch saved lines: %v", saved)
+		}
 		call("db_batch", map[string]any{"ops": ops})
+		// Later single-cell edits and single-line deletes must not break the sum either.
+		rawCall := func(name string, args any) string {
+			t.Helper()
+			result, err := client.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, _ := json.Marshal(result)
+			return string(raw)
+		}
+		for name, args := range map[string]any{
+			"db_update_cells": map[string]any{"db": "receipt_items", "updates": []map[string]any{{"row_id": id + ":2", "column": "amount", "value": "20.00"}}},
+			"db_delete_rows":  map[string]any{"db": "receipt_items", "row_ids": []string{id + ":2"}},
+		} {
+			if out := rawCall(name, args); !strings.Contains(out, "rows sum to 2") {
+				t.Fatalf("%s broke the ledger sum: %s", name, out)
+			}
+		}
+		if kept := call("db_query", map[string]any{"db": "receipt_items", "where": "row.line == 2"}); len(kept["rows"].([]any)) != 1 || kept["rows"].([]any)[0].(map[string]any)["cells"].(map[string]any)["amount"] != "20.10" {
+			t.Fatalf("refused edit changed the line: %v", kept)
+		}
 		// Re-itemise: delete then rewrite the same row ids without the product ref.
 		call("db_batch", map[string]any{"ops": []map[string]any{
 			{"db": "receipt_items", "delete_where": "row.entry == '" + id + "'"},
