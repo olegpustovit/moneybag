@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Receipt Line Items</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b675f;--line:#e4e0d8;--card:#fff;--accent:#2f6b4f;--warn:#9a5b13;--code:#f3f0ea}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1e1d1a;--accent:#7cc4a0;--warn:#e0a458;--code:#24231f}}
+:root[data-theme="dark"]{--bg:#161614;--fg:#ecebe6;--muted:#a19d94;--line:#2e2c28;--card:#1e1d1a;--accent:#7cc4a0;--warn:#e0a458;--code:#24231f}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.6 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:880px;margin:0 auto;padding:40px 16px 80px}
+h1{font-size:2rem;line-height:1.2;margin:0 0 8px}
+h2{font-size:1.25rem;margin:48px 0 12px;padding-top:16px;border-top:1px solid var(--line)}
+h3{font-size:1rem;margin:24px 0 8px}
+.lede{color:var(--muted);font-size:1.075rem;margin:0 0 24px}
+code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:.86em}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:14px 16px;border-radius:8px;overflow-x:auto;line-height:1.45}
+pre code{background:none;padding:0}
+table{width:100%;border-collapse:collapse;font-size:.92rem;margin:8px 0}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.wrap{overflow-x:auto}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:12px 0}
+.tag{display:inline-block;font-size:.75rem;font-weight:600;padding:1px 8px;border-radius:999px;border:1px solid currentColor;white-space:nowrap}
+.v1{color:var(--accent)}.later{color:var(--muted)}.warn{color:var(--warn)}
+ul,ol{padding-left:20px}li{margin:4px 0}
+.small{font-size:.9rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>Receipt line items</h1>
+<p class="lede">Receipts are the first use of something more general: agents can define their own data on top of the ledger, and the platform guarantees it stays consistent with the money. Nothing here is specific to a country or to receipts. Receipts are just the first template.</p>
+
+<div class="card">
+<strong>Recommendation:</strong> don't build a receipts subsystem. Upgrade the existing user tables (<code>db_*</code>) with ledger-aware column types, unique keys, references, row checks, a "rows must add up to the entry" constraint, and an atomic multi-table write. Then ship a <code>receipts</code> template that uses all of it. Dashboards already read <code>table:&lt;id&gt;</code> sources, so analytics comes almost for free.
+</div>
+
+<h2>Evidence: what agents already build, and work around</h2>
+<p>Your production account has 14 tables built by agents (read with <code>db_list</code>). They show what's missing:</p>
+<div class="wrap"><table>
+<tr><th>What agents did</th><th>Why</th><th>What fixes it</th></tr>
+<tr><td><code>salary_usd</code>, <code>gross</code>, <code>fee</code>, <code>amount</code> stored as <code>string</code></td><td><code>number</code> is a float, which isn't safe for money</td><td>A <code>decimal</code> type</td></tr>
+<tr><td><code>entry_id</code> and <code>entry_ids</code> as plain strings, sometimes comma-separated lists</td><td>No link to the ledger, and nothing checks it exists</td><td>An <code>entry</code> type, plus <code>list</code></td></tr>
+<tr><td><code>original_source_row_json</code>, <code>source_rows_json</code></td><td>No nested data</td><td>A <code>json</code> type</td></tr>
+<tr><td>Columns named <code>tag</code>, <code>payee_match</code>, <code>source_account</code></td><td>No link to accounts or tags</td><td>An <code>account</code> type</td></tr>
+<tr><td>An <code>o</code> column for ordering, and an <code>id</code> column copying the row id</td><td>No notion of a key</td><td>Unique <code>keys</code> and natural row ids</td></tr>
+</table></div>
+
+<h2>Schema primitives (country-agnostic)</h2>
+<h3>Column types: existing, plus new ones</h3>
+<div class="wrap"><table>
+<tr><th>Type</th><th>Stored as / validated</th></tr>
+<tr><td><code>number string bool date formula</code></td><td>Unchanged, so existing tables keep working.</td></tr>
+<tr><td><code>decimal</code></td><td>Decimal128, a string in JSON, parsed by <code>ledger.ParseDecimal</code>. Use it for money and quantities.</td></tr>
+<tr><td><code>datetime</code></td><td>RFC 3339 <em>with</em> an offset, so the local hour is preserved for "when do I shop".</td></tr>
+<tr><td><code>entry</code></td><td>A ledger entry id that must exist and belong to you. Queries can join the entry's fields.</td></tr>
+<tr><td><code>account</code></td><td>An account id that must exist, such as <code>expenses:everyday:home</code>.</td></tr>
+<tr><td><code>ref</code> + <code>table</code></td><td>The id of a row in another table, which must exist. Deleting a referenced row is refused.</td></tr>
+<tr><td><code>list</code></td><td>An array of strings, such as payee patterns or tags.</td></tr>
+<tr><td><code>json</code></td><td>An object up to 16 KB, readable in CEL as <code>row.attrs.x</code>. Country- or source-specific extras go here.</td></tr>
+</table></div>
+<p>Each column can also carry <code>description</code>, <code>required</code>, <code>enum</code> and <code>pattern</code>.</p>
+
+<h3>Table-level guarantees</h3>
+<pre><code>{ name, description,                      // descriptions are what the next agent reads
+  columns: [...],
+  keys:   [["merchant","store_code"]],      // unique; enforced by a Mongo unique index, so it is safe under concurrency
+  checks: [{ expr: "row.qty * row.unit_price ... ", message: "...", level: "error"|"warn" }],
+  ledger: { entry: "entry", amount: "amount", accounts: ["expenses:"] }   // Σ amount per entry = that entry's postings in those accounts
+}</code></pre>
+<ul>
+<li><strong>The <code>ledger</code> constraint</strong> is the one that matters. Line items, invoice splits and trip allocations all mean "these rows explain this entry". It is checked for every entry a write touches. A reversed entry is exempt, and its rows are marked <code>entry.effective=false</code>.</li>
+<li><strong>Checksum functions in CEL:</strong> <code>gtin_valid</code>, <code>iban_valid</code>, <code>luhn</code>, <code>mod11_10</code> (the Croatian OIB), <code>mod97</code>. The platform stays generic, and an agent adds <code>row.country != "HR" || mod11_10(row.tax_id)</code> as a check when it learns a country's rule.</li>
+</ul>
+
+<h3>Atomic multi-table write: <code>db_batch</code></h3>
+<p>A receipt is a store, a header and 30 lines. Written one call at a time, the "items add up" rule could never pass partway through. One call does it all:</p>
+<pre><code>db_batch {
+  dry_run?: true,
+  ops: [
+    { db: "stores",        upsert: { row_id: "HR:12345678903:P1232", cells: {...} } },
+    { db: "receipts",      upsert: { row_id: "01M6AVWD…", cells: {...}, version?: 2 } },
+    { db: "receipt_items", delete_where: "row.entry == '01M6AVWD…'" },
+    { db: "receipt_items", upsert: { row_id: "01M6AVWD…:1", cells: {...} } }, ...
+  ]
+}
+→ { rows_written, warnings[], violations[] (on dry_run or failure), event_id }</code></pre>
+<p>All the operations run in one transaction and one audit event, so a single <code>undo</code> reverses the whole receipt. Types, required fields, references, keys, checks and ledger sums are evaluated <em>at commit</em>, and any failure rolls everything back with a list of every violation (not just the first). <code>db_update_cells</code> becomes a single-table call to the same code path.</p>
+
+<h3>Reading with the ledger joined in</h3>
+<ul>
+<li><code>db_query</code> gains <code>join_entry: true</code>, which adds <code>entry.{date, payee, accounts, amount, value_eur, effective, tags}</code>, and <code>expand: ["store","product"]</code> to inline one level of references.</li>
+<li>Filters on key, <code>ref</code> and <code>entry</code> columns run in Mongo with an index. Today every row is loaded and filtered in memory, with a 5,000-row cap, and line items will pass that within a year.</li>
+<li>The dashboard <code>table:</code> source exposes the same joined fields, so <code>view_upsert</code> with group and agg answers "spend by store by weekday" with no new analytics tool.</li>
+<li><code>entry_get</code> lists the rows that explain the entry (<code>explained_by: [{db, rows}]</code>), and <code>entries_list</code> gains <code>explained_by: "receipt_items" | "!receipt_items"</code> to find receipts still to itemise.</li>
+</ul>
+
+<h2>The <code>receipts</code> template</h2>
+<p><code>db_templates</code> lists ready-made schemas, and <code>db_create {template: "receipts"}</code> creates all five tables. They're ordinary tables afterwards, so the agent can <code>db_alter</code> them. Column names follow common standards (ISO 3166 country, ISO 4217 currency, GS1 GTIN), so agents in different sessions and countries end up with the same shape.</p>
+<pre class="mermaid">erDiagram
+  ENTRY ||--o| RECEIPTS : "entry (key)"
+  ENTRY ||--o{ RECEIPT_ITEMS : "entry + ledger sum"
+  MERCHANTS ||--o{ STORES : "merchant ref"
+  STORES ||--o{ RECEIPTS : "store ref"
+  PRODUCTS ||--o{ RECEIPT_ITEMS : "product ref (optional)"</pre>
+<div class="wrap"><table>
+<tr><th>Table</th><th>Row id (natural)</th><th>Columns</th><th>Guarantees</th></tr>
+<tr><td><code>merchants</code></td><td><code>&lt;country&gt;:&lt;tax_id&gt;</code></td><td>country, tax_id, tax_scheme, legal_name, brand, attrs</td><td>key (country, tax_id)</td></tr>
+<tr><td><code>stores</code></td><td><code>&lt;merchant&gt;:&lt;store_code&gt;</code></td><td>merchant <em>ref</em>, store_code, label, address, city, postcode, country, lat, lon <em>decimal</em>, payees <em>list</em>, external_ids <em>json</em></td><td>key (merchant, store_code)</td></tr>
+<tr><td><code>products</code></td><td><code>gtin:&lt;gtin&gt;</code>, or chosen by the agent</td><td>gtin, name, brand, size <em>decimal</em>, size_unit enum(g, ml, pc), category, aliases <em>list</em>, external_ids <em>json</em></td><td>key (gtin); check <code>gtin == "" || gtin_valid(gtin)</code></td></tr>
+<tr><td><code>receipts</code></td><td>the entry id</td><td>entry <em>entry</em>, store <em>ref</em>, issued_at <em>datetime</em>, receipt_ref, currency, total <em>decimal</em>, payment enum, source enum(photo, e-receipt, manual), attrs <em>json</em></td><td>keys (entry), (store, receipt_ref); ledger sum on total</td></tr>
+<tr><td><code>receipt_items</code></td><td><code>&lt;entry&gt;:&lt;line&gt;</code></td><td>entry <em>entry</em>, line, raw_name, product <em>ref</em>, qty <em>decimal</em>, unit, unit_price <em>decimal</em>, amount <em>decimal</em>, kind enum(item, discount, deposit, rounding, tip, fee), category <em>account</em>, attrs <em>json</em></td><td>key (entry, line); ledger sum on amount; warning when qty × unit_price ≠ amount</td></tr>
+</table></div>
+<p>Country-specific data goes in <code>attrs</code>, for example:</p>
+<ul>
+<li>Croatia: JIR, ZKI and the VAT breakdown.</li>
+<li>Germany: TSE signature and transaction number.</li>
+<li>US: sales tax lines and the tip on the bill.</li>
+<li>Any country: loyalty savings.</li>
+</ul>
+<p>The fields that analytics depends on (who, where, when, what, how much) are real columns in every country.</p>
+
+<h3>Making it obvious to an agent</h3>
+<p>Agents reliably read tool descriptions, and rarely read resources. So the guidance goes where they'll see it:</p>
+<ul>
+<li><strong><code>db_create</code> description:</strong> "To attach facts to ledger entries (receipt lines, invoice splits, trip details), use an <code>entry</code> column plus a <code>ledger</code> constraint. Put shared things (stores, products) in their own table with natural row ids and point to them with <code>ref</code>. Put source-specific extras in a <code>json</code> attrs column. Check <code>db_templates</code> first."</li>
+<li><strong><code>db_templates</code>:</strong> returns each template's schema <em>and</em> a short playbook, for example "find the entry with <code>entries_list explained_by:'!receipt_items'</code>, reuse stores via <code>db_query</code> on <code>stores</code> by key, then write everything in one <code>db_batch</code> with <code>dry_run</code> first".</li>
+<li><strong>Error messages say what to do next:</strong> "receipt_items for 01M6… sum to 22.52; the entry is 22.62. Add a line of kind=rounding or discount for 0.10."</li>
+<li><strong>Table and column <code>description</code>s are returned by <code>db_list</code></strong>, so the next session understands tables an earlier agent created.</li>
+</ul>
+
+<h3>"Where am I losing money"</h3>
+<p>Moneybag stores only what you paid. A price-list MCP holds what you could have paid. The agent joins them on <strong>GTIN plus store plus date</strong>, with <code>stores.external_ids</code> and <code>products.external_ids</code> holding the other system's ids. In Croatia, for example, large retailers have had to publish daily, machine-readable price lists for each shop since May 2025. No external prices are copied into the ledger, so nothing can go stale there.</p>
+
+<h2>Lifecycle and integrity</h2>
+<div class="wrap"><table>
+<tr><th>Event</th><th>Effect</th></tr>
+<tr><td>Entry reversed</td><td>Its rows remain with <code>entry.effective=false</code>, the ledger sum is no longer enforced, and analytics drop them.</td></tr>
+<tr><td><code>import_undo</code> removes an entry</td><td>Its rows become orphans with <code>entry: null</code> in joins. <code>consistency_check</code> lists every broken <code>entry</code>, <code>ref</code> and <code>account</code> value.</td></tr>
+<tr><td>Delete a referenced store or product</td><td>Refused, naming the rows that point to it. To merge duplicates, repoint the references with <code>db_batch</code> and then delete.</td></tr>
+<tr><td><code>db_alter</code> adds a key, check or ledger constraint</td><td>Existing rows are validated first, and the change is refused with the violations listed.</td></tr>
+<tr><td><code>db_drop</code> on a table that other tables reference</td><td>Refused until those references are removed.</td></tr>
+</table></div>
+
+<h2>Build order</h2>
+<ol>
+<li>The <code>decimal</code>, <code>datetime</code>, <code>entry</code>, <code>account</code>, <code>ref</code>, <code>list</code> and <code>json</code> types, plus descriptions. <span class="tag v1">v1</span></li>
+<li><code>keys</code> (unique index on <code>user_id, table_id, key_hashes</code>), <code>checks</code>, and the checksum functions. <span class="tag v1">v1</span></li>
+<li><code>db_batch</code>, with all constraints checked at commit, including the <code>ledger</code> constraint. <span class="tag v1">v1</span></li>
+<li>Join and expand in <code>db_query</code> and in dashboard <code>table:</code> sources, with indexed filters. <span class="tag v1">v1</span></li>
+<li><code>explained_by</code> on <code>entry_get</code> and <code>entries_list</code>. <span class="tag v1">v1</span></li>
+<li><code>db_templates</code> with <code>receipts</code>. <span class="tag v1">v1</span></li>
+<li>Changing a column's type, so existing string money columns can move to <code>decimal</code>. <span class="tag later">later</span></li>
+</ol>
+
+<h2>Testing plan</h2>
+<p>No test writes go to production. The integration harness only accepts databases named <code>moneybag_test_*</code> and drops them afterwards.</p>
+<ul>
+<li><strong>Unit:</strong> validation for every new type, including edge cases (decimal precision, datetime without an offset, oversized json); the checksum functions against published test vectors; key hashing; ledger sums with mixed commodities.</li>
+<li><strong>Integration (<code>make test-integration</code> through <code>mcpSession</code>):</strong>
+<ul>
+<li>A <code>db_batch</code> with one bad operation rolls back everything.</li>
+<li>Items that don't add up are refused with the difference stated; complete items are accepted.</li>
+<li>After a reversal, the ledger constraint is no longer enforced.</li>
+<li>Two concurrent upserts of the same store leave one row.</li>
+<li>Deleting a referenced row is refused.</li>
+<li>An <code>undo</code> of a batch restores every table.</li>
+<li><code>join_entry</code> returns <code>value_eur</code> computed with a fixed <code>rate_set</code>.</li>
+<li>The dashboard <code>table:</code> source groups by <code>store.label</code> and by weekday.</li>
+<li>Another user can't reference your rows.</li>
+<li>In a read-only session, the write tools are hidden.</li>
+</ul></li>
+<li><strong>Backward compatibility:</strong> a fixture copies the schemas of your 14 production tables (not their data), and existing <code>db_query</code> and <code>db_update_cells</code> results stay identical.</li>
+<li><strong>Agent evaluation across countries:</strong> the same template and prompt, with a Croatian Konzum receipt, a German receipt carrying a TSE signature, and a US receipt with a tip. Pass means the receipt is itemised in one batch with no new columns, and the second visit to the same store reuses the store row.</li>
+<li><strong>Production:</strong> read-only checks after deploy (<code>db_list</code> shows the old tables unchanged, and <code>db_templates</code> is listed). The first write is a real receipt you actually want stored.</li>
+</ul>
+<p class="small">Based on: <code>tables/service.go</code>, <code>dashboard/catalog.go</code> (<code>table:</code> sources), <code>ledger/tags.go</code>, <code>mcpserver/server.go</code> and <code>reference.go</code>, and read-only production calls (<code>db_list</code>, <code>entries_list</code>, <code>categories_list</code>) on 2026-11-04. Croatian price-list rules: <a href="https://cms.law/en/hrv/legal-updates/new-croatian-price-control-measures">CMS</a>.</p>
+</main>
+</body>
+</html>

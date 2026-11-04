@@ -7,6 +7,7 @@ import (
 	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
@@ -62,6 +63,12 @@ func specEnums(s *jsonschema.Schema) {
 		}
 	}
 	if s.Properties != nil {
+		if s.Properties["formula"] != nil && s.Properties["id"] != nil && s.Properties["table"] != nil {
+			set(s, "type", tables.ColumnTypes)
+		}
+		if s.Properties["expr"] != nil && s.Properties["message"] != nil && s.Properties["level"] != nil {
+			set(s, "level", []string{"", "error", "warn"})
+		}
 		if s.Properties["encoding"] != nil && s.Properties["columns"] != nil {
 			set(s, "mark", dashboard.Marks)
 			set(s, "format", dashboard.Formats)

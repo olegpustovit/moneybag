@@ -54,6 +54,30 @@ func testAgentEvalTasks(t *testing.T, ctx context.Context, pa principal.Principa
 		}
 	})
 
+	t.Run("discover and evaluate receipt checksums", func(t *testing.T) {
+		out, result := call("catalog_get", map[string]any{})
+		if result.IsError {
+			t.Fatal(text(result))
+		}
+		found := map[string]bool{}
+		for _, raw := range out["functions"].([]any) {
+			function := raw.(map[string]any)
+			name, _ := function["name"].(string)
+			if function["description"] != "" {
+				found[name] = true
+			}
+		}
+		for _, name := range []string{"gtin_valid", "iban_valid", "luhn", "mod11_10", "mod97"} {
+			if !found[name] {
+				t.Fatalf("catalog missing %s", name)
+			}
+		}
+		out, result = call("expr_eval", map[string]any{"expr": `gtin_valid('6291041500213') && iban_valid('DE89370400440532013000') && luhn('79927398713') && mod11_10('12345678903') && mod97('98')`})
+		if result.IsError || out["value"] != true {
+			t.Fatalf("checksum evaluation: %v %s", out, text(result))
+		}
+	})
+
 	t.Run("understand a dashboard without its full spec", func(t *testing.T) {
 		out, result := call("dashboard_summary", map[string]any{"id": "eval-agent"})
 		pages, _ := out["pages"].([]any)

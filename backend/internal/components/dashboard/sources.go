@@ -324,18 +324,7 @@ func (s *Sources) rows(ctx context.Context, p principal.Principal, source string
 			out = append(out, r)
 		}
 	case strings.HasPrefix(source, "table:"):
-		q, e := s.Tables.Query(ctx, p, tables.QueryInput{DB: strings.TrimPrefix(source, "table:")})
-		if e != nil {
-			return nil, e
-		}
-		for _, r := range q.Rows {
-			cells := map[string]any{}
-			for k, v := range r.Cells {
-				cells[k] = v
-			}
-			cells["_row_id"] = r.ID
-			out = append(out, cells)
-		}
+		return s.Tables.SourceRows(ctx, p, strings.TrimPrefix(source, "table:"))
 	case source == "scenarios" || strings.HasPrefix(source, "scenario:"):
 		state, e := s.Model.Get(ctx, p)
 		if e != nil {

@@ -1,0 +1,488 @@
+[
+  {
+    "name": "Legacy schema 01",
+    "columns": [
+      {
+        "id": "tag",
+        "type": "string"
+      },
+      {
+        "id": "counted",
+        "type": "string"
+      },
+      {
+        "id": "why",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 02",
+    "columns": [
+      {
+        "id": "name",
+        "type": "string"
+      },
+      {
+        "id": "tag",
+        "type": "string"
+      },
+      {
+        "id": "kind",
+        "type": "string"
+      },
+      {
+        "id": "status",
+        "type": "string"
+      },
+      {
+        "id": "cancelled_on",
+        "type": "string"
+      },
+      {
+        "id": "watch_for",
+        "type": "string"
+      },
+      {
+        "id": "est_eur",
+        "type": "number"
+      },
+      {
+        "id": "note",
+        "type": "string"
+      },
+      {
+        "id": "o",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 03",
+    "columns": [
+      {
+        "id": "o",
+        "type": "string"
+      },
+      {
+        "id": "title",
+        "type": "string"
+      },
+      {
+        "id": "type",
+        "type": "string"
+      },
+      {
+        "id": "category",
+        "type": "string"
+      },
+      {
+        "id": "payee_match",
+        "type": "string"
+      },
+      {
+        "id": "cut_share",
+        "type": "number"
+      },
+      {
+        "id": "detail",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 04",
+    "columns": [
+      {
+        "id": "tag",
+        "type": "string"
+      },
+      {
+        "id": "name",
+        "type": "string"
+      },
+      {
+        "id": "from",
+        "type": "string"
+      },
+      {
+        "id": "to",
+        "type": "string"
+      },
+      {
+        "id": "evidence",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 05",
+    "columns": [
+      {
+        "id": "id",
+        "type": "string"
+      },
+      {
+        "id": "o",
+        "type": "string"
+      },
+      {
+        "id": "description",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 06",
+    "columns": [
+      {
+        "id": "o",
+        "type": "string"
+      },
+      {
+        "id": "question",
+        "type": "string"
+      },
+      {
+        "id": "payee_match",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 07",
+    "columns": [
+      {
+        "id": "account_id",
+        "type": "string"
+      },
+      {
+        "id": "period",
+        "type": "string"
+      },
+      {
+        "id": "record_type",
+        "type": "string"
+      },
+      {
+        "id": "coverage_status",
+        "type": "string"
+      },
+      {
+        "id": "date_precision",
+        "type": "string"
+      },
+      {
+        "id": "entry_ids",
+        "type": "string"
+      },
+      {
+        "id": "evidence_file",
+        "type": "string"
+      },
+      {
+        "id": "source_row",
+        "type": "string"
+      },
+      {
+        "id": "notes",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 08",
+    "columns": [
+      {
+        "id": "date",
+        "type": "string"
+      },
+      {
+        "id": "payer",
+        "type": "string"
+      },
+      {
+        "id": "currency",
+        "type": "string"
+      },
+      {
+        "id": "gross",
+        "type": "string"
+      },
+      {
+        "id": "fee",
+        "type": "string"
+      },
+      {
+        "id": "net",
+        "type": "string"
+      },
+      {
+        "id": "entry_id",
+        "type": "string"
+      },
+      {
+        "id": "status",
+        "type": "string"
+      },
+      {
+        "id": "source_document",
+        "type": "string"
+      },
+      {
+        "id": "scope",
+        "type": "string"
+      },
+      {
+        "id": "notes",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 09",
+    "columns": [
+      {
+        "id": "date",
+        "type": "string"
+      },
+      {
+        "id": "currency",
+        "type": "string"
+      },
+      {
+        "id": "destination_credit",
+        "type": "string"
+      },
+      {
+        "id": "destination_account",
+        "type": "string"
+      },
+      {
+        "id": "destination_entry",
+        "type": "string"
+      },
+      {
+        "id": "source_row",
+        "type": "string"
+      },
+      {
+        "id": "possible_business_account",
+        "type": "string"
+      },
+      {
+        "id": "source_iban_status",
+        "type": "string"
+      },
+      {
+        "id": "business_debit_status",
+        "type": "string"
+      },
+      {
+        "id": "notes",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 10",
+    "columns": [
+      {
+        "id": "withdrawal_date",
+        "type": "string"
+      },
+      {
+        "id": "cash_uah",
+        "type": "string"
+      },
+      {
+        "id": "assumed_conversion_date",
+        "type": "string"
+      },
+      {
+        "id": "reference_uah_per_usd",
+        "type": "string"
+      },
+      {
+        "id": "estimated_usd",
+        "type": "string"
+      },
+      {
+        "id": "reference_week_low_usd",
+        "type": "string"
+      },
+      {
+        "id": "reference_week_high_usd",
+        "type": "string"
+      },
+      {
+        "id": "estimate_status",
+        "type": "string"
+      },
+      {
+        "id": "rate_source",
+        "type": "string"
+      },
+      {
+        "id": "source_account",
+        "type": "string"
+      },
+      {
+        "id": "source_row",
+        "type": "string"
+      },
+      {
+        "id": "notes",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 11",
+    "columns": [
+      {
+        "id": "currency",
+        "type": "string"
+      },
+      {
+        "id": "wise_reference",
+        "type": "string"
+      },
+      {
+        "id": "source_dates",
+        "type": "string"
+      },
+      {
+        "id": "source_net",
+        "type": "string"
+      },
+      {
+        "id": "source_row_count",
+        "type": "string"
+      },
+      {
+        "id": "entry_ids",
+        "type": "string"
+      },
+      {
+        "id": "coverage_status",
+        "type": "string"
+      },
+      {
+        "id": "source_rows_json",
+        "type": "string"
+      },
+      {
+        "id": "source_zip_sha256",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 12",
+    "columns": [
+      {
+        "id": "account",
+        "type": "string"
+      },
+      {
+        "id": "date",
+        "type": "string"
+      },
+      {
+        "id": "time_local",
+        "type": "string"
+      },
+      {
+        "id": "amount",
+        "type": "string"
+      },
+      {
+        "id": "currency",
+        "type": "string"
+      },
+      {
+        "id": "balance_after",
+        "type": "string"
+      },
+      {
+        "id": "charge",
+        "type": "string"
+      },
+      {
+        "id": "card",
+        "type": "string"
+      },
+      {
+        "id": "source_page",
+        "type": "string"
+      },
+      {
+        "id": "entry_group",
+        "type": "string"
+      },
+      {
+        "id": "match_scope",
+        "type": "string"
+      },
+      {
+        "id": "original_source_row_json",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 13",
+    "columns": [
+      {
+        "id": "invoice_number",
+        "type": "string"
+      },
+      {
+        "id": "receipt_date",
+        "type": "string"
+      },
+      {
+        "id": "salary_usd",
+        "type": "string"
+      },
+      {
+        "id": "reimbursement_usd",
+        "type": "string"
+      },
+      {
+        "id": "gross_usd",
+        "type": "string"
+      },
+      {
+        "id": "fee_usd",
+        "type": "string"
+      },
+      {
+        "id": "entry_id",
+        "type": "string"
+      },
+      {
+        "id": "match_basis",
+        "type": "string"
+      }
+    ]
+  },
+  {
+    "name": "Legacy schema 14",
+    "columns": [
+      {
+        "id": "key",
+        "type": "string"
+      },
+      {
+        "id": "value",
+        "type": "number"
+      },
+      {
+        "id": "unit",
+        "type": "string"
+      }
+    ]
+  }
+]

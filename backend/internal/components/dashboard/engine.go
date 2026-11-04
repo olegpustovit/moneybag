@@ -122,6 +122,11 @@ func native(v any) (map[string]any, error) {
 }
 func numeric(v any) (float64, error) {
 	switch n := v.(type) {
+	case interface{ Float() float64 }:
+		value := n.Float()
+		if !math.IsNaN(value) && !math.IsInf(value, 0) {
+			return value, nil
+		}
 	case float64:
 		if !math.IsInf(n, 0) && !math.IsNaN(n) {
 			return n, nil

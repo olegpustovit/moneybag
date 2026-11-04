@@ -359,6 +359,12 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 			return e
 		}
 		return s.Rates.Archive(ctx, p, id, old.Archived, reason)
+	case "db_template_create":
+		created, err := decodeAfter[[]tables.Table](event)
+		if err != nil {
+			return err
+		}
+		return s.Tables.ArchiveTemplate(ctx, p, created, reason)
 	case "db_create":
 		return s.Tables.Archive(ctx, p, id, true, reason)
 	case "db_archive":
@@ -374,13 +380,23 @@ func (s *Service) inverse(ctx context.Context, p principal.Principal, event audi
 		if e != nil {
 			return e
 		}
-		return s.Tables.SetColumns(ctx, p, id, old.Columns, reason)
+		return s.Tables.RestoreSchema(ctx, p, id, old, reason)
 	case "db_update_cells":
 		old, e := decodeBefore[[]tables.Row](event)
 		if e != nil {
 			return e
 		}
 		return s.Tables.RestoreRows(ctx, p, id, old, reason)
+	case "db_batch":
+		before, err := decodeBefore[tables.BatchState](event)
+		if err != nil {
+			return err
+		}
+		after, err := decodeAfter[tables.BatchState](event)
+		if err != nil {
+			return err
+		}
+		return s.Tables.RestoreBatch(ctx, p, before, after, reason)
 	case "scenario_upsert":
 		old, e := decodeBefore[model.Scenario](event)
 		if e != nil {

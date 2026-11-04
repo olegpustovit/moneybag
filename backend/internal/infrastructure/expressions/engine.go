@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"google.golang.org/protobuf/types/known/structpb"
 	"math"
+	"math/big"
 	"reflect"
 	"strconv"
 	"sync"
@@ -36,13 +37,20 @@ func number(v ref.Val) (float64, bool) {
 		return float64(n), true
 	case types.Uint:
 		return float64(n), true
+	case exactDecimal:
+		return n.Float(), true
 	}
 	return 0, false
 }
 func New() (*Engine, error) {
 	opts := []cel.EnvOption{cel.Variable("row", cel.DynType), cel.Variable("data", cel.MapType(cel.StringType, cel.DynType)), cel.Variable("params", cel.MapType(cel.StringType, cel.DynType)), cel.Variable("computed", cel.MapType(cel.StringType, cel.DynType)), cel.Variable("rates", cel.MapType(cel.StringType, cel.DynType)), cel.ParserRecursionLimit(40), cel.ParserExpressionSizeLimit(2000), cel.CrossTypeNumericComparisons(true)}
+	opts = append(opts, checksumOptions()...)
+	opts = append(opts, decimalOptions()...)
 	unary := func(name string, fn func(float64) float64) {
-		opts = append(opts, cel.Function(name, cel.Overload("mb_"+name, []*cel.Type{cel.DynType}, cel.DoubleType, cel.UnaryBinding(func(v ref.Val) ref.Val {
+		opts = append(opts, cel.Function(name, cel.Overload("mb_"+name, []*cel.Type{cel.DynType}, cel.DynType, cel.UnaryBinding(func(v ref.Val) ref.Val {
+			if decimal, ok := v.(exactDecimal); ok && name == "abs" {
+				return checkedDecimal(new(big.Rat).Abs(decimal.r))
+			}
 			n, ok := number(v)
 			if !ok {
 				return types.NewErr("%s needs a number", name)
@@ -55,11 +63,14 @@ func New() (*Engine, error) {
 		}))))
 	}
 	unary("abs", math.Abs)
-	opts = append(opts, cel.Function("round", cel.Overload("mb_round", []*cel.Type{cel.DynType, cel.DynType}, cel.DoubleType, cel.BinaryBinding(func(x, y ref.Val) ref.Val {
+	opts = append(opts, cel.Function("round", cel.Overload("mb_round", []*cel.Type{cel.DynType, cel.DynType}, cel.DynType, cel.BinaryBinding(func(x, y ref.Val) ref.Val {
 		a, ok := number(x)
 		b, bok := number(y)
 		if !ok || !bok || b < 0 || b > 12 {
 			return types.NewErr("round(number, decimals 0..12) expected")
+		}
+		if decimal, ok := x.(exactDecimal); ok {
+			return roundDecimal(decimal, int(b))
 		}
 		p := math.Pow10(int(b))
 		return types.Double(math.Round(a*p) / p)
@@ -76,7 +87,7 @@ func New() (*Engine, error) {
 	}))))
 	for _, name := range []string{"sum", "min", "max"} {
 		name := name
-		opts = append(opts, cel.Function(name, cel.Overload("mb_"+name, []*cel.Type{cel.ListType(cel.DynType)}, cel.DoubleType, cel.UnaryBinding(func(v ref.Val) ref.Val {
+		opts = append(opts, cel.Function(name, cel.Overload("mb_"+name, []*cel.Type{cel.ListType(cel.DynType)}, cel.DynType, cel.UnaryBinding(func(v ref.Val) ref.Val {
 			l, ok := v.(traits.Lister)
 			if !ok {
 				return types.NewErr("%s needs a list", name)
@@ -87,7 +98,11 @@ func New() (*Engine, error) {
 			}
 			total := 0.0
 			for i := 0; i < n; i++ {
-				x, ok := number(l.Get(types.Int(i)))
+				value := l.Get(types.Int(i))
+				if _, ok := value.(exactDecimal); ok {
+					return decimalAggregate(name, l)
+				}
+				x, ok := number(value)
 				if !ok {
 					return types.NewErr("%s needs numbers", name)
 				}
@@ -187,7 +202,7 @@ func (e *Engine) Compile(src string) (cel.Program, error) {
 	if issues.Err() != nil {
 		return nil, issues.Err()
 	}
-	p, err := e.env.Program(ast, cel.CostLimit(10000), cel.InterruptCheckFrequency(64), cel.EvalOptions(cel.OptTrackCost))
+	p, err := e.env.Program(ast, cel.Functions(decimalBindings()...), cel.CustomDecoratorV2(decimalEqualityDecorator), cel.CostLimit(10000), cel.InterruptCheckFrequency(64), cel.EvalOptions(cel.OptTrackCost))
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +280,11 @@ func evalProgram(ctx context.Context, src string, p cel.Program, env any) (Resul
 func nativeValue(out ref.Val) (any, error) {
 	const safeInteger = 1<<53 - 1
 	switch v := out.(type) {
+	case exactDecimal:
+		if _, err := decimalString(v.r); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case types.Bool:
 		return bool(v), nil
 	case types.String:

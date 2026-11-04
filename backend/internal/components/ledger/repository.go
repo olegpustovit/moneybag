@@ -129,6 +129,14 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 			f["kind"] = bson.M{"$ne": "reversal"}
 		}
 	}
+	if in.MatchIDs != nil {
+		op := "$in"
+		if in.ExcludeIDs {
+			op = "$nin"
+		}
+		f["$and"] = bson.A{bson.M{"_id": bson.M{op: in.MatchIDs}}}
+	}
+
 	if in.Text != "" {
 		f["payee"] = bson.M{"$regex": regexp.QuoteMeta(in.Text), "$options": "i"}
 	}
@@ -136,7 +144,7 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 	if limit == 0 {
 		limit = 100
 	}
-	overlay := bson.A{bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}}, bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"}}
+	overlay := entryTagOverlay(p)
 	sort := bson.D{{Key: "seq", Value: -1}}
 	if in.Sort == "date" || in.Sort == "-date" {
 		direction := 1

@@ -1,42 +1,30 @@
 # Implementation and verification ledger
 
-The v0.4 reference is a full product specification, not a request to deploy its in-memory prototype. Checked items have implementation and verification evidence below. Deployment and publication remain open until verified on the target services.
+## Ledger-aware tables and receipts (2026-11-04)
 
-- [x] Foundations: Go layout, typed MONEYBAG_ config, optional Vault, slog, shutdown, health, existing standalone MongoDB on oracle-vm, atomic document writes and durable audit intents/outcomes and explicit user_id scoping in one shared MongoDB database.
-- [x] Identity: Argon2id passwords, invite-only signup, first-owner bootstrap, hashed cookie sessions, connected agent management.
-- [x] OAuth: PRM/AS discovery, code + S256 PKCE, audience and scopes, exact redirects and host allowlist, DCR, SSRF-safe CIMD, 15-minute access, 30-day rotating refresh with reuse detection, revocation, issuer redirects.
-- [x] Ledger: Decimal128 money, per-commodity balance validation, immutable posted entries, drafts, reversals/replacements, transfers, commodity/account management, per-user sequence/audit/cache invalidation with detectable incomplete workflows, history and undo.
-- [x] Rates: historical FX/metal/security valuation, cost lots, manual and feed quotes.
-- [x] Classification: expense categories, tags without journal mutation, ordered CEL rules, previews, batch reclassification.
-- [x] Imports: PrivatBank XLSX, Wise CSV/feed, mapped generic CSV, Plaid/Finance connector input, staging/edit/preview/commit, row provenance/dedupe, assertions, undo.
-- [x] Reconciliation: assertions, discrepancies, suggestions, match/adjust/ignore with reason, duplicate detection, nightly invariant verification.
-- [x] Budgets: mapped expense accounts, monthly actuals, six-month averages, limits, status.
-- [x] Tables: typed columns, CRUD cells, CEL formulas/dependency recompute and formula bar.
-- [x] Models: assumptions, income streams, scenario overlays/events, forecast engine port, compare and shocks; all eight tracker scenarios reproduced.
-- [x] Dashboard engine: concrete JSON schema, bounded/cached CEL, dependency queries, where/derive/group/agg/sort/limit, server HTML/SVG, KPI/table/bar/line/area/stack/donut/budget bars/scenario/text, same renderer for web and preview, HTML + PNG.
-- [x] Dashboard lifecycle: draft/create/components/compose/RFC6902 patch, validate/preview/diff, immutable versions, atomic publish gate, attribution, rollback.
-- [x] Sharing: invite user grants/roles/expiry/revoke; snapshot default/refresh; live source and row restricted reads; editor publishing limits; read auditing; shared-with-me.
-- [x] MCP: all 64 specified typed tools, truthful annotations, scoped toolsets, separate full/read-only HTTP, stdio, eight resources and five prompts, SDK-based contract/transport/isolation tests.
-- [x] UI: faithful sidebar/dashboards/grids/editor/spec/console/history/settings, accessible, responsive, theme states, useful empty/error states, every action uses shared workflows.
-- [x] Data ingestion handoff: user will have Grokbot populate real data. Import workflows and provenance are implemented; all eight original scenario forecasts pass the private parity check. No fabricated transaction history.
-- [x] Operations: systemd service and jobs, atomic deploy/rollback, validated health on 6459. Backups and restore drills are excluded at the owner's request.
-- [x] Publication: public GitHub repository, accurate README, synthetic screenshots, license, checks/CI, no private data or credentials.
-- [x] Completion audit: rendered desktop/mobile, security/integration tests, live MCP workflows, fidelity review, design documentation, production state verified.
+Source proposal: https://artifacts.microapps.space/a/x8kpzrphvgs7, version 3; saved verbatim at `docs/receipt-line-items.html` (SHA-256 `1a218ece493aa5d67c7936875dd63026a774fcbf054d3bb221c1480475120ff5`).
 
-Verified on 2026-10-28:
+**User-approved change to the proposal:** `AGENTS.md` requires ordinary standalone MongoDB. The user explicitly accepted possible partial table writes instead of multi-document atomicity. There is no replica-set requirement, transaction session, operator script, replacement storage model, database migration, or system MongoDB change. Normal application deployments remain sudo-free.
 
-- `go test ./...` and `go vet ./...` pass with Go 1.26.10. Integration tests run natively against the existing standalone MongoDB using a disposable `moneybag_test_` database, including colliding logical IDs, OAuth/HTTP/stdio, all 64 scope guards, import/reclassification/reversal chains, snapshot/live sharing, preview revocation, archived-record undo, cost lots and valuations.
-- The eight private forecast fixtures pass to the cent. The public repository contains no private reference data.
-- Playwright passes real setup/login, dashboard validation, persistent cell edits, import commit, all page routes, mobile/light/dark captures and authenticated HTML/PNG previews using the VM's Chromium.
-- The dependency scan reports zero reachable vulnerabilities. Its remaining non-reachable advisories are not a claim that all dependencies have no advisories.
+- [x] Exact Decimal128 money/quantity cells with JSON strings, bounded exact CEL arithmetic and aggregations, and compatibility with ordinary floating-point numbers.
+- [x] Offset-preserving datetime, entry/account/ref, string list and bounded JSON; descriptions, required/enum/pattern constraints and typed computed cells.
+- [x] Generic checksum functions: GTIN, IBAN, Luhn, mod11_10 and mod97, with discovery and edge-case tests. IBAN validation covers global structure/checksum, not national registries.
+- [x] Owner-isolated references, final-state cross-table validation and deletion/schema/restore guards.
+- [x] Composite keys backed by the existing MongoDB unique index, exact decimal hashing and optional-key behavior. No advance key-hash clearing. Occupied-key swaps/transfers require a separate temporary key and are refused before writing.
+- [x] `db_batch` validates the complete proposed state before ordered row writes. Dry runs save no data/events. Successful batches have one audit event and version-guarded undo. Storage failures retain earlier writes and expose confirmed counts, audit ids and recovery instructions without leaking database errors.
+- [x] The same preparation and persistence paths serve cell updates, deletions, schema changes and undo. No compensating rollback writes.
+- [x] Exact ledger-sum constraints, commodity separation and shared reversal-chain rules. Receipt metadata writes never mutate ledger entries/postings.
+- [x] `consistency_check` reports broken references and table constraints, including interrupted receipt sums, invalid cells, keys and key metadata. Scans fail explicitly on budget exhaustion.
+- [x] Indexed filters, explicit pagination/truncation, one-level ref expansion and joined entry metadata, including custom entry-column names. Alias conflicts fail without hiding stored data. Complete bounded dashboard sources exclude orphan/reversed entries.
+- [x] `entry_get.explained_by` plus positive/negative entry-list filters applied before pagination.
+- [x] Five ordinary receipts-template tables with a playbook. Creation can resume after partial failure by reusing compatible schemas; conflicting/archived schemas are preserved. Undo records only tables created by the successful call.
+- [x] Standalone MCP integration coverage for validation refusal, partial storage failure/recovery, unchanged ledger data, concurrency/unique-index enforcement, references, undo, fixed historical EUR valuation, saved store/weekday grouping, and read-only tool visibility.
+- [x] Scripted synthetic HR/DE/US receipt workflows and store/product reuse, using the same template and no added columns. This covers tool/data workflows, not OCR accuracy or an independently repeated live-model benchmark.
+- [x] All 14 legacy production schemas (104 columns) have exact contract fixtures; before/after behavior was compared against original HEAD `8d45d44`. The private original schema snapshot remains mode 0600 with unchanged SHA-256 `1da82e96d5524d8db14b6e4587f44ea832a5081310122f827161f5d208d835f4`.
+- [x] Final full standalone integration suite, make check (production UI build/size budget, Go tests/vet and UI tests), focused race checks, regenerated tool contracts and UI typechecking pass. Only the pre-existing account-route unnecessary-spread lint warning remains.
+- [ ] Commit/release and read-only deployed verification: unchanged original 14 schemas, new template discovery, dashboard/forecast parity, and health. No synthetic production receipts or table writes.
 
-Cost lots require explicit per-unit costs on acquisitions and disposals; missing costs stay unknown. ECB is the configured automatic market-price feed. Metal/security prices can be supplied with `rate_set` without inventing an unconfigured provider. Live third-party ChatGPT and Grok account handshakes are not verified by the SDK transport suite.
-
-Production deploy and subsequent upgrade both passed their release-version health checks. The smdctl user service is active/enabled on oracle-vm and the public HTTPS health endpoint responds. Existing standalone MongoDB 8.0.16 is reused; its service/configuration was not changed. First-owner setup is ready; no owner credentials or financial records were fabricated.
-
-Finish review disposition: **ship**, scoped to the three scored accessibility fixes (mobile chart lettering, exact chart-data alternatives, and labelled keyboard scrolling); all three were resolved and recaptured. DESIGN.md and the schema-v2 design sidecar document the finished CSS. Every public screenshot has embedded capture provenance. Targeted race checks pass for previews, OAuth, dashboard rendering, audit and HTTP packages.
-
-Public repository: https://github.com/olegpustovit/moneybag. GitHub CI passed on application/deployment commit `27a6bbb6b2075b439a36c382120f6177e04604ff`: https://github.com/olegpustovit/moneybag/actions/runs/40755489538. It covers formatting, Go tests/vet/build, real standalone MongoDB 7.0 integration and Chromium browser workflows. Production uses the same tested application code in release `27a6bbb6b207-20261028193419`; the subsequent handoff commit changes only documentation and a deployment-script comment.
+The pre-release authenticated read-only schema check matches all 14 originals exactly. Dashboard/forecast values are captured privately for deployed comparison. Operator conversion scripts and the replica test target were removed. Production MongoDB configuration and user finance data have not been changed by this implementation.
 
 ## SPA redesign performance work (2026-10-29)
 

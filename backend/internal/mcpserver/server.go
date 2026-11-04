@@ -32,6 +32,7 @@ import (
 	"log/slog"
 	"reflect"
 	"strconv"
+	"strings"
 )
 
 type Services struct {
@@ -166,7 +167,11 @@ func add[In, Out any](r registration, name, set, scope, description string, read
 		if e != nil {
 			var command mongo.CommandError
 			var write mongo.WriteException
-			if errors.As(e, &command) || errors.As(e, &write) || mongo.IsNetworkError(e) {
+			var recovery interface{ RecoveryMessage() string }
+			if errors.As(e, &recovery) {
+				r.logger.Error("MCP workflow failed", "tool", name, "error", e)
+				e = errors.New(recovery.RecoveryMessage())
+			} else if errors.As(e, &command) || errors.As(e, &write) || mongo.IsNetworkError(e) {
 				r.logger.Error("MCP workflow failed", "tool", name, "error", e)
 				e = fmt.Errorf("storage operation failed; inspect audit history before retrying a write")
 			}
@@ -231,26 +236,28 @@ func New(s Services, opts Options) *mcp.Server {
 	add(r, "accounts_list", "ledger", "ledger:read", "Use this when you need the chart of accounts or pots. Page with next_cursor; limit is 1..500.", true, false, s.Ledger.Accounts)
 	add(r, "account_create", "ledger", "ledger:write", "Use this when a new bank account, cash pot or expense category is needed. Optional class (bank, cash, metal_holding, receivable, liability, equity, income, expense) and groups (dimension to value, e.g. type, category, source). IDs use assets:, liabilities:, expenses:, income: or equity: prefixes. Money amounts use declared commodities.", false, false, s.Ledger.CreateAccount)
 	add(r, "account_update", "ledger", "ledger:write", "Use this when renaming, regrouping (class, groups) or closing an account, or setting its human display_name, working note or estimated flag. Keep notes out of the name. Omitted fields remain unchanged; empty pot or location clears them. History is retained.", false, false, s.Ledger.UpdateAccount)
-	add(r, "entries_list", "ledger", "ledger:read", "Use this when you need transactions matching filters; effective=true hides reversed originals and their reversals. Results are scoped to your user, newest sequence first by default; sort=date or -date uses next_cursor and next_cursor_date together; amount or -amount uses next_cursor and next_cursor_amount together. Use account or accounts to match postings in one or any of several accounts. Amount is the first matching account posting, or first posting when no account filter is specified, ordered numerically across commodities. Limit 1..500.", true, false, s.Ledger.Entries)
-	add(r, "entry_get", "ledger", "ledger:read", "Use this when you need one entry with provenance links and audit history. Obtain its id from entries_list.", true, false, func(ctx context.Context, p principal.Principal, in IDInput) (struct {
-		Entry ledger.Entry  `json:"entry"`
-		Links []ledger.Link `json:"links"`
-		Audit []audit.Event `json:"audit"`
-	}, error) {
-		v, e := s.Ledger.Get(ctx, p, in.ID)
-		if e != nil {
-			return struct {
-				Entry ledger.Entry  `json:"entry"`
-				Links []ledger.Link `json:"links"`
-				Audit []audit.Event `json:"audit"`
-			}{}, e
+	add(r, "entries_list", "ledger", "ledger:read", "Use this when you need transactions matching filters; effective=true hides reversed originals and their reversals. Results are scoped to your user, newest sequence first by default; sort=date or -date uses next_cursor and next_cursor_date together; amount or -amount uses next_cursor and next_cursor_amount together. Use account or accounts to match postings in one or any of several accounts. Amount is the first matching account posting, or first posting when no account filter is specified, ordered numerically across commodities. Use explained_by=table to select explained entries, or !table for entries without rows. Limit 1..500.", true, false, func(ctx context.Context, p principal.Principal, in entriesListInput) (ledger.EntriesPage, error) {
+		if in.ExplainedBy != "" {
+			ids, err := s.Tables.ExplainedEntryIDs(ctx, p, strings.TrimPrefix(in.ExplainedBy, "!"))
+			if err != nil {
+				return ledger.EntriesPage{}, err
+			}
+			in.EntriesInput.MatchIDs = ids
+			in.EntriesInput.ExcludeIDs = strings.HasPrefix(in.ExplainedBy, "!")
 		}
-		a, e := s.Audit.List(ctx, p, audit.ListInput{Target: in.ID})
-		return struct {
-			Entry ledger.Entry  `json:"entry"`
-			Links []ledger.Link `json:"links"`
-			Audit []audit.Event `json:"audit"`
-		}{v, v.Links, a.Events}, e
+		return s.Ledger.Entries(ctx, p, in.EntriesInput)
+	})
+	add(r, "entry_get", "ledger", "ledger:read", "Read one entry with provenance links, audit history and explained_by table row ids.", true, false, func(ctx context.Context, p principal.Principal, in IDInput) (entryDetails, error) {
+		v, err := s.Ledger.Get(ctx, p, in.ID)
+		if err != nil {
+			return entryDetails{}, err
+		}
+		a, err := s.Audit.List(ctx, p, audit.ListInput{Target: in.ID})
+		if err != nil {
+			return entryDetails{}, err
+		}
+		explanations, err := s.Tables.Explanations(ctx, p, in.ID)
+		return entryDetails{Entry: v, Links: v.Links, Audit: a.Events, ExplainedBy: explanations}, err
 	})
 	add(r, "entry_post", "ledger", "ledger:write", "Use this when recording a money movement. Amounts are {v:decimal string,c:commodity}; postings must balance separately per commodity. Defaults to draft; commit=true posts it. To edit a saved draft, include id and its complete entry body with commit=false. To commit it, supply only id and commit=true.", false, false, s.Ledger.Post)
 	add(r, "entry_reverse", "ledger", "ledger:write", "Use this when a posted entry is wrong. Requires a reason; appends a reversal and optional replacement. Never changes the original entry.", false, false, s.Ledger.Reverse)
@@ -346,9 +353,10 @@ func New(s Services, opts Options) *mcp.Server {
 			Items []tables.Table `json:"items"`
 		}{v}, e
 	})
-	add(r, "db_query", "tables", "ledger:read", "Use this when reading your database rows. db is a logical table ID from db_list, where is CEL over row, sort uses +/-column names, limit 1..5000.", true, false, s.Tables.Query)
-	add(r, "db_create", "tables", "model:write", "Use this when you need a new user database. Columns have unique id and type number/string/bool/date/formula. Formula columns require CEL and are read-only cells.", false, false, s.Tables.Create)
+	add(r, "db_query", "tables", "ledger:read", "Read database rows. db is a logical table ID from db_list. where is CEL over row; literal equality and membership on key/ref/entry/account columns use indexes before scanning. join_entry adds entry date, payee, accounts, amount, value_eur, effective and tags; missing entries return null. expand lists ref columns to inline one level; original ids still work in CEL comparisons. sort uses +/-column names, limit 1..5000; next_cursor paginates row-id order without custom sort. truncated explicitly reports a partial page. Analytic sources read complete bounded data or return an error.", true, false, s.Tables.Query)
+	add(r, "db_create", "tables", "model:write", "Check db_templates first; template:receipts creates five ordinary tables; repeat calls reuse compatible schemas and finish missing tables. To attach facts to ledger entries use entry plus a ledger constraint, shared entities in ref tables with natural row ids, and source-specific extras in json attrs. Use this when you need a new user database. Tables and columns accept descriptions for future agents. Columns may specify required, enum (at most 100 values) and pattern (RE2, string-valued types). Columns have unique id and type number/string/bool/date/formula/decimal/datetime/entry/account/ref/list/json. entry/account ids must exist in your ledger; ref needs table and refuses dangling references. Table keys are arrays of unique column combinations; checks are {expr,message,level:error|warn}. ledger:{entry,amount,accounts} requires exact sums per entry for those account prefixes. Use db_batch for a whole receipt or allocation, with dry_run first. decimal is a finite decimal string stored exactly as Decimal128; CEL arithmetic on decimal cells stays exact. datetime is RFC 3339 with an offset, list is an array of strings, and json is an object up to 16 KiB. Formula columns require CEL and are read-only cells.", false, false, s.Tables.CreateDatabase)
 	add(r, "db_update_cells", "tables", "model:write", "Use this when editing assumptions or cells. Row IDs may create rows; updates are type-checked and formulas recomputed. Optional version rejects stale edits.", false, false, s.Tables.Update)
+	add(r, "db_batch", "tables", "model:write", "Validate 1..500 operations across your tables, then write rows in order with one audit event on standalone MongoDB. Each op gives db and exactly one of upsert {row_id,cells,version?} or delete_where (CEL over row). Upsert merges cells; formulas and constraints are checked on the final state. Use dry_run first: it writes no rows or audit events. violations lists every rejected row/column; zero rows are written if any violation exists. A successful batch is reversed by one undo. Writes are not atomic across rows: storage failures can leave earlier rows saved. Errors include the confirmed write count and event id; reload affected rows, run consistency_check, and complete or correct the batch. Receipt writes never change ledger entries.", false, true, s.Tables.Batch)
 	add(r, "db_delete_rows", "tables", "model:write", "Use this to delete rows from a data table, either by row_ids (1..500) or by where (CEL over row; matching 1..500 rows). Give exactly one. Rows are archived, so undo restores them. To change a row, use db_update_cells with its row_id.", false, true, s.Tables.DeleteRows)
 	add(r, "model_get", "model", "ledger:read", "Use this when you need assumptions, income streams and scenarios before forecasting.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (model.State, error) {
 		return s.Model.Get(ctx, p)

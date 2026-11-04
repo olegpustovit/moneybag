@@ -6,7 +6,8 @@ permissions:
   contents: read
 jobs:
   check:
-    runs-on: ubuntu-latest
+    # Match the MongoDB-compatible runner used by speed-budget below.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -18,6 +19,8 @@ jobs:
           cache-dependency-path: backend/go.sum
       - run: make check
       - run: make build
+      - run: make test-integration
+        timeout-minutes: 6
   speed-budget:
     # MongoDB crashes on Linux 6.19 through 7.0.13 (SERVER-121912); move back to ubuntu-latest when its kernel is past that.
     runs-on: ubuntu-22.04

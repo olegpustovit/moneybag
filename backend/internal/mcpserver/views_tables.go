@@ -3,10 +3,18 @@ package mcpserver
 import (
 	"context"
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
 func registerViewsAndTables(r registration, s Services) {
+	add(r, "db_templates", "tables", "ledger:read", "List ready-made ordinary table schemas and agent playbooks. Create all receipts tables with db_create {template:receipts}; reuse natural ids and write a complete receipt in one db_batch, dry_run first.", true, false, func(ctx context.Context, p principal.Principal, _ Empty) (struct {
+		Templates []tables.Template `json:"templates"`
+	}, error) {
+		return struct {
+			Templates []tables.Template `json:"templates"`
+		}{tables.Templates()}, p.Require("ledger:read")
+	})
 	add(r, "view_upsert", "dashboard", "dash:write", "Use this to save a named query (the same query object dashboards use: from, where, derive, group, agg, sort, limit, hide_zero) as a per-user view. Dashboards read it as the source from: \"view:<id>\". agg also supports mean, median, count_distinct, percentile(expr, p) with p 0..100, and linear_slope(x, y) (least-squares slope of y per unit of x). A view that references itself through view: sources is rejected.", false, false, s.Dashboard.UpsertView)
 	add(r, "view_get", "dashboard", "ledger:read", "Use this to read one saved view by id.", true, false, func(ctx context.Context, p principal.Principal, in IDInput) (dashboard.View, error) {
 		return s.Dashboard.View(ctx, p, in.ID)
@@ -44,5 +52,5 @@ func registerViewsAndTables(r registration, s Services) {
 			Dropped string `json:"dropped"`
 		}{in.DB}, e
 	})
-	add(r, "db_alter", "tables", "model:write", "Use this to change a database schema: remove_columns by id, then add_columns (same shape as db_create). Cells of removed columns stay stored but are no longer listed; added formula columns fill in on each row's next cell update. Undo restores the previous schema.", false, true, s.Tables.Alter)
+	add(r, "db_alter", "tables", "model:write", "Use this to change a database schema: remove_columns by id, then add_columns (same shape as db_create). Optional keys, checks, ledger and description replace those schema fields; [] clears keys/checks and {} clears ledger. Existing active rows must satisfy all proposed cell, key, reference, check and ledger constraints before the schema changes. Key/constraint migrations rewrite derived values in order on standalone MongoDB; storage failures can leave earlier row changes saved, so run consistency_check and retry the migration after resolving the error. Type changes are not supported. Cells of removed columns stay stored but are no longer listed; plain formula additions fill in on the next cell update, while constraint migrations recompute them immediately. Undo restores the previous schema.", false, true, s.Tables.Alter)
 }

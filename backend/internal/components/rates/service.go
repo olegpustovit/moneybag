@@ -50,6 +50,9 @@ type Result struct {
 	EventID string `json:"event_id"`
 }
 type MongoRepository struct{ db *mongo.Database }
+
+var ErrNoQuote = errors.New("no quote")
+
 type Service struct {
 	repo  *MongoRepository
 	audit *audit.Service
@@ -150,7 +153,7 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, pairs []string
 		if errors.Is(e, mongo.ErrNoDocuments) {
 			inv, ie := s.quote(ctx, p, b, a, at)
 			if ie != nil {
-				return nil, fmt.Errorf("no quote for %s at or before %s", pair, at)
+				return nil, fmt.Errorf("%w for %s at or before %s", ErrNoQuote, pair, at)
 			}
 			v, ie := ledger.ParseDecimal(strings.TrimRight(strings.TrimRight(new(big.Rat).Inv(inv.Value.Rat()).FloatString(10), "0"), "."))
 			if ie != nil {
@@ -276,7 +279,7 @@ func (s *Service) rate(ctx context.Context, p principal.Principal, base, quote, 
 	if !errors.Is(e, mongo.ErrNoDocuments) {
 		return nil, e
 	}
-	return nil, fmt.Errorf("no quote for %s/%s at or before %s", base, quote, at)
+	return nil, fmt.Errorf("%w for %s/%s at or before %s", ErrNoQuote, base, quote, at)
 }
 func (s *Service) Convert(ctx context.Context, p principal.Principal, a ledger.Amount, quote, at string) (ledger.Amount, error) {
 	r, e := s.Rate(ctx, p, a.Commodity, quote, at)

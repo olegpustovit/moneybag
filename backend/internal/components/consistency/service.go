@@ -494,6 +494,16 @@ func (s *Service) run(ctx context.Context, p principal.Principal) (Result, error
 	// 11. info: number columns in user tables (R-21)
 	sort.Strings(numberCols)
 	checks = append(checks, Check{"table_number_columns", true, numberCols})
+	brokenReferences, err := s.Tables.BrokenReferences(ctx, p)
+	if err != nil {
+		return Result{}, err
+	}
+	checks = append(checks, Check{"table_references", len(brokenReferences) == 0, brokenReferences})
+	tableIssues, err := s.Tables.ConstraintIssues(ctx, p)
+	if err != nil {
+		return Result{}, err
+	}
+	checks = append(checks, Check{"table_constraints", len(tableIssues) == 0, tableIssues})
 
 	out := Result{OK: true, Checks: checks}
 	for _, c := range checks {

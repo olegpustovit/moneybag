@@ -162,6 +162,10 @@ export interface MoneybagTools {
     input: DbAlterInput;
     output: DbAlterOutput;
   };
+  db_batch: {
+    input: DbBatchInput;
+    output: DbBatchOutput;
+  };
   db_create: {
     input: DbCreateInput;
     output: DbCreateOutput;
@@ -181,6 +185,10 @@ export interface MoneybagTools {
   db_query: {
     input: DbQueryInput;
     output: DbQueryOutput;
+  };
+  db_templates: {
+    input: DbTemplatesInput;
+    output: DbTemplatesOutput;
   };
   db_update_cells: {
     input: DbUpdateCellsInput;
@@ -971,12 +979,12 @@ export interface CatalogGetOutput {
          */
         accounts?: null | string[];
         /**
-         * sum, last, avg or none; how the total folds over time and whether a table may total it
+         * sum, last, avg or none; how the total folds over time
          */
         additivity: string;
         description?: string;
         /**
-         * dimensions this metric may split by; the first is the default for contributors
+         * dimensions it splits by; the first is the default
          */
         dimensions?: null | string[];
         /**
@@ -988,23 +996,27 @@ export interface CatalogGetOutput {
          */
         exclude?: null | string[];
         /**
-         * stable id, lowercase letters, digits, _ or -
+         * lowercase letters, digits, _ or -
          */
         id: string;
         /**
-         * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+         * flow (period sum), balance (holdings at period end) or rate (flow per month, or per)
          */
         kind: string;
         /**
-         * human name, used in sentences and titles
+         * human name for sentences and titles
          */
         label: string;
+        /**
+         * day, week or month (default); unit a rate or avg averages over
+         */
+        per?: string;
         /**
          * 1 or -1; -1 shows income, stored as negative postings, as positive
          */
         sign?: number;
         /**
-         * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+         * eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)
          */
         unit: string;
         /**
@@ -1091,6 +1103,10 @@ export interface DashboardAddComponentInput {
      * trips, or a tag rule such as trip:* or home-move
      */
     annotate?: string;
+    /**
+     * time_chart bucket: auto (default), day, week or month
+     */
+    bucket?: "auto" | "day" | "week" | "month";
     color?: null | {
       /**
        * entity
@@ -1123,7 +1139,7 @@ export interface DashboardAddComponentInput {
           value: string;
         }[];
     /**
-     * overrides scope.compare; none states that no comparison makes sense
+     * overrides scope.compare; none means no comparison makes sense
      */
     compare?: "previous_period" | "previous_year" | "none";
     delta?: string;
@@ -1172,7 +1188,7 @@ export interface DashboardAddComponentInput {
     mark?: "line" | "area" | "stack" | "bar" | "donut";
     md?: string;
     /**
-     * metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy
+     * metric id from metric_list, on stat, time_chart, ranked_bars, sankey, entries
      */
     metric?: string;
     rows?: string;
@@ -1183,7 +1199,7 @@ export interface DashboardAddComponentInput {
     scenarios?: null | string[];
     sparkline?: string;
     /**
-     * dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key
+     * dimension to split by: category, payee, account, trip, tag, type, source, pot, class or an account group key
      */
     split?: string;
     sub?: string;
@@ -1383,6 +1399,10 @@ export interface DashboardCreateOutput {
            * trips, or a tag rule such as trip:* or home-move
            */
           annotate?: string;
+          /**
+           * time_chart bucket: auto (default), day, week or month
+           */
+          bucket?: string;
           color?: null | {
             /**
              * entity
@@ -1417,7 +1437,7 @@ export interface DashboardCreateOutput {
                 [k: string]: unknown;
               }[];
           /**
-           * overrides scope.compare; none states that no comparison makes sense
+           * overrides scope.compare; none means no comparison makes sense
            */
           compare?: string;
           delta?: string;
@@ -1472,7 +1492,7 @@ export interface DashboardCreateOutput {
           mark?: string;
           md?: string;
           /**
-           * metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy
+           * metric id from metric_list, on stat, time_chart, ranked_bars, sankey, entries
            */
           metric?: string;
           rows?: string;
@@ -1484,7 +1504,7 @@ export interface DashboardCreateOutput {
           scenarios?: null | string[];
           sparkline?: string;
           /**
-           * dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key
+           * dimension to split by: category, payee, account, trip, tag, type, source, pot, class or an account group key
            */
           split?: string;
           sub?: string;
@@ -1560,7 +1580,7 @@ export interface DashboardCreateOutput {
           [k: string]: unknown;
         }[];
     /**
-     * defaults CEL reads as params.*; with scope, params.from, to, compare_from and compare_to hold the page clock as YYYY-MM-DD
+     * defaults for params.*; with scope, params.from, to, compare_from, compare_to hold the page clock
      */
     params?: {
       [k: string]:
@@ -1596,7 +1616,7 @@ export interface DashboardCreateOutput {
       [k: string]: unknown;
     };
     /**
-     * saved questions dashboard_test checks against the ledger; all must pass to publish
+     * questions dashboard_test checks against the ledger; all must pass to publish
      */
     tests?:
       | null
@@ -1728,6 +1748,10 @@ export interface DashboardGetOutput {
            * trips, or a tag rule such as trip:* or home-move
            */
           annotate?: string;
+          /**
+           * time_chart bucket: auto (default), day, week or month
+           */
+          bucket?: string;
           color?: null | {
             /**
              * entity
@@ -1762,7 +1786,7 @@ export interface DashboardGetOutput {
                 [k: string]: unknown;
               }[];
           /**
-           * overrides scope.compare; none states that no comparison makes sense
+           * overrides scope.compare; none means no comparison makes sense
            */
           compare?: string;
           delta?: string;
@@ -1817,7 +1841,7 @@ export interface DashboardGetOutput {
           mark?: string;
           md?: string;
           /**
-           * metric id from metric_list on stat, time_chart, ranked_bars, sankey and entries; brings the unit, additivity and estimate policy
+           * metric id from metric_list, on stat, time_chart, ranked_bars, sankey, entries
            */
           metric?: string;
           rows?: string;
@@ -1829,7 +1853,7 @@ export interface DashboardGetOutput {
           scenarios?: null | string[];
           sparkline?: string;
           /**
-           * dimension to break the metric down by: category, payee, account, trip, tag, type, source, pot, class or an account group key
+           * dimension to split by: category, payee, account, trip, tag, type, source, pot, class or an account group key
            */
           split?: string;
           sub?: string;
@@ -1905,7 +1929,7 @@ export interface DashboardGetOutput {
           [k: string]: unknown;
         }[];
     /**
-     * defaults CEL reads as params.*; with scope, params.from, to, compare_from and compare_to hold the page clock as YYYY-MM-DD
+     * defaults for params.*; with scope, params.from, to, compare_from, compare_to hold the page clock
      */
     params?: {
       [k: string]:
@@ -1941,7 +1965,7 @@ export interface DashboardGetOutput {
       [k: string]: unknown;
     };
     /**
-     * saved questions dashboard_test checks against the ledger; all must pass to publish
+     * questions dashboard_test checks against the ledger; all must pass to publish
      */
     tests?:
       | null
@@ -2665,49 +2689,295 @@ export interface DbAlterInput {
   add_columns?:
     | null
     | {
+        description?: string;
+        enum?:
+          | null
+          | (
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                }
+            )[];
         formula?: string;
         id: string;
-        type: string;
+        pattern?: string;
+        required?: boolean;
+        table?: string;
+        type:
+          | "number"
+          | "string"
+          | "bool"
+          | "date"
+          | "formula"
+          | "decimal"
+          | "datetime"
+          | "entry"
+          | "account"
+          | "ref"
+          | "list"
+          | "json";
+      }[];
+  checks?:
+    | null
+    | {
+        expr: string;
+        level?: "" | "error" | "warn";
+        message: string;
       }[];
   db: string;
+  description?: null | string;
+  keys?: null | (null | string[])[];
+  ledger?: null | {
+    accounts: null | string[];
+    amount: string;
+    entry: string;
+  };
   remove_columns?: null | string[];
 }
 export interface DbAlterOutput {
   archived?: boolean;
+  checks?:
+    | null
+    | {
+        expr: string;
+        level?: string;
+        message: string;
+        [k: string]: unknown;
+      }[];
   columns:
     | null
     | {
+        description?: string;
+        enum?:
+          | null
+          | (
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                }
+            )[];
         formula?: string;
         id: string;
+        pattern?: string;
+        required?: boolean;
+        table?: string;
         type: string;
         [k: string]: unknown;
       }[];
+  description?: string;
   id: string;
+  keys?: null | (null | string[])[];
+  ledger?: null | {
+    accounts: null | string[];
+    amount: string;
+    entry: string;
+    [k: string]: unknown;
+  };
   name: string;
   [k: string]: unknown;
 }
-export interface DbCreateInput {
-  columns:
+export interface DbBatchInput {
+  dry_run?: boolean;
+  ops:
     | null
     | {
+        db: string;
+        delete_where?: string;
+        upsert?: null | {
+          cells: {
+            [k: string]:
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                };
+          };
+          row_id: string;
+          version?: null | number;
+        };
+      }[];
+}
+export interface DbBatchOutput {
+  event_id?: string;
+  partial?: boolean;
+  rows_written: number;
+  violations:
+    | null
+    | {
+        column?: string;
+        db: string;
+        message: string;
+        row_id?: string;
+        [k: string]: unknown;
+      }[];
+  warnings:
+    | null
+    | {
+        column?: string;
+        db: string;
+        message: string;
+        row_id?: string;
+        [k: string]: unknown;
+      }[];
+  [k: string]: unknown;
+}
+export interface DbCreateInput {
+  checks?:
+    | null
+    | {
+        expr: string;
+        level?: "" | "error" | "warn";
+        message: string;
+      }[];
+  columns?:
+    | null
+    | {
+        description?: string;
+        enum?:
+          | null
+          | (
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                }
+            )[];
         formula?: string;
         id: string;
-        type: string;
+        pattern?: string;
+        required?: boolean;
+        table?: string;
+        type:
+          | "number"
+          | "string"
+          | "bool"
+          | "date"
+          | "formula"
+          | "decimal"
+          | "datetime"
+          | "entry"
+          | "account"
+          | "ref"
+          | "list"
+          | "json";
       }[];
-  name: string;
+  description?: string;
+  keys?: null | (null | string[])[];
+  ledger?: null | {
+    accounts: null | string[];
+    amount: string;
+    entry: string;
+  };
+  name?: string;
+  template?: string;
 }
 export interface DbCreateOutput {
   archived?: boolean;
+  checks?:
+    | null
+    | {
+        expr: string;
+        level?: string;
+        message: string;
+        [k: string]: unknown;
+      }[];
   columns:
     | null
     | {
+        description?: string;
+        enum?:
+          | null
+          | (
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                }
+            )[];
         formula?: string;
         id: string;
+        pattern?: string;
+        required?: boolean;
+        table?: string;
         type: string;
         [k: string]: unknown;
       }[];
+  description?: string;
+  event_id?: string;
   id: string;
+  keys?: null | (null | string[])[];
+  ledger?: null | {
+    accounts: null | string[];
+    amount: string;
+    entry: string;
+    [k: string]: unknown;
+  };
   name: string;
+  tables?:
+    | null
+    | {
+        archived?: boolean;
+        checks?:
+          | null
+          | {
+              expr: string;
+              level?: string;
+              message: string;
+              [k: string]: unknown;
+            }[];
+        columns:
+          | null
+          | {
+              description?: string;
+              enum?:
+                | null
+                | (
+                    | null
+                    | boolean
+                    | number
+                    | string
+                    | unknown[]
+                    | {
+                        [k: string]: unknown;
+                      }
+                  )[];
+              formula?: string;
+              id: string;
+              pattern?: string;
+              required?: boolean;
+              table?: string;
+              type: string;
+              [k: string]: unknown;
+            }[];
+        description?: string;
+        id: string;
+        keys?: null | (null | string[])[];
+        ledger?: null | {
+          accounts: null | string[];
+          amount: string;
+          entry: string;
+          [k: string]: unknown;
+        };
+        name: string;
+        [k: string]: unknown;
+      }[];
   [k: string]: unknown;
 }
 export interface DbDeleteRowsInput {
@@ -2733,8 +3003,30 @@ export interface DbDeleteRowsOutput {
                 [k: string]: unknown;
               };
         };
+        entry?: null | {
+          accounts: null | string[];
+          amount: null | string;
+          commodity: string;
+          date: string;
+          effective: boolean;
+          id: string;
+          payee: string;
+          tags: null | string[];
+          valuation_error?: string;
+          value_eur: null | string;
+          [k: string]: unknown;
+        };
         id: string;
         version: number;
+        [k: string]: unknown;
+      }[];
+  warnings?:
+    | null
+    | {
+        column?: string;
+        db: string;
+        message: string;
+        row_id?: string;
         [k: string]: unknown;
       }[];
   [k: string]: unknown;
@@ -2753,22 +3045,57 @@ export interface DbListOutput {
     | null
     | {
         archived?: boolean;
+        checks?:
+          | null
+          | {
+              expr: string;
+              level?: string;
+              message: string;
+              [k: string]: unknown;
+            }[];
         columns:
           | null
           | {
+              description?: string;
+              enum?:
+                | null
+                | (
+                    | null
+                    | boolean
+                    | number
+                    | string
+                    | unknown[]
+                    | {
+                        [k: string]: unknown;
+                      }
+                  )[];
               formula?: string;
               id: string;
+              pattern?: string;
+              required?: boolean;
+              table?: string;
               type: string;
               [k: string]: unknown;
             }[];
+        description?: string;
         id: string;
+        keys?: null | (null | string[])[];
+        ledger?: null | {
+          accounts: null | string[];
+          amount: string;
+          entry: string;
+          [k: string]: unknown;
+        };
         name: string;
         [k: string]: unknown;
       }[];
   [k: string]: unknown;
 }
 export interface DbQueryInput {
+  cursor?: string;
   db: string;
+  expand?: null | string[];
+  join_entry?: boolean;
   limit?: number;
   sort?: null | string[];
   where?: string;
@@ -2777,11 +3104,28 @@ export interface DbQueryOutput {
   columns:
     | null
     | {
+        description?: string;
+        enum?:
+          | null
+          | (
+              | null
+              | boolean
+              | number
+              | string
+              | unknown[]
+              | {
+                  [k: string]: unknown;
+                }
+            )[];
         formula?: string;
         id: string;
+        pattern?: string;
+        required?: boolean;
+        table?: string;
         type: string;
         [k: string]: unknown;
       }[];
+  next_cursor?: string;
   rows:
     | null
     | {
@@ -2797,8 +3141,82 @@ export interface DbQueryOutput {
                 [k: string]: unknown;
               };
         };
+        entry?: null | {
+          accounts: null | string[];
+          amount: null | string;
+          commodity: string;
+          date: string;
+          effective: boolean;
+          id: string;
+          payee: string;
+          tags: null | string[];
+          valuation_error?: string;
+          value_eur: null | string;
+          [k: string]: unknown;
+        };
         id: string;
         version: number;
+        [k: string]: unknown;
+      }[];
+  truncated?: boolean;
+  [k: string]: unknown;
+}
+export interface DbTemplatesInput {}
+export interface DbTemplatesOutput {
+  templates:
+    | null
+    | {
+        description: string;
+        id: string;
+        playbook: string;
+        tables:
+          | null
+          | {
+              archived?: boolean;
+              checks?:
+                | null
+                | {
+                    expr: string;
+                    level?: string;
+                    message: string;
+                    [k: string]: unknown;
+                  }[];
+              columns:
+                | null
+                | {
+                    description?: string;
+                    enum?:
+                      | null
+                      | (
+                          | null
+                          | boolean
+                          | number
+                          | string
+                          | unknown[]
+                          | {
+                              [k: string]: unknown;
+                            }
+                        )[];
+                    formula?: string;
+                    id: string;
+                    pattern?: string;
+                    required?: boolean;
+                    table?: string;
+                    type: string;
+                    [k: string]: unknown;
+                  }[];
+              description?: string;
+              id: string;
+              keys?: null | (null | string[])[];
+              ledger?: null | {
+                accounts: null | string[];
+                amount: string;
+                entry: string;
+                [k: string]: unknown;
+              };
+              name: string;
+              [k: string]: unknown;
+            }[];
         [k: string]: unknown;
       }[];
   [k: string]: unknown;
@@ -2840,8 +3258,30 @@ export interface DbUpdateCellsOutput {
                 [k: string]: unknown;
               };
         };
+        entry?: null | {
+          accounts: null | string[];
+          amount: null | string;
+          commodity: string;
+          date: string;
+          effective: boolean;
+          id: string;
+          payee: string;
+          tags: null | string[];
+          valuation_error?: string;
+          value_eur: null | string;
+          [k: string]: unknown;
+        };
         id: string;
         version: number;
+        [k: string]: unknown;
+      }[];
+  warnings?:
+    | null
+    | {
+        column?: string;
+        db: string;
+        message: string;
+        row_id?: string;
         [k: string]: unknown;
       }[];
   [k: string]: unknown;
@@ -2920,6 +3360,10 @@ export interface EntriesListInput {
    */
   cursor_date?: string;
   effective?: boolean;
+  /**
+   * table id with explaining rows, or !table id for entries without rows
+   */
+  explained_by?: string;
   from?: string;
   kind?: string;
   limit?: number;
@@ -3104,6 +3548,13 @@ export interface EntryGetOutput {
     tags: null | string[];
     [k: string]: unknown;
   };
+  explained_by?:
+    | null
+    | {
+        db: string;
+        rows: null | string[];
+        [k: string]: unknown;
+      }[];
   links:
     | null
     | {
@@ -4084,12 +4535,12 @@ export interface MetricListOutput {
          */
         accounts?: null | string[];
         /**
-         * sum, last, avg or none; how the total folds over time and whether a table may total it
+         * sum, last, avg or none; how the total folds over time
          */
         additivity: string;
         description?: string;
         /**
-         * dimensions this metric may split by; the first is the default for contributors
+         * dimensions it splits by; the first is the default
          */
         dimensions?: null | string[];
         /**
@@ -4101,23 +4552,27 @@ export interface MetricListOutput {
          */
         exclude?: null | string[];
         /**
-         * stable id, lowercase letters, digits, _ or -
+         * lowercase letters, digits, _ or -
          */
         id: string;
         /**
-         * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+         * flow (period sum), balance (holdings at period end) or rate (flow per month, or per)
          */
         kind: string;
         /**
-         * human name, used in sentences and titles
+         * human name for sentences and titles
          */
         label: string;
+        /**
+         * day, week or month (default); unit a rate or avg averages over
+         */
+        per?: string;
         /**
          * 1 or -1; -1 shows income, stored as negative postings, as positive
          */
         sign?: number;
         /**
-         * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+         * eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)
          */
         unit: string;
         /**
@@ -4243,12 +4698,12 @@ export interface MetricUpsertInput {
    */
   accounts?: null | string[];
   /**
-   * sum, last, avg or none; how the total folds over time and whether a table may total it
+   * sum, last, avg or none; how the total folds over time
    */
   additivity: string;
   description?: string;
   /**
-   * dimensions this metric may split by; the first is the default for contributors
+   * dimensions it splits by; the first is the default
    */
   dimensions?: null | string[];
   /**
@@ -4260,23 +4715,27 @@ export interface MetricUpsertInput {
    */
   exclude?: null | string[];
   /**
-   * stable id, lowercase letters, digits, _ or -
+   * lowercase letters, digits, _ or -
    */
   id: string;
   /**
-   * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+   * flow (period sum), balance (holdings at period end) or rate (flow per month, or per)
    */
   kind: string;
   /**
-   * human name, used in sentences and titles
+   * human name for sentences and titles
    */
   label: string;
+  /**
+   * day, week or month (default); unit a rate or avg averages over
+   */
+  per?: string;
   /**
    * 1 or -1; -1 shows income, stored as negative postings, as positive
    */
   sign?: number;
   /**
-   * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+   * eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)
    */
   unit: string;
   /**
@@ -4290,12 +4749,12 @@ export interface MetricUpsertOutput {
    */
   accounts?: null | string[];
   /**
-   * sum, last, avg or none; how the total folds over time and whether a table may total it
+   * sum, last, avg or none; how the total folds over time
    */
   additivity: string;
   description?: string;
   /**
-   * dimensions this metric may split by; the first is the default for contributors
+   * dimensions it splits by; the first is the default
    */
   dimensions?: null | string[];
   /**
@@ -4307,23 +4766,27 @@ export interface MetricUpsertOutput {
    */
   exclude?: null | string[];
   /**
-   * stable id, lowercase letters, digits, _ or -
+   * lowercase letters, digits, _ or -
    */
   id: string;
   /**
-   * flow (sum over the period), balance (holdings at the period end) or rate (flow per month)
+   * flow (period sum), balance (holdings at period end) or rate (flow per month, or per)
    */
   kind: string;
   /**
-   * human name, used in sentences and titles
+   * human name for sentences and titles
    */
   label: string;
+  /**
+   * day, week or month (default); unit a rate or avg averages over
+   */
+  per?: string;
   /**
    * 1 or -1; -1 shows income, stored as negative postings, as positive
    */
   sign?: number;
   /**
-   * eur, usd (values at each entry's date), int (count of postings), pct, mo or days (sum of native amounts)
+   * eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)
    */
   unit: string;
   /**
@@ -4348,6 +4811,19 @@ export interface ModelGetOutput {
             | {
                 [k: string]: unknown;
               };
+        };
+        entry?: null | {
+          accounts: null | string[];
+          amount: null | string;
+          commodity: string;
+          date: string;
+          effective: boolean;
+          id: string;
+          payee: string;
+          tags: null | string[];
+          valuation_error?: string;
+          value_eur: null | string;
+          [k: string]: unknown;
         };
         id: string;
         version: number;

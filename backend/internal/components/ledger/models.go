@@ -197,14 +197,16 @@ type EntryResult struct {
 	EventID  string `json:"event_id"`
 }
 type EntriesInput struct {
-	From     string   `json:"from,omitempty"`
-	To       string   `json:"to,omitempty"`
-	Account  string   `json:"account,omitempty"`
-	Accounts []string `json:"accounts,omitempty" jsonschema:"match postings in any of these accounts; cannot be combined with account"`
-	Kind     string   `json:"kind,omitempty"`
-	Tag      string   `json:"tag,omitempty"`
-	Text     string   `json:"text,omitempty"`
-	Status   string   `json:"status,omitempty"`
+	MatchIDs   []string `json:"-"`
+	ExcludeIDs bool     `json:"-"`
+	From       string   `json:"from,omitempty"`
+	To         string   `json:"to,omitempty"`
+	Account    string   `json:"account,omitempty"`
+	Accounts   []string `json:"accounts,omitempty" jsonschema:"match postings in any of these accounts; cannot be combined with account"`
+	Kind       string   `json:"kind,omitempty"`
+	Tag        string   `json:"tag,omitempty"`
+	Text       string   `json:"text,omitempty"`
+	Status     string   `json:"status,omitempty"`
 	// Effective hides reversed originals and their reversals, leaving the latest replacement of each chain.
 	Effective    bool   `json:"effective,omitempty"`
 	Cursor       int64  `json:"cursor,omitempty"`

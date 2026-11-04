@@ -98,8 +98,22 @@ func (s *Service) Catalog(ctx context.Context, p principal.Principal, tableServi
 					typ = "bool"
 				case "formula":
 					typ = "dyn"
+				case "datetime":
+					typ = "string"
+				case "entry", "account":
+					typ = "string"
+				case "list":
+					typ = "list(string)"
+				case "ref", "json":
+					typ = "map(string, dyn)"
 				}
 				fields[col.ID] = typ
+			}
+			for _, col := range table.Columns {
+				if col.Type == "entry" {
+					fields["entry"] = "map(string, dyn)"
+					break
+				}
 			}
 			out.Sources = append(out.Sources, CatalogSource{Name: "table:" + table.ID, Label: table.Name, Fields: fields})
 			tableFields["table:"+table.ID] = fields
