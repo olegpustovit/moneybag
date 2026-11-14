@@ -2,7 +2,7 @@
 import { chromium } from 'playwright'
 const chunks=[]
 for await (const chunk of process.stdin)chunks.push(chunk)
-const {base,cookie,id,readonly}=JSON.parse(Buffer.concat(chunks).toString())
+const {base,cookie,id,readonly,origin=base}=JSON.parse(Buffer.concat(chunks).toString())
 const browser=await chromium.launch({headless:true,...(process.env.MONEYBAG_CHROMIUM_BIN ? {executablePath:process.env.MONEYBAG_CHROMIUM_BIN} : {})})
 try {
  const context=await browser.newContext({viewport:{width:1440,height:1000},locale:'en-US',timezoneId:'Europe/Zagreb',serviceWorkers:'block'})
@@ -13,7 +13,7 @@ try {
   if(['GET','HEAD'].includes(request.method()))return route.continue()
   if(url.pathname==='/api/mcp' && request.method()==='POST') {
    const body=request.postDataJSON()
-   if(body.method==='tools/call' && readonly.includes(body.params?.name))return route.continue()
+   if(body.method==='tools/call' && readonly.includes(body.params?.name))return route.fulfill({response:await route.fetch({headers:{...request.headers(),origin},maxRedirects:0})})
   }
   return route.abort()
  })

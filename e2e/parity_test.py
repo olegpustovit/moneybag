@@ -6,6 +6,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import runpy
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 from parity import Capture, canonical
 
@@ -75,7 +76,7 @@ class ParityTest(unittest.TestCase):
                 if self.path == '/api/mcp':
                     body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                     name = body['params']['name']
-                requests.append(('POST', name, self.headers.get('Cookie')))
+                requests.append(('POST', name, self.headers.get('Cookie'), self.headers.get('Origin')))
                 self.send_response(200)
                 self.end_headers()
                 self.wfile.write(b'{}')
@@ -87,15 +88,23 @@ class ParityTest(unittest.TestCase):
             result = subprocess.run(['node', str(Path(__file__).with_name('parity-shared.mjs'))],
                                     input=json.dumps({'base': 'http://127.0.0.1:' + str(server.server_port),
                                                       'cookie': 'synthetic-cookie', 'id': 'fixture',
-                                                      'readonly': ['accounts_list']}),
+                                                      'readonly': ['accounts_list'], 'origin': 'https://moneybag.example'}),
                                     text=True, capture_output=True, timeout=30, check=True)
             self.assertIn('<h1 id="shared">Rendered shared fixture</h1>', json.loads(result.stdout)['html'])
             self.assertEqual([r[1] for r in requests if r[0] == 'POST'], ['accounts_list'])
+            self.assertEqual([r[3] for r in requests if r[0] == 'POST'], ['https://moneybag.example'])
             self.assertTrue(all('moneybag_session=synthetic-cookie' in r[2] for r in requests))
         finally:
             server.shutdown()
             server.server_close()
             thread.join()
+
+    def test_loopback_capture_can_use_the_configured_public_origin(self):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {'MONEYBAG_PARITY_ORIGIN': 'https://moneybag.example'}):
+            capture = Capture('http://127.0.0.1:6459', {'cookie': 'secret', 'csrf': 'csrf'},
+                              Path(directory) / 'out', '2026-11-14')
+            self.assertEqual(capture.headers['Origin'], 'https://moneybag.example')
+            self.assertEqual(capture.base, 'http://127.0.0.1:6459')
 
     def test_canonical_json_keeps_array_order_and_exact_money_strings(self):
         self.assertEqual(canonical({'b': ['999999999999999999.01', '-0.00'], 'a': 2}),

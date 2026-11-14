@@ -21,6 +21,8 @@ The fixed request inventory expands across discovered accounts, entries, tables,
 
 The only read exclusions are dashboard-render `timing_ms`/`render_ms` and dashboard-view `body.as_of` (the cache build time, not a valuation date). JSON object keys and MCP's duplicate JSON text are canonicalized. Array order, data, errors and versions remain exact. `tools/list` records its read-only registry; datastore wording in mutating-tool descriptions is outside this capture.
 
+For the production baseline over SSH, run the capture on the VM with `--base http://127.0.0.1:6459` and `MONEYBAG_PARITY_ORIGIN=https://moneybag.microapps.space`. This keeps transport on loopback while sending the configured public origin for CSRF checks. The shared-DOM driver applies that origin only to allowed read-only MCP requests; all mutating requests remain blocked.
+
 ## Write capture on separate clones
 
 Create fresh write clones of both read datasets. Keep the read datasets untouched. The write script requires an explicit `--restored-copy` and a loopback origin:

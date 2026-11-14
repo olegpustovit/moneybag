@@ -32,7 +32,7 @@ class Capture:
         self.as_of = as_of
         self.cookie = session['cookie']
         self.headers = {'Cookie': 'moneybag_session=' + session['cookie'],
-                        'X-CSRF-Token': session['csrf'], 'Origin': self.base,
+                        'X-CSRF-Token': session['csrf'], 'Origin': os.environ.get('MONEYBAG_PARITY_ORIGIN', self.base),
                         'Content-Type': 'application/json',
                         'Accept': 'application/json, text/event-stream',
                         'MCP-Protocol-Version': '2025-11-25'}
@@ -196,7 +196,8 @@ class Capture:
                 self.get('api-shared-' + str(index) + suffix.replace('/', '-'), '/api/shared/' + id + suffix)
             rendered = subprocess.run(['node', str(Path(__file__).with_name('parity-shared.mjs'))],
                                       input=json.dumps({'base': self.base, 'cookie': self.cookie,
-                                                        'id': share['id'], 'readonly': sorted(self.readonly)}),
+                                                        'id': share['id'], 'readonly': sorted(self.readonly),
+                                                        'origin': self.headers['Origin']}),
                                       text=True, capture_output=True, timeout=180, check=True)
             self.save('shared-html-' + str(index), json.loads(rendered.stdout))
         missing = self.readonly - self.called
