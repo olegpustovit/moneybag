@@ -1,11 +1,10 @@
 # AGENTS.md
 
-## STRICT: standalone MongoDB only
+## Persistence: PostgreSQL
 
-- This project must run on the existing, simple, single-instance **standalone MongoDB** on the user's machine.
-- **Never introduce features that require a replica set or sharded cluster. A single-node replica set is also forbidden.**
-- Do not use MongoDB multi-document transactions, sessions that require replication, change streams, or any other replication-dependent feature.
-- Do not enable, provision, recommend, or require replication. Do not change the system MongoDB configuration or require a topology upgrade for an application feature.
-- Design persistence and consistency around capabilities supported by standalone MongoDB, including single-document atomic operations where needed.
-- Do not claim multi-document writes are atomic or fake transaction guarantees with compensating writes. If a proposed feature depends on those guarantees, redesign it to work on standalone MongoDB and state its actual guarantees.
-- Existing standalone installations must continue working without additional MongoDB services or infrastructure changes.
+- Moneybag stores all data in the existing PostgreSQL 18 cluster on the host, reached through `MONEYBAG_DATABASE_URL` with pgx/pgxpool. Do not add MongoDB code or dependencies.
+- Schema changes are forward-only goose migrations embedded from `backend/internal/infrastructure/postgres/migrations` and applied at startup. Never edit an applied migration; add a new one.
+- SQL lives as constants beside the code that runs it, inside the owning component. Pass values with `pgx.NamedArgs`; never build SQL from input. No ORM or query builder.
+- Money is `numeric` in columns and a decimal string inside `jsonb`. Never pass an amount through `float64`.
+- Write timestamps truncated to milliseconds. Use `NOT NULL` with a default for every non-pointer field.
+- A transaction stays inside one component. Do not change PostgreSQL server configuration (`postgresql.conf`, extensions, `pg_hba.conf`) for an application feature; the cluster is shared with other apps.
