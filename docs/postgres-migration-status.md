@@ -65,3 +65,9 @@ The owner requested no GitHub CI on 2026-11-14. The earlier branch pushes had tr
 - One earlier combined run reported a stale scheduled-rate snapshot; a diagnostic-only addition leaves the original assertion intact. Focused and subsequent combined runs passed. Root cause has not been established; keep this concern open for the complete integration gate rather than claiming it fixed by a retry.
 - The migration-idempotency test now clears the entire isolated test schema before concurrent migration, so new component tables are exercised too; its assertions are unchanged.
 - Classification remains to port: its direct accounts read requires the ledger table/data port before the existing cross-component tests can pass. Do not replace that read with a behavior-changing service shortcut just to make the leaf ordering work.
+
+## Admin port
+
+- Confirmation persistence now uses PostgreSQL. Issuing, owner-only lookup, expiry and atomic single-use consumption retain existing behavior. `UPDATE ... RETURNING` deliberately returns NULL for the previous used_at field, matching Mongo FindOneAndUpdate's pre-update response, while the stored row is consumed.
+- R2: used_at `$exists:false` -> `IS NULL`; expiry `$gt` -> `>@now`. Requested actor stays jsonb; timestamps are UTC milliseconds.
+- Local app build, admin vet/unit compile and the complete core/product/HTTP/MCP/telemetry regression pass (9.697 s), without changing their assertions.

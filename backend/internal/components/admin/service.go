@@ -5,13 +5,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"net/url"
 	"strings"
 	"time"
@@ -21,15 +20,15 @@ const confirmationTTL = time.Hour
 
 // Confirmation binds one owner decision to one exact action; the agent holds only the link.
 type Confirmation struct {
-	Hash        string          `json:"-" bson:"_id"`
-	UserID      string          `json:"-" bson:"user_id"`
-	Action      string          `json:"action" bson:"action"`
-	Target      string          `json:"-" bson:"target"`
-	TargetLabel string          `json:"target_label" bson:"target_label"`
-	Reason      string          `json:"reason" bson:"reason"`
-	RequestedBy principal.Actor `json:"requested_by" bson:"requested_by"`
-	ExpiresAt   time.Time       `json:"expires_at" bson:"expires_at"`
-	UsedAt      *time.Time      `json:"used_at,omitempty" bson:"used_at,omitempty"`
+	Hash        string          `json:"-" db:"id"`
+	UserID      string          `json:"-" db:"user_id"`
+	Action      string          `json:"action" db:"action"`
+	Target      string          `json:"-" db:"target"`
+	TargetLabel string          `json:"target_label" db:"target_label"`
+	Reason      string          `json:"reason" db:"reason"`
+	RequestedBy principal.Actor `json:"requested_by" db:"requested_by"`
+	ExpiresAt   time.Time       `json:"expires_at" db:"expires_at"`
+	UsedAt      *time.Time      `json:"used_at,omitempty" db:"used_at"`
 }
 
 // Sentence is what the confirmation page asks the owner to approve.
@@ -65,23 +64,20 @@ type RevokeInput struct {
 type RequestInput struct {
 	Reason string `json:"reason" jsonschema:"shown to the owner on the confirmation page"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo      *MongoRepository
+	repo      *PostgresRepository
 	identity  *identity.Service
 	oauth     *oauth.Service
 	audit     *audit.Service
 	publicURL string
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, i *identity.Service, o *oauth.Service, a *audit.Service, publicURL string) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, i *identity.Service, o *oauth.Service, a *audit.Service, publicURL string) *Service {
 	return &Service{r, i, o, a, strings.TrimRight(publicURL, "/")}
 }
-func (s *Service) Init(ctx context.Context) error {
-	_, e := s.repo.db.Collection("admin_confirmations").Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)})
-	return e
-}
+func (s *Service) Init(context.Context) error { return nil }
 
 func needReason(reason string) error {
 	if strings.TrimSpace(reason) == "" || len(reason) > 1000 {
@@ -220,8 +216,8 @@ func (s *Service) RequestAdmin(ctx context.Context, p principal.Principal, in Re
 
 func (s *Service) request(ctx context.Context, p principal.Principal, action, target, label, reason string) (string, error) {
 	raw := identity.Random()
-	c := Confirmation{Hash: identity.Hash(raw), UserID: p.UserID, Action: action, Target: target, TargetLabel: label, Reason: reason, RequestedBy: p.Actor, ExpiresAt: time.Now().UTC().Add(confirmationTTL)}
-	if _, e := s.repo.db.Collection("admin_confirmations").InsertOne(ctx, c); e != nil {
+	c := Confirmation{Hash: identity.Hash(raw), UserID: p.UserID, Action: action, Target: target, TargetLabel: label, Reason: reason, RequestedBy: p.Actor, ExpiresAt: time.Now().UTC().Add(confirmationTTL).Truncate(time.Millisecond)}
+	if _, e := s.repo.db.Exec(ctx, `INSERT INTO admin_confirmations (id,user_id,action,target,target_label,reason,requested_by,expires_at) VALUES (@id,@user,@action,@target,@label,@reason,@actor,@expires)`, pgx.NamedArgs{"id": c.Hash, "user": c.UserID, "action": c.Action, "target": c.Target, "label": c.TargetLabel, "reason": c.Reason, "actor": c.RequestedBy, "expires": c.ExpiresAt}); e != nil {
 		return "", e
 	}
 	return s.publicURL + "/confirm/" + url.PathEscape(raw), nil
@@ -232,9 +228,13 @@ func (s *Service) Confirmation(ctx context.Context, p principal.Principal, raw s
 	if !p.Admin || p.Actor.Kind != "human" {
 		return Confirmation{}, principal.ErrForbidden
 	}
-	var c Confirmation
-	e := s.repo.db.Collection("admin_confirmations").FindOne(ctx, bson.M{"_id": identity.Hash(raw), "user_id": p.UserID, "used_at": bson.M{"$exists": false}, "expires_at": bson.M{"$gt": time.Now()}}).Decode(&c)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const confirmationSQL = `SELECT * FROM admin_confirmations WHERE id=@id AND user_id=@user AND used_at IS NULL AND expires_at>@now`
+	rows, e := s.repo.db.Query(ctx, confirmationSQL, pgx.NamedArgs{"id": identity.Hash(raw), "user": p.UserID, "now": time.Now().UTC().Truncate(time.Millisecond)})
+	if e != nil {
+		return Confirmation{}, e
+	}
+	c, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Confirmation])
+	if errors.Is(e, pgx.ErrNoRows) {
 		return Confirmation{}, principal.ErrNotFound
 	}
 	return c, e
@@ -247,8 +247,14 @@ func (s *Service) Decide(ctx context.Context, p principal.Principal, raw string,
 	}
 	var c Confirmation
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		e := s.repo.db.Collection("admin_confirmations").FindOneAndUpdate(tx, bson.M{"_id": identity.Hash(raw), "user_id": p.UserID, "used_at": bson.M{"$exists": false}, "expires_at": bson.M{"$gt": time.Now()}}, bson.M{"$set": bson.M{"used_at": time.Now().UTC()}}).Decode(&c)
-		if errors.Is(e, mongo.ErrNoDocuments) {
+		const decideSQL = `UPDATE admin_confirmations SET used_at=@now WHERE id=@id AND user_id=@user AND used_at IS NULL AND expires_at>@now
+ RETURNING id,user_id,action,target,target_label,reason,requested_by,expires_at,NULL::timestamptz AS used_at`
+		rows, e := s.repo.db.Query(tx, decideSQL, pgx.NamedArgs{"id": identity.Hash(raw), "user": p.UserID, "now": time.Now().UTC().Truncate(time.Millisecond)})
+		if e != nil {
+			return e
+		}
+		c, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[Confirmation])
+		if errors.Is(e, pgx.ErrNoRows) {
 			return principal.ErrNotFound
 		}
 		if e != nil || !allow {

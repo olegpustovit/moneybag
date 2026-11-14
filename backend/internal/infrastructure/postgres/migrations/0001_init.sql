@@ -143,3 +143,16 @@ CREATE TABLE oauth_tokens (
     used boolean NOT NULL DEFAULT false
 );
 CREATE INDEX oauth_tokens_expiry ON oauth_tokens (expires_at);
+
+CREATE TABLE admin_confirmations (
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    action text NOT NULL DEFAULT '',
+    target text NOT NULL DEFAULT '',
+    target_label text NOT NULL DEFAULT '',
+    reason text NOT NULL DEFAULT '',
+    requested_by jsonb NOT NULL DEFAULT '{}',
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz
+);
+CREATE INDEX admin_confirmations_expiry ON admin_confirmations (expires_at);

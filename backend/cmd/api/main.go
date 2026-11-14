@@ -136,7 +136,7 @@ func run() error {
 	services.Classify = classes
 	services.Semantic, services.PublicURL = meaning, cfg.PublicURL
 	services.Feedback = feedback.NewService(feedback.NewPostgresRepository(pool), a)
-	services.Admin = admin.NewService(admin.NewMongoRepository(db), ids, auth, a, cfg.PublicURL)
+	services.Admin = admin.NewService(admin.NewPostgresRepository(pool), ids, auth, a, cfg.PublicURL)
 	if e = services.Admin.Init(ctx); e != nil {
 		return fmt.Errorf("initialize admin: %w", e)
 	}
