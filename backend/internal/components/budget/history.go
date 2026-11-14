@@ -13,7 +13,7 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 	}
 	return s.audit.Workflow(ctx, func(tx context.Context) error {
 		var old struct {
-			Archived bool `json:"archived" bson:"archived"`
+			Archived bool `json:"archived"`
 		}
 		args := pgx.NamedArgs{"user": p.UserID, "id": id}
 		if e := s.repo.db.QueryRow(tx, `SELECT archived FROM budgets WHERE user_id=@user AND id=@id`, args).Scan(&old.Archived); e != nil {

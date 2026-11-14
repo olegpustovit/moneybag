@@ -26,7 +26,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/screenshot"
@@ -76,16 +75,8 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer cancel()
 	connectCtx, stop := context.WithTimeout(ctx, 10*time.Second)
-	client, e := mongodb.Connect(connectCtx, cfg.MongoURI)
+	pool, e := postgres.Open(connectCtx, cfg.DatabaseURL)
 	stop()
-	if e != nil {
-		return e
-	}
-	defer client.Disconnect(context.Background())
-	if cfg.DatabaseURL == "" {
-		return fmt.Errorf("MONEYBAG_DATABASE_URL is required")
-	}
-	pool, e := postgres.Open(ctx, cfg.DatabaseURL)
 	if e != nil {
 		return e
 	}
@@ -184,9 +175,9 @@ func run() error {
 	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log)
 	a.OnChange = onChange
 	defer stopPrewarm()
-	stopJobs := startJobs(ctx, services, log)
+	stopJobs := startJobs(ctx, services, pool, log)
 	defer stopJobs()
-	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
+	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, pool)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
 	compress, e := handlers.Compression()
 	if e != nil {

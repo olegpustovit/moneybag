@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
@@ -12,10 +13,9 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testValidatedTables(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testValidatedTables(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
 	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("validated table batches", func(t *testing.T) {

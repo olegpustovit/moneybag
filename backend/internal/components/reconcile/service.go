@@ -20,25 +20,25 @@ import (
 )
 
 type Assertion struct {
-	ID      string         `json:"id" bson:"_id" db:"id"`
-	UserID  string         `json:"-" bson:"user_id" db:"user_id"`
-	Account string         `json:"account" bson:"account" db:"account"`
-	Date    string         `json:"date" bson:"date" db:"date"`
-	Amount  ledger.Amount  `json:"amount" bson:"amount" db:"amount"`
-	Source  string         `json:"source" bson:"source" db:"source"`
-	OK      bool           `json:"ok" bson:"ok" db:"ok"`
-	Diff    ledger.Decimal `json:"diff" bson:"diff" db:"diff"`
+	ID      string         `json:"id" db:"id"`
+	UserID  string         `json:"-" db:"user_id"`
+	Account string         `json:"account" db:"account"`
+	Date    string         `json:"date" db:"date"`
+	Amount  ledger.Amount  `json:"amount" db:"amount"`
+	Source  string         `json:"source" db:"source"`
+	OK      bool           `json:"ok" db:"ok"`
+	Diff    ledger.Decimal `json:"diff" db:"diff"`
 }
 type Discrepancy struct {
-	ID           string        `json:"id" bson:"_id" db:"id"`
-	UserID       string        `json:"-" bson:"user_id" db:"user_id"`
-	AssertionID  string        `json:"assertion_id" bson:"assertion_id" db:"assertion_id"`
-	Account      string        `json:"account" bson:"account" db:"account"`
-	Diff         ledger.Amount `json:"diff" bson:"diff" db:"diff"`
-	Status       string        `json:"status" bson:"status" db:"status"`
-	Resolution   string        `json:"resolution,omitempty" bson:"resolution,omitempty" db:"resolution"`
-	Reason       string        `json:"reason,omitempty" bson:"reason,omitempty" db:"reason"`
-	AdjustmentID string        `json:"adjustment_id,omitempty" bson:"adjustment_id,omitempty" db:"adjustment_id"`
+	ID           string        `json:"id" db:"id"`
+	UserID       string        `json:"-" db:"user_id"`
+	AssertionID  string        `json:"assertion_id" db:"assertion_id"`
+	Account      string        `json:"account" db:"account"`
+	Diff         ledger.Amount `json:"diff" db:"diff"`
+	Status       string        `json:"status" db:"status"`
+	Resolution   string        `json:"resolution,omitempty" db:"resolution"`
+	Reason       string        `json:"reason,omitempty" db:"reason"`
+	AdjustmentID string        `json:"adjustment_id,omitempty" db:"adjustment_id"`
 }
 type AssertInput struct {
 	Account string        `json:"account"`

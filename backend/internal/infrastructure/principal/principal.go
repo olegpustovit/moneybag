@@ -13,8 +13,8 @@ var ErrNotFound = errors.New("not found")
 var ErrConflict = errors.New("version conflict; reload and retry")
 
 type Actor struct {
-	Kind string `json:"kind" bson:"kind"`
-	ID   string `json:"id" bson:"id"`
+	Kind string `json:"kind"`
+	ID   string `json:"id"`
 }
 type Principal struct {
 	UserID string   `json:"user_id"`

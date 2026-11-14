@@ -53,7 +53,7 @@ type batchInvalid struct{}
 
 func (batchInvalid) Error() string { return "batch validation failed" }
 
-// Batch validates a final overlay before any writes, then writes rows in order on standalone MongoDB.
+// Batch validates a final overlay before any writes, then writes rows in order in PostgreSQL.
 func (s *Service) Batch(ctx context.Context, p principal.Principal, in BatchInput) (result BatchResult, err error) {
 	if err = p.Require("model:write"); err != nil {
 		return result, err

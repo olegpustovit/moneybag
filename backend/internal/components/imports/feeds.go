@@ -19,14 +19,14 @@ import (
 )
 
 type Feed struct {
-	Key            string `json:"-" bson:"_id" db:"storage_key"`
-	UserID         string `json:"-" bson:"user_id" db:"user_id"`
-	ID             string `json:"id" bson:"id" db:"id"`
-	URL            string `json:"-" bson:"url" db:"url"`
-	Account        string `json:"account" bson:"account" db:"account"`
-	Format         string `json:"format" bson:"format" db:"format"`
-	DateFormat     string `json:"date_format,omitempty" bson:"date_format,omitempty" db:"date_format"`
-	TokenEncrypted string `json:"-" bson:"token_encrypted" db:"token_encrypted"`
+	Key            string `json:"-" db:"storage_key"`
+	UserID         string `json:"-" db:"user_id"`
+	ID             string `json:"id" db:"id"`
+	URL            string `json:"-" db:"url"`
+	Account        string `json:"account" db:"account"`
+	Format         string `json:"format" db:"format"`
+	DateFormat     string `json:"date_format,omitempty" db:"date_format"`
+	TokenEncrypted string `json:"-" db:"token_encrypted"`
 }
 type FeedInput struct {
 	ID         string

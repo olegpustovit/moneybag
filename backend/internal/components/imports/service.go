@@ -25,35 +25,35 @@ import (
 )
 
 type Candidate struct {
-	RowID     string `json:"row_id" bson:"row_id"`
-	Duplicate bool   `json:"duplicate" bson:"duplicate"`
+	RowID     string `json:"row_id"`
+	Duplicate bool   `json:"duplicate"`
 }
 type Batch struct {
-	ID             string         `json:"id" bson:"_id" db:"id"`
-	UserID         string         `json:"-" bson:"user_id" db:"user_id"`
-	Account        string         `json:"account" bson:"account" db:"account"`
-	Format         string         `json:"format" bson:"format" db:"format"`
-	FileSHA256     string         `json:"file_sha256" bson:"file_sha256" db:"file_sha256"`
-	Status         string         `json:"status" bson:"status" db:"status"`
-	Candidates     []Candidate    `json:"-" bson:"candidates" db:"candidates"`
-	From           string         `json:"from" bson:"from" db:"from"`
-	To             string         `json:"to" bson:"to" db:"to"`
-	ClosingBalance *ledger.Amount `json:"closing_balance,omitempty" bson:"closing_balance,omitempty" db:"closing_balance"`
-	CreatedAt      time.Time      `json:"created_at" bson:"created_at" db:"created_at"`
+	ID             string         `json:"id" db:"id"`
+	UserID         string         `json:"-" db:"user_id"`
+	Account        string         `json:"account" db:"account"`
+	Format         string         `json:"format" db:"format"`
+	FileSHA256     string         `json:"file_sha256" db:"file_sha256"`
+	Status         string         `json:"status" db:"status"`
+	Candidates     []Candidate    `json:"-" db:"candidates"`
+	From           string         `json:"from" db:"from"`
+	To             string         `json:"to" db:"to"`
+	ClosingBalance *ledger.Amount `json:"closing_balance,omitempty" db:"closing_balance"`
+	CreatedAt      time.Time      `json:"created_at" db:"created_at"`
 }
 type ImportRow struct {
-	ID         string            `json:"id" bson:"_id" db:"id"`
-	UserID     string            `json:"-" bson:"user_id" db:"user_id"`
-	BatchID    string            `json:"batch_id" bson:"batch_id" db:"batch_id"`
-	Account    string            `json:"account" bson:"account" db:"account"`
-	DedupeKey  string            `json:"dedupe_key" bson:"dedupe_key" db:"dedupe_key"`
-	Raw        map[string]string `json:"raw" bson:"raw" db:"raw"`
-	Proposed   ledger.EntryInput `json:"proposed" bson:"proposed" db:"proposed"`
-	Kind       string            `json:"kind" bson:"kind" db:"kind"`
-	EntryID    string            `json:"entry_id,omitempty" bson:"entry_id,omitempty" db:"entry_id"`
-	ReversalID string            `json:"reversal_id,omitempty" bson:"reversal_id,omitempty" db:"reversal_id"`
-	ProposedID string            `json:"-" bson:"proposed_id" db:"proposed_id"`
-	Skip       bool              `json:"skip" bson:"skip" db:"skip"`
+	ID         string            `json:"id" db:"id"`
+	UserID     string            `json:"-" db:"user_id"`
+	BatchID    string            `json:"batch_id" db:"batch_id"`
+	Account    string            `json:"account" db:"account"`
+	DedupeKey  string            `json:"dedupe_key" db:"dedupe_key"`
+	Raw        map[string]string `json:"raw" db:"raw"`
+	Proposed   ledger.EntryInput `json:"proposed" db:"proposed"`
+	Kind       string            `json:"kind" db:"kind"`
+	EntryID    string            `json:"entry_id,omitempty" db:"entry_id"`
+	ReversalID string            `json:"reversal_id,omitempty" db:"reversal_id"`
+	ProposedID string            `json:"-" db:"proposed_id"`
+	Skip       bool              `json:"skip" db:"skip"`
 }
 type StartInput struct {
 	Account    string  `json:"account"`

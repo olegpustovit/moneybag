@@ -17,14 +17,14 @@ import (
 )
 
 type RowCheck struct {
-	Expr    string `json:"expr" bson:"expr"`
-	Message string `json:"message" bson:"message"`
-	Level   string `json:"level,omitempty" bson:"level,omitempty"`
+	Expr    string `json:"expr"`
+	Message string `json:"message"`
+	Level   string `json:"level,omitempty"`
 }
 type LedgerConstraint struct {
-	Entry    string   `json:"entry" bson:"entry"`
-	Amount   string   `json:"amount" bson:"amount"`
-	Accounts []string `json:"accounts" bson:"accounts"`
+	Entry    string   `json:"entry"`
+	Amount   string   `json:"amount"`
+	Accounts []string `json:"accounts"`
 }
 
 var ledgerPrefix = regexp.MustCompile(`^(assets|liabilities|income|expenses|equity):[a-z0-9_:-]*$`)

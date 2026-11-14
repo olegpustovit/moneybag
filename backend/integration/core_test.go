@@ -9,11 +9,8 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -21,30 +18,10 @@ import (
 )
 
 func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI to a dedicated moneybag_test_ database on standalone MongoDB")
-	}
-	parsed, e := url.Parse(uri)
-	if e != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("integration tests require the dedicated moneybag_test_ database")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	client, e := mongodb.Connect(ctx, uri)
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/"))
-	if e = db.Drop(ctx); e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() {
-		if e := db.Drop(context.Background()); e != nil {
-			t.Error(e)
-		}
-	})
+	db := pgtest.New(t)
+	var e error
 	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)

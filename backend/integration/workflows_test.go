@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
@@ -29,7 +30,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"log/slog"
 	"net"
 	"net/http"
@@ -58,7 +58,7 @@ func (b *blockedShareReader) Rows(ctx context.Context, p principal.Principal, so
 	}
 }
 
-func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database, pa, pb principal.Principal, book *ledger.Service, a *audit.Service, ids *identity.Service) {
+func testProductWorkflows(t *testing.T, ctx context.Context, db *pgxpool.Pool, pa, pb principal.Principal, book *ledger.Service, a *audit.Service, ids *identity.Service) {
 	t.Helper()
 	expr, e := expressions.New()
 	if e != nil {

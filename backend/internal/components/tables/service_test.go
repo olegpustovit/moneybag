@@ -9,21 +9,20 @@ import (
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
-func TestNestedCellsBSONRoundTrip(t *testing.T) {
+func TestNestedCellsJSONRoundTrip(t *testing.T) {
 	original := Row{ID: "receipt", Cells: map[string]any{
 		"issued_at": "2026-11-04T18:23:45+01:00",
 		"payees":    []any{"Konzum"},
 		"attrs":     map[string]any{"vat": map[string]any{"rate": float64(25)}},
 	}}
-	encoded, err := bson.Marshal(original)
+	encoded, err := json.Marshal(original)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var stored Row
-	if err = bson.Unmarshal(encoded, &stored); err != nil {
+	if err = json.Unmarshal(encoded, &stored); err != nil {
 		t.Fatal(err)
 	}
 	engine, err := expressions.New()
@@ -43,16 +42,24 @@ func TestDecimalCellsPreserveStorageAndJSON(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := Row{ID: "one", Cells: cells, Version: 1}
-	encoded, err := bson.Marshal(row)
+	encoded, err := json.Marshal(row)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := bson.Raw(encoded).Lookup("cells").Document().Lookup("amount")
-	if raw.Type != bson.TypeDecimal128 {
-		t.Fatalf("stored as %s", raw.Type)
+	var wire struct {
+		Cells map[string]any `json:"cells"`
+	}
+	if err = json.Unmarshal(encoded, &wire); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := wire.Cells["amount"].(string); !ok {
+		t.Fatal("decimal JSON is not a string")
 	}
 	var restored Row
-	if err = bson.Unmarshal(encoded, &restored); err != nil {
+	if err = json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	if err = normalizeCells(columns, restored.Cells); err != nil {
 		t.Fatal(err)
 	}
 	value, ok := restored.Cells["amount"].(ledger.Decimal)
@@ -104,7 +111,7 @@ func TestValueTypes(t *testing.T) {
 		{"comma fraction", "datetime", "2026-11-04T18:23:45,123+01:00", false},
 		{"string list", "list", []string{"Lidl", "Konzum"}, true},
 		{"json list", "list", []any{"Lidl", "Konzum"}, true},
-		{"stored list", "list", bson.A{"Lidl"}, true},
+		{"stored list", "list", []any{"Lidl"}, true},
 		{"empty list", "list", []any{}, true},
 		{"mixed list", "list", []any{"Lidl", 12}, false},
 		{"oversized list item", "list", []string{strings.Repeat("x", 10001)}, false},
@@ -196,7 +203,7 @@ func TestColumnConstraints(t *testing.T) {
 		{"required false", Column{Type: "bool", Required: true}, false, true},
 		{"enum match", Column{Type: "string", Enum: []any{"EUR", "USD"}}, "EUR", true},
 		{"enum mismatch", Column{Type: "string", Enum: []any{"EUR", "USD"}}, "GBP", false},
-		{"numeric enum bson", Column{Type: "number", Enum: []any{int32(1), int32(2)}}, float64(1), true},
+		{"numeric enum integers", Column{Type: "number", Enum: []any{int32(1), int32(2)}}, float64(1), true},
 		{"bool enum", Column{Type: "bool", Enum: []any{false}}, true, false},
 		{"pattern match", Column{Type: "string", Pattern: "^[A-Z]{2}$"}, "HR", true},
 		{"pattern mismatch", Column{Type: "string", Pattern: "^[A-Z]{2}$"}, "HR1", false},
@@ -216,17 +223,17 @@ func TestColumnConstraints(t *testing.T) {
 	}
 }
 
-func TestStructuredEnumsSurviveBSON(t *testing.T) {
+func TestStructuredEnumsSurviveJSON(t *testing.T) {
 	definition := Table{Columns: []Column{
 		{ID: "attrs", Type: "json", Enum: []any{map[string]any{"country": "HR", "rate": float64(25)}}},
 		{ID: "tags", Type: "list", Enum: []any{[]any{"receipt", "food"}}},
 	}}
-	encoded, err := bson.Marshal(definition)
+	encoded, err := json.Marshal(definition)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var restored Table
-	if err = bson.Unmarshal(encoded, &restored); err != nil {
+	if err = json.Unmarshal(encoded, &restored); err != nil {
 		t.Fatal(err)
 	}
 	if err = validateCells(restored.Columns, map[string]any{"attrs": map[string]any{"country": "HR", "rate": float64(25)}, "tags": []any{"receipt", "food"}}); err != nil {

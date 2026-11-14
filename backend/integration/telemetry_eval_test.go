@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"math/big"
 	"regexp"
@@ -25,7 +26,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // evalLedger is a synthetic ledger whose Q2 2026 spending is €280.00: €100 of food, €50 and $110 at 1.10 of travel, and €30 estimated.
@@ -64,7 +64,7 @@ func evalLedger(t *testing.T, ctx context.Context, owner principal.Principal, s 
 }
 
 // testTelemetryEval is the deterministic eval: a fresh agent holding only the MCP builds a metric and a scoped dashboard, gets it through lint and tests, publishes, and answers a person's flag.
-func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
 	t.Helper()
 	token, e := s.Identity.Invite(ctx, admin, "eval-owner@example.test")
 	if e != nil {
@@ -554,7 +554,7 @@ func evalCaller(t *testing.T, ctx context.Context, cs *mcp.ClientSession, larges
 func evalJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 // testEvalTasks is the table of jobs a fresh agent does through MCP alone, on its own user and ledger. Each ends by checking state.
-func testEvalTasks(t *testing.T, ctx context.Context, admin principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testEvalTasks(t *testing.T, ctx context.Context, admin principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
 	pgdb := pgtest.New(t)
 	t.Helper()
 	token, e := s.Identity.Invite(ctx, admin, "eval-tasks@example.test")

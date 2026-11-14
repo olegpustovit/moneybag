@@ -21,64 +21,64 @@ import (
 )
 
 type Override struct {
-	Assumption string   `json:"assumption" bson:"assumption"`
-	Value      *float64 `json:"value,omitempty" bson:"value,omitempty"`
-	Expr       string   `json:"expr,omitempty" bson:"expr,omitempty"`
+	Assumption string   `json:"assumption"`
+	Value      *float64 `json:"value,omitempty"`
+	Expr       string   `json:"expr,omitempty"`
 	// Ref resolves a model input at forecast time: budget_line:<id>, budget_lines.total or income_stream:<id>. The assumption name must end in _usd or _eur; the value is converted to that currency with the live EUR/USD rate.
-	Ref    string   `json:"ref,omitempty" bson:"ref,omitempty" jsonschema:"model input: budget_line:<id> (limit), budget_lines.total or income_stream:<id> (monthly amount); assumption must end in _usd or _eur, converted with the live EUR/USD rate"`
-	Factor *float64 `json:"factor,omitempty" bson:"factor,omitempty" jsonschema:"multiplier applied to the resolved ref value"`
+	Ref    string   `json:"ref,omitempty" jsonschema:"model input: budget_line:<id> (limit), budget_lines.total or income_stream:<id> (monthly amount); assumption must end in _usd or _eur, converted with the live EUR/USD rate"`
+	Factor *float64 `json:"factor,omitempty" jsonschema:"multiplier applied to the resolved ref value"`
 }
 type Event struct {
-	Month   int     `json:"month" bson:"month"`
-	Amount  float64 `json:"amount" bson:"amount"`
-	Account string  `json:"account,omitempty" bson:"account,omitempty"`
+	Month   int     `json:"month"`
+	Amount  float64 `json:"amount"`
+	Account string  `json:"account,omitempty"`
 }
 type SpendLine struct {
-	Name     string  `json:"name" bson:"name" db:"name"`
-	Amount   float64 `json:"amount" bson:"amount"`
-	Currency string  `json:"currency" bson:"currency"`
-	USD      float64 `json:"usd" bson:"usd"`
+	Name     string  `json:"name" db:"name"`
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
+	USD      float64 `json:"usd"`
 }
 type LegacyInputs struct {
-	Spend                    []SpendLine `json:"spend" bson:"spend"`
-	SalaryBiweeklyUSD        float64     `json:"salaryBiweeklyUsd" bson:"salary_biweekly_usd"`
-	ReimbursementBiweeklyUSD float64     `json:"reimbursementBiweeklyUsd" bson:"reimbursement_biweekly_usd"`
-	SideIncomeMonthlyUSD     float64     `json:"sideIncomeMonthlyUsd" bson:"side_income_monthly_usd"`
-	KyivExtraDrainMonthlyUSD float64     `json:"kyivExtraDrainMonthlyUsd" bson:"kyiv_extra_drain_monthly_usd"`
-	BufferUSD                float64     `json:"bufferUsd" bson:"buffer_usd"`
-	YieldPct                 float64     `json:"yieldPct" bson:"yield_pct"`
+	Spend                    []SpendLine `json:"spend"`
+	SalaryBiweeklyUSD        float64     `json:"salaryBiweeklyUsd"`
+	ReimbursementBiweeklyUSD float64     `json:"reimbursementBiweeklyUsd"`
+	SideIncomeMonthlyUSD     float64     `json:"sideIncomeMonthlyUsd"`
+	KyivExtraDrainMonthlyUSD float64     `json:"kyivExtraDrainMonthlyUsd"`
+	BufferUSD                float64     `json:"bufferUsd"`
+	YieldPct                 float64     `json:"yieldPct"`
 }
 type Scenario struct {
-	Archived         bool          `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
-	Key              string        `json:"-" bson:"_id" db:"storage_key"`
-	UserID           string        `json:"-" bson:"user_id" db:"user_id"`
-	ID               string        `json:"id" bson:"id" db:"id"`
-	Name             string        `json:"name" bson:"name" db:"name"`
-	Revision         int           `json:"revision,omitempty" bson:"revision" db:"revision"`
-	ExpectedRevision *int          `json:"expected_revision,omitempty" bson:"-" db:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
-	Overrides        []Override    `json:"overrides" bson:"overrides" db:"overrides"`
-	Events           []Event       `json:"events,omitempty" bson:"events,omitempty" db:"events"`
-	Legacy           *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty" db:"legacy"`
+	Archived         bool          `json:"archived,omitempty" db:"archived"`
+	Key              string        `json:"-" db:"storage_key"`
+	UserID           string        `json:"-" db:"user_id"`
+	ID               string        `json:"id" db:"id"`
+	Name             string        `json:"name" db:"name"`
+	Revision         int           `json:"revision,omitempty" db:"revision"`
+	ExpectedRevision *int          `json:"expected_revision,omitempty" db:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
+	Overrides        []Override    `json:"overrides" db:"overrides"`
+	Events           []Event       `json:"events,omitempty" db:"events"`
+	Legacy           *LegacyInputs `json:"legacy,omitempty" db:"legacy"`
 	// DropLegacy removes a stored legacy block; omitting legacy otherwise keeps it.
-	DropLegacy bool `json:"drop_legacy,omitempty" bson:"-" db:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
+	DropLegacy bool `json:"drop_legacy,omitempty" db:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
 }
 type Income struct {
-	ID        string  `json:"id" bson:"id" db:"id"`
-	Amount    float64 `json:"amount" bson:"amount"`
-	Currency  string  `json:"currency" bson:"currency"`
-	Frequency string  `json:"frequency" bson:"frequency"`
-	Start     string  `json:"start,omitempty" bson:"start,omitempty"`
-	End       string  `json:"end,omitempty" bson:"end,omitempty"`
-	GrowthPct float64 `json:"growth_pct,omitempty" bson:"growth_pct,omitempty"`
+	ID        string  `json:"id" db:"id"`
+	Amount    float64 `json:"amount"`
+	Currency  string  `json:"currency"`
+	Frequency string  `json:"frequency"`
+	Start     string  `json:"start,omitempty"`
+	End       string  `json:"end,omitempty"`
+	GrowthPct float64 `json:"growth_pct,omitempty"`
 	// Deprecated: use Kind "reimbursement". Still read so stored streams keep working.
-	Reimbursement bool `json:"reimbursement,omitempty" bson:"reimbursement,omitempty" jsonschema:"deprecated; use kind reimbursement"`
+	Reimbursement bool `json:"reimbursement,omitempty" jsonschema:"deprecated; use kind reimbursement"`
 	// Kind is salary, side or reimbursement. Reimbursement streams repay spend already paid from Kyiv cash, so they net against Kyiv instead of adding wealth.
-	Kind string `json:"kind,omitempty" bson:"kind,omitempty" jsonschema:"salary, side or reimbursement; reimbursement is never counted as income"`
+	Kind string `json:"kind,omitempty" jsonschema:"salary, side or reimbursement; reimbursement is never counted as income"`
 	// PayerMatch is a CEL expression over row.payee and row.tags selecting the entries that pay this stream.
-	PayerMatch string `json:"payer_match,omitempty" bson:"payer_match,omitempty" jsonschema:"CEL over row.payee and row.tags selecting entries that pay this stream, e.g. row.payee == \"Acme\""`
+	PayerMatch string `json:"payer_match,omitempty" jsonschema:"CEL over row.payee and row.tags selecting entries that pay this stream, e.g. row.payee == \"Acme\""`
 	// LandsIn is the account id receiving the money; without it actuals are read from income-type accounts.
-	LandsIn    string `json:"lands_in,omitempty" bson:"lands_in,omitempty" jsonschema:"account id receiving the money; empty reads income-type accounts"`
-	GrossOrNet string `json:"gross_or_net,omitempty" bson:"gross_or_net,omitempty" jsonschema:"gross or net"`
+	LandsIn    string `json:"lands_in,omitempty" jsonschema:"account id receiving the money; empty reads income-type accounts"`
+	GrossOrNet string `json:"gross_or_net,omitempty" jsonschema:"gross or net"`
 }
 
 func (v Income) IsReimbursement() bool { return v.Kind == "reimbursement" || v.Reimbursement }
@@ -168,7 +168,7 @@ func (s *Service) load(ctx context.Context, p principal.Principal) (State, error
 		return out, fmt.Errorf("at most 100 scenarios")
 	}
 	var streams struct {
-		Streams []Income `bson:"streams"`
+		Streams []Income ``
 	}
 	e = s.repo.db.QueryRow(ctx, `SELECT streams FROM income_models WHERE id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&streams.Streams)
 	if e == nil {
@@ -298,7 +298,7 @@ func (s *Service) SetIncome(ctx context.Context, p principal.Principal, streams 
 		}
 	}
 	var before struct {
-		Streams []Income `bson:"streams"`
+		Streams []Income ``
 	}
 	e := s.repo.db.QueryRow(ctx, `SELECT streams FROM income_models WHERE id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&before.Streams)
 	if e != nil && !postgres.IsNotFound(e) {

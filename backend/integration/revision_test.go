@@ -4,38 +4,19 @@ import (
 	"context"
 	"errors"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
-	"net/url"
-	"os"
-	"strings"
 	"testing"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestRevisionTracksPartialWritesAndIsolation(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_revision")
-	if err := db.Drop(ctx); err != nil {
+	db := pgtest.New(t)
+	if _, err := db.Exec(ctx, `CREATE TABLE synthetic(id text PRIMARY KEY)`); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}
 	other := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW"}
 	s := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
@@ -54,14 +35,14 @@ func TestRevisionTracksPartialWritesAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := s.Mutation(ctx, p, func(ctx context.Context) error {
-		_, err := db.Collection("synthetic").InsertOne(ctx, bson.M{"_id": "written"})
+		_, err := db.Exec(ctx, `INSERT INTO synthetic(id) VALUES ('written')`)
 		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
 	partial := errors.New("after partial write")
 	if err := s.Mutation(ctx, p, func(ctx context.Context) error {
-		if _, err := db.Collection("synthetic").InsertOne(ctx, bson.M{"_id": "partial"}); err != nil {
+		if _, err := db.Exec(ctx, `INSERT INTO synthetic(id) VALUES ('partial')`); err != nil {
 			return err
 		}
 		return partial

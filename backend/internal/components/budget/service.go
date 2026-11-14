@@ -19,23 +19,23 @@ import (
 )
 
 type Line struct {
-	LiteralAccounts []string       `json:"-" bson:"-" db:"-"`
-	Synthetic       bool           `json:"-" bson:"-" db:"-"`
-	Archived        bool           `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
-	Key             string         `json:"-" bson:"_id" db:"storage_key"`
-	UserID          string         `json:"-" bson:"user_id" db:"user_id"`
-	ID              string         `json:"id" bson:"id" db:"id"`
-	Name            string         `json:"name" bson:"name" db:"name"`
-	Revision        int            `json:"revision,omitempty" bson:"revision" db:"revision"`
-	Limit           ledger.Decimal `json:"limit" bson:"limit" db:"limit"`
-	Accounts        []string       `json:"accounts" bson:"accounts" db:"accounts"`
+	LiteralAccounts []string       `json:"-" db:"-"`
+	Synthetic       bool           `json:"-" db:"-"`
+	Archived        bool           `json:"archived,omitempty" db:"archived"`
+	Key             string         `json:"-" db:"storage_key"`
+	UserID          string         `json:"-" db:"user_id"`
+	ID              string         `json:"id" db:"id"`
+	Name            string         `json:"name" db:"name"`
+	Revision        int            `json:"revision,omitempty" db:"revision"`
+	Limit           ledger.Decimal `json:"limit" db:"limit"`
+	Accounts        []string       `json:"accounts" db:"accounts"`
 	// GroupRef maps every expense account whose groups[dimension] equals value, resolved on read.
-	GroupRef *GroupRef `json:"group_ref,omitempty" bson:"group_ref,omitempty" db:"group_ref"`
-	Order    int       `json:"order" bson:"order" db:"order"`
+	GroupRef *GroupRef `json:"group_ref,omitempty" db:"group_ref"`
+	Order    int       `json:"order" db:"order"`
 }
 type GroupRef struct {
-	Dimension string `json:"dimension" bson:"dimension"`
-	Value     string `json:"value" bson:"value"`
+	Dimension string `json:"dimension"`
+	Value     string `json:"value"`
 }
 type SetInput struct {
 	ID               string          `json:"id"`
@@ -152,7 +152,7 @@ func (s *Service) lines(ctx context.Context, p principal.Principal) ([]Line, err
 const lineColumns = `storage_key,user_id,id,name,revision,COALESCE(limit_lexeme,"limit"::text) AS "limit",accounts,group_ref,"order",archived`
 
 type accountID struct {
-	ID string `bson:"id" db:"id"`
+	ID string `db:"id"`
 }
 
 func (s *Service) groupAccounts(ctx context.Context, p principal.Principal, ref GroupRef) ([]accountID, error) {

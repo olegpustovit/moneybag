@@ -15,8 +15,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -41,16 +39,13 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const tailnetOrigin = "https://moneybag.example.ts.net:8443"
 
 type readHarness struct {
 	ctx      context.Context
-	db       *mongo.Database
+	db       *pgxpool.Pool
 	endpoint string
 	services mcpserver.Services
 	audit    *audit.Service
@@ -61,38 +56,17 @@ type readHarness struct {
 	capture  atomic.Pointer[preview.Capture]
 }
 
-func testDatabase(t *testing.T, suffix string, monitor *event.CommandMonitor) (*mongo.Database, context.Context) {
+func testDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
 	t.Helper()
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	t.Cleanup(cancel)
-	opts := options.Client().ApplyURI(uri)
-	if monitor != nil {
-		opts.SetMonitor(monitor)
-	}
-	client, err := mongo.Connect(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + suffix)
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
-	return db, ctx
+	return pgtest.New(t), ctx
 }
 
 // newReadHarness runs the real handlers, snapshots, sharing and ledger behind the real compression wrapper.
 func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHarness {
 	t.Helper()
-	db, ctx := testDatabase(t, suffix, nil)
+	db, ctx := testDatabase(t)
 	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if err := ids.Init(ctx); err != nil {
 		t.Fatal(err)
@@ -140,7 +114,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	h.services.Previews = preview.New(h.endpoint, func(ctx context.Context, target string, width, height int) ([]byte, error) {
 		return (*h.capture.Load())(ctx, target, width, height)
 	})
-	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db.Client())
+	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db)
 	compress, err := handlers.Compression()
 	if err != nil {
 		t.Fatal(err)

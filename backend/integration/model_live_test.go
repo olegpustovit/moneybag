@@ -13,35 +13,17 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, e := url.Parse(uri)
-	if e != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("integration tests require the dedicated moneybag_test_ database")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	client, e := mongodb.Connect(ctx, uri)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_live")
-	_ = db.Drop(ctx)
-	defer db.Drop(context.Background())
+	var e error
 	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)

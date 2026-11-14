@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
@@ -15,11 +16,10 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // These synthetic receipts exercise country-specific metadata without claiming OCR accuracy.
-func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
 	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("receipt template", func(t *testing.T) {

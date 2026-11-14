@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
@@ -10,10 +11,9 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testLargeTableQuery(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testLargeTableQuery(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
 	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("indexed table query beyond 5000 rows", func(t *testing.T) {

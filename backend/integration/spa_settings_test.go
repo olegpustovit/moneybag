@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"net/http"
@@ -17,10 +18,9 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testSPASettingsWrites(t *testing.T, ctx context.Context, endpoint string, owner principal.Principal, services mcpserver.Services, db *mongo.Database) {
+func testSPASettingsWrites(t *testing.T, ctx context.Context, endpoint string, owner principal.Principal, services mcpserver.Services, db *pgxpool.Pool) {
 	t.Helper()
 	invite, err := services.Identity.Invite(ctx, owner, "settings-only@example.test")
 	if err != nil {

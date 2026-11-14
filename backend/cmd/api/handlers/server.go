@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
@@ -15,7 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/preview"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"html/template"
 	"io"
 	"net/http"
@@ -57,13 +57,13 @@ type Handler struct {
 	services       mcpserver.Services
 	oauth          *oauth.Service
 	ledgerRepo     *ledger.PostgresRepository
-	client         *mongo.Client
+	pool           *pgxpool.Pool
 	templates      *template.Template
 	full, readonly *mcp.Server
 }
 
-func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.PostgresRepository, client *mongo.Client) *Handler {
-	h := &Handler{cfg: cfg, services: s, oauth: oa, ledgerRepo: repo, client: client, templates: template.Must(parseTemplates())}
+func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.PostgresRepository, pool *pgxpool.Pool) *Handler {
+	h := &Handler{cfg: cfg, services: s, oauth: oa, ledgerRepo: repo, pool: pool, templates: template.Must(parseTemplates())}
 	h.full = mcpserver.New(s, mcpserver.Options{Version: cfg.Version, Toolsets: cfg.Toolsets})
 	h.readonly = mcpserver.New(s, mcpserver.Options{Version: cfg.Version, ReadOnly: true, Toolsets: cfg.Toolsets})
 	return h
@@ -134,7 +134,7 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
-		if h.client.Ping(ctx, nil) != nil {
+		if h.pool.Ping(ctx) != nil {
 			respond(w, 503, map[string]string{"status": "unhealthy"})
 			return
 		}

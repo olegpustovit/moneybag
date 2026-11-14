@@ -7,8 +7,8 @@ import (
 )
 
 // Captured by running ParseDecimal and String on dev at 55c5d50, before the persistence port.
-func TestDecimalMongoGolden(t *testing.T) {
-	b, err := os.ReadFile("testdata/decimal-mongo-golden.json")
+func TestDecimalLegacyGolden(t *testing.T) {
+	b, err := os.ReadFile("testdata/decimal-legacy-golden.json")
 	if err != nil {
 		t.Fatal(err)
 	}

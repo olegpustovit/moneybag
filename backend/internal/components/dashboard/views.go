@@ -14,10 +14,10 @@ import (
 
 // View is a named, per-user saved Query usable as the data source "view:<id>".
 type View struct {
-	Key    string `json:"-" bson:"_id" db:"storage_key"`
-	UserID string `json:"-" bson:"user_id" db:"user_id"`
-	ID     string `json:"id" bson:"id" db:"id"`
-	Query  Query  `json:"query" bson:"query" db:"query"`
+	Key    string `json:"-" db:"storage_key"`
+	UserID string `json:"-" db:"user_id"`
+	ID     string `json:"id" db:"id"`
+	Query  Query  `json:"query" db:"query"`
 }
 type ViewInput struct {
 	ID    string `json:"id"`

@@ -10,18 +10,23 @@ import (
 )
 
 func TestConfigVaultPrecedenceAndSecretValidation(t *testing.T) {
-	for _, key := range []string{"LISTEN", "PUBLIC_URL", "MONGO_URI", "MONGO_DB", "SETUP_TOKEN", "LOG_FORMAT", "TOOLSETS", "SECRET_KEY"} {
+	for _, key := range []string{"LISTEN", "PUBLIC_URL", "DATABASE_URL", "SETUP_TOKEN", "LOG_FORMAT", "TOOLSETS", "SECRET_KEY"} {
 		t.Setenv("MONEYBAG_"+key, "")
 	}
 	t.Setenv("MONEYBAG_PUBLIC_URL", "http://127.0.0.1:6459")
-	t.Setenv("MONEYBAG_MONGO_DB", "test")
+	t.Setenv("MONEYBAG_DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("MONEYBAG_LOG_FORMAT", "text")
 	t.Setenv("MONEYBAG_LISTEN", "127.0.0.1:6459")
 	t.Setenv("MONEYBAG_VAULT_ENABLED", "false")
 	c, e := loadConfig()
-	if e != nil || c.MongoDB != "test" {
-		t.Fatal(c.MongoDB, e)
+	if e != nil || c.DatabaseURL != "postgres://localhost/test" {
+		t.Fatal(c.DatabaseURL, e)
 	}
+	t.Setenv("MONEYBAG_DATABASE_URL", "postgres://user:secret-must-not-appear@localhost:bad/database")
+	if _, err := loadConfig(); err == nil || strings.Contains(err.Error(), "secret-must-not-appear") {
+		t.Fatal("database URL validation/redaction", err)
+	}
+	t.Setenv("MONEYBAG_DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("MONEYBAG_SECRET_KEY", "secret-must-not-appear")
 	_, e = loadConfig()
 	if e == nil || strings.Contains(e.Error(), "secret-must-not-appear") {
@@ -48,7 +53,7 @@ func TestConfigVaultPrecedenceAndSecretValidation(t *testing.T) {
 			if r.Header.Get("X-Vault-Token") != "synthetic-token" {
 				t.Error("missing Vault token")
 			}
-			io.WriteString(w, `{"data":{"data":{"listen":"127.0.0.1:1234","mongo_db":"vault-db"},"metadata":{}}}`)
+			io.WriteString(w, `{"data":{"data":{"listen":"127.0.0.1:1234","database_url":"postgres://localhost/vault-db"},"metadata":{}}}`)
 		case "/v1/auth/token/revoke-self":
 			revoked = true
 			w.WriteHeader(204)
@@ -65,11 +70,11 @@ func TestConfigVaultPrecedenceAndSecretValidation(t *testing.T) {
 	t.Setenv("MONEYBAG_VAULT_SECRET_ID", "synthetic-secret")
 	t.Setenv("MONEYBAG_VAULT_AUTH_METHOD", "approle")
 	values, e := vaultValues()
-	if e != nil || values["MONGO_DB"] != "vault-db" || !revoked {
+	if e != nil || values["DATABASE_URL"] != "postgres://localhost/vault-db" || !revoked {
 		t.Fatal("Vault startup read/revoke", e)
 	}
 	c, e = loadConfig()
-	if e != nil || c.Listen != "127.0.0.1:6459" || c.MongoDB != "test" {
+	if e != nil || c.Listen != "127.0.0.1:6459" || c.DatabaseURL != "postgres://localhost/test" {
 		t.Fatal("environment must override Vault", e)
 	}
 	server.Close()

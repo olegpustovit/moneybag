@@ -13,7 +13,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func testSnapshots() *Snapshots {
@@ -250,7 +249,7 @@ func TestCachedSourceQueryCopiesResultsAndChargesOriginalCost(t *testing.T) {
 	ctx := expressions.WithVolatility(context.Background())
 	_, err := cache.read(ctx, p, "query", q.From, key, func() (any, error) {
 		expressions.ExpireAt(ctx, expires)
-		return queryResult{value: []map[string]any{{"nested": map[string]any{"value": float64(1)}, "bson": bson.A{bson.D{{Key: "value", Value: 1}}}}}, cost: 17, count: 3}, nil
+		return queryResult{value: []map[string]any{{"nested": map[string]any{"value": float64(1)}, "array": []any{map[string]any{"value": 1}}}}, cost: 17, count: 3}, nil
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -267,11 +266,11 @@ func TestCachedSourceQueryCopiesResultsAndChargesOriginalCost(t *testing.T) {
 			t.Fatalf("cached value mutated: %v", nested)
 		}
 		nested["value"] = float64(999)
-		bsonValue := value.([]map[string]any)[0]["bson"].(bson.A)[0].(bson.D)
-		if bsonValue[0].Value != 1 {
-			t.Fatalf("cached BSON mutated: %v", bsonValue)
+		arrayValue := value.([]map[string]any)[0]["array"].([]any)[0].(map[string]any)
+		if arrayValue["value"] != 1 {
+			t.Fatalf("cached array mutated: %v", arrayValue)
 		}
-		bsonValue[0].Value = 999
+		arrayValue["value"] = 999
 	}
 }
 

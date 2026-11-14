@@ -15,7 +15,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"math"
 	"math/big"
 	"regexp"
@@ -25,62 +24,39 @@ import (
 )
 
 type Column struct {
-	Table       string `json:"table,omitempty" bson:"table,omitempty"`
-	Description string `json:"description,omitempty" bson:"description,omitempty"`
-	Required    bool   `json:"required,omitempty" bson:"required,omitempty"`
-	Enum        []any  `json:"enum,omitempty" bson:"enum,omitempty"`
-	Pattern     string `json:"pattern,omitempty" bson:"pattern,omitempty"`
-	ID          string `json:"id" bson:"id"`
-	Type        string `json:"type" bson:"type"`
-	Formula     string `json:"formula,omitempty" bson:"formula,omitempty"`
+	Table       string `json:"table,omitempty"`
+	Description string `json:"description,omitempty"`
+	Required    bool   `json:"required,omitempty"`
+	Enum        []any  `json:"enum,omitempty"`
+	Pattern     string `json:"pattern,omitempty"`
+	ID          string `json:"id"`
+	Type        string `json:"type"`
+	Formula     string `json:"formula,omitempty"`
 }
 type Table struct {
-	Keys        [][]string        `json:"keys,omitempty" bson:"keys,omitempty" db:"keys"`
-	Checks      []RowCheck        `json:"checks,omitempty" bson:"checks,omitempty" db:"checks"`
-	Ledger      *LedgerConstraint `json:"ledger,omitempty" bson:"ledger,omitempty" db:"ledger"`
-	Description string            `json:"description,omitempty" bson:"description,omitempty" db:"description"`
-	Archived    bool              `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
-	Key         string            `json:"-" bson:"_id" db:"storage_key"`
-	UserID      string            `json:"-" bson:"user_id" db:"user_id"`
-	ID          string            `json:"id" bson:"id" db:"id"`
-	Name        string            `json:"name" bson:"name" db:"name"`
-	Columns     []Column          `json:"columns" bson:"columns" db:"columns"`
-}
-
-func (t *Table) UnmarshalBSON(data []byte) error {
-	type table Table
-	decoder := bson.NewDecoder(bson.NewDocumentReader(bytes.NewReader(data)))
-	decoder.DefaultDocumentM()
-	return decoder.Decode((*table)(t))
+	Keys        [][]string        `json:"keys,omitempty" db:"keys"`
+	Checks      []RowCheck        `json:"checks,omitempty" db:"checks"`
+	Ledger      *LedgerConstraint `json:"ledger,omitempty" db:"ledger"`
+	Description string            `json:"description,omitempty" db:"description"`
+	Archived    bool              `json:"archived,omitempty" db:"archived"`
+	Key         string            `json:"-" db:"storage_key"`
+	UserID      string            `json:"-" db:"user_id"`
+	ID          string            `json:"id" db:"id"`
+	Name        string            `json:"name" db:"name"`
+	Columns     []Column          `json:"columns" db:"columns"`
 }
 
 type Row struct {
-	Entry     *JoinedEntry `json:"entry,omitempty" bson:"-" db:"-"`
+	Entry     *JoinedEntry `json:"entry,omitempty" db:"-"`
 	joined    bool
-	KeyHashes []string       `json:"-" bson:"key_hashes,omitempty" db:"key_hashes"`
-	Archived  bool           `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
-	Key       string         `json:"-" bson:"_id" db:"storage_key"`
-	UserID    string         `json:"-" bson:"user_id" db:"user_id"`
-	TableID   string         `json:"-" bson:"table_id" db:"table_id"`
-	ID        string         `json:"id" bson:"id" db:"id"`
-	Cells     map[string]any `json:"cells" bson:"cells" db:"cells"`
-	Version   int            `json:"version" bson:"version" db:"version"`
-}
-
-// Decode nested cells as maps so CEL can address JSON fields by name.
-func (r *Row) UnmarshalBSON(data []byte) error {
-	type row Row
-	decoder := bson.NewDecoder(bson.NewDocumentReader(bytes.NewReader(data)))
-	decoder.DefaultDocumentM()
-	if err := decoder.Decode((*row)(r)); err != nil {
-		return err
-	}
-	for id, value := range r.Cells {
-		if decimal, ok := value.(bson.Decimal128); ok {
-			r.Cells[id] = ledger.Decimal{Decimal128: decimal}
-		}
-	}
-	return nil
+	KeyHashes []string       `json:"-" db:"key_hashes"`
+	Archived  bool           `json:"archived,omitempty" db:"archived"`
+	Key       string         `json:"-" db:"storage_key"`
+	UserID    string         `json:"-" db:"user_id"`
+	TableID   string         `json:"-" db:"table_id"`
+	ID        string         `json:"id" db:"id"`
+	Cells     map[string]any `json:"cells" db:"cells"`
+	Version   int            `json:"version" db:"version"`
 }
 
 type CreateInput struct {
@@ -311,13 +287,11 @@ func validValue(c Column, v any) bool {
 				}
 			}
 			return true
-		case bson.A:
-			return validValue(c, []any(values))
 		}
 		return false
 	case "json":
 		switch v.(type) {
-		case map[string]any, bson.M:
+		case map[string]any:
 		default:
 			return false
 		}

@@ -1,13 +1,10 @@
 package integration
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 
@@ -16,25 +13,10 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestIncomeReconcileStreamsJournalAndPreservesLimit(t *testing.T) {
 	ctx, p, sources, reads := postingsFixture(t)
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	parsed, _ := url.Parse(uri)
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer db.Drop(context.Background())
-
 	expr, err := expressions.New()
 	if err != nil {
 		t.Fatal(err)

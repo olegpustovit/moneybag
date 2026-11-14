@@ -19,20 +19,20 @@ import (
 )
 
 type RuleSet struct {
-	Account string   `json:"account,omitempty" bson:"account,omitempty"`
-	Tags    []string `json:"tags,omitempty" bson:"tags,omitempty"`
-	Kind    string   `json:"kind,omitempty" bson:"kind,omitempty"`
+	Account string   `json:"account,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Kind    string   `json:"kind,omitempty"`
 }
 type Rule struct {
-	Key      string  `json:"-" bson:"_id" db:"storage_key"`
-	UserID   string  `json:"-" bson:"user_id" db:"user_id"`
-	ID       string  `json:"id,omitempty" bson:"id" db:"id"`
-	Priority int     `json:"priority" bson:"priority" db:"priority"`
-	Match    string  `json:"match" bson:"match" db:"match"`
-	Set      RuleSet `json:"set" bson:"set" db:"set"`
-	Note     string  `json:"note,omitempty" bson:"note,omitempty"`
-	Enabled  bool    `json:"enabled" bson:"enabled" db:"enabled"`
-	Version  int     `json:"version" bson:"version" db:"version"`
+	Key      string  `json:"-" db:"storage_key"`
+	UserID   string  `json:"-" db:"user_id"`
+	ID       string  `json:"id,omitempty" db:"id"`
+	Priority int     `json:"priority" db:"priority"`
+	Match    string  `json:"match" db:"match"`
+	Set      RuleSet `json:"set" db:"set"`
+	Note     string  `json:"note,omitempty"`
+	Enabled  bool    `json:"enabled" db:"enabled"`
+	Version  int     `json:"version" db:"version"`
 }
 type RuleInput struct {
 	ID       string  `json:"id,omitempty"`

@@ -5,7 +5,6 @@ permissions:
   contents: read
 jobs:
   check:
-    # Match the MongoDB-compatible runner used by speed-budget below.
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -21,14 +20,16 @@ jobs:
       - run: make test-integration
         timeout-minutes: 6
   speed-budget:
-    # MongoDB crashes on Linux 6.19 through 7.0.13 (SERVER-121912); move back to ubuntu-latest when its kernel is past that.
     runs-on: ubuntu-22.04
     services:
-      mongo:
-        image: mongo:8
-        options: --ulimit nofile=64000:64000
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: moneybag_speed_ci
         ports:
-          - 27017:27017
+          - 5432:5432
+        options: --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 2s --health-retries 20
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
@@ -41,5 +42,5 @@ jobs:
       - run: e2e/speed-budget-ci.sh
         timeout-minutes: 6
         env:
-          MONEYBAG_E2E_MONGO_URI: mongodb://127.0.0.1:27017
+          MONEYBAG_E2E_DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/moneybag_speed_ci
           CHROMIUM_BIN: /usr/bin/google-chrome
