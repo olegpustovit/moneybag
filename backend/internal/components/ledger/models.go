@@ -1,6 +1,7 @@
 package ledger
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -81,6 +82,25 @@ func DecimalFromRat(r *big.Rat) (Decimal, error) {
 	return ParseDecimal(s)
 }
 func (d Decimal) MarshalJSON() ([]byte, error) { return json.Marshal(d.String()) }
+
+func (d Decimal) Value() (driver.Value, error) { return d.String(), nil }
+
+func (d *Decimal) Scan(src any) error {
+	var text string
+	switch v := src.(type) {
+	case string:
+		text = v
+	case []byte:
+		text = string(v)
+	default:
+		return fmt.Errorf("amount must be a decimal string")
+	}
+	value, err := ParseDecimal(text)
+	if err == nil {
+		*d = value
+	}
+	return err
+}
 func (d *Decimal) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
