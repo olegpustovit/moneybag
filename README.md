@@ -59,7 +59,7 @@ go vet ./...
 MONEYBAG_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres go test ./integration -v
 ```
 
-The integration suite requires a disposable database whose name starts with `moneybag_test_`; it drops that database. It checks colliding user IDs in shared collections, ledger invariants, OAuth, import retries, rules, reconciliation, sharing, undo/redo and all 64 tool scope guards through the official MCP SDK. Integration tests skip when the environment variable is absent.
+The integration suite requires a dedicated disposable PostgreSQL server and a role that can create databases; it creates and removes isolated databases for each test. It checks colliding user IDs in shared tables, ledger invariants, OAuth, import retries, rules, reconciliation, sharing, undo/redo and all 64 tool scope guards through the official MCP SDK. Integration tests skip when the environment variable is absent.
 
 Browser checks use a separate synthetic QA environment on port 6460. Start the QA server with `MONEYBAG_SETUP_TOKEN=synthetic-preview-token`, a disposable PostgreSQL database, and `MONEYBAG_CHROMIUM_BIN` set for `dashboard_render`:
 
