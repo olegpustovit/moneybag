@@ -13,6 +13,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
@@ -57,7 +58,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	}
 	book := ledger.NewService(repo, a)
 	expr, _ := expressions.New()
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)

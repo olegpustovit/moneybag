@@ -5,6 +5,8 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
@@ -12,9 +14,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
 	"net/http"
 	"regexp"
@@ -24,17 +23,17 @@ import (
 )
 
 type Quote struct {
-	Archived bool           `json:"archived,omitempty" bson:"archived,omitempty"`
-	ID       string         `json:"id" bson:"_id"`
-	UserID   string         `json:"-" bson:"user_id"`
-	Pair     string         `json:"pair" bson:"pair"`
-	Base     string         `json:"base" bson:"base"`
-	Quote    string         `json:"quote" bson:"quote"`
-	At       string         `json:"at" bson:"at"`
-	Value    ledger.Decimal `json:"value" bson:"value"`
-	Source   string         `json:"source" bson:"source"`
+	Archived bool           `json:"archived,omitempty" db:"archived"`
+	ID       string         `json:"id" db:"id"`
+	UserID   string         `json:"-" db:"user_id"`
+	Pair     string         `json:"pair" db:"pair"`
+	Base     string         `json:"base" db:"base"`
+	Quote    string         `json:"quote" db:"quote"`
+	At       string         `json:"at" db:"at"`
+	Value    ledger.Decimal `json:"value" db:"value"`
+	Source   string         `json:"source" db:"source"`
 	// Corrected marks a human or agent quote; the provider sync never overwrites it.
-	Corrected bool `json:"corrected,omitempty" bson:"corrected,omitempty"`
+	Corrected bool `json:"corrected,omitempty" db:"corrected"`
 }
 type SetInput struct {
 	Pair   string         `json:"pair"`
@@ -49,23 +48,25 @@ type Result struct {
 	Quote   Quote  `json:"quote"`
 	EventID string `json:"event_id"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 
 var ErrNoQuote = errors.New("no quote")
 
 type Service struct {
-	repo  *MongoRepository
+	repo  *PostgresRepository
 	audit *audit.Service
 	http  *http.Client
 	urls  endpoints
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository {
-	return &MongoRepository{db}
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{db}
 }
-func NewService(r *MongoRepository, a *audit.Service) *Service {
+func NewService(r *PostgresRepository, a *audit.Service) *Service {
 	return &Service{r, a, safefetch.Client(), endpoints{ecbURL, goldAPIURL, swissURL, ecbDataURL}}
 }
+
+const quoteColumns = `archived,id,user_id,pair,base,quote,to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS at,value,source,corrected`
 
 var pairPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,19}/[A-Za-z][A-Za-z0-9_]{0,19}$`)
 
@@ -95,17 +96,26 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 		return Result{}, fmt.Errorf("positive decimal quote, RFC3339 timestamp and source required")
 	}
 	q := Quote{ID: ulid.Make().String(), UserID: p.UserID, Pair: base + "/" + quote, Base: base, Quote: quote, At: at.UTC().Format(time.RFC3339), Value: in.Value, Source: in.Source, Corrected: !in.Provider}
-	f := bson.M{"user_id": p.UserID, "pair": q.Pair, "at": q.At}
+	args := pgx.NamedArgs{"user": p.UserID, "pair": q.Pair, "at": q.At}
 	var old Quote
-	e = s.repo.db.Collection("prices").FindOne(ctx, f).Decode(&old)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	const findSQL = `SELECT ` + quoteColumns + ` FROM prices WHERE user_id=@user AND pair=@pair AND at=@at::timestamptz`
+	rows, err := s.repo.db.Query(ctx, findSQL, args)
+	if err != nil {
+		return Result{}, err
+	}
+	old, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[Quote])
+	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return Result{}, e
 	}
 	if e == nil {
 		q.ID = old.ID
 	}
 	id, e := s.audit.Write(audit.RateOnly(ctx), p, "rate_set", audit.Target{Collection: "prices", ID: q.ID}, in.Reason, old, q, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("prices").ReplaceOne(tx, f, q, options.Replace().SetUpsert(true))
+		const writeSQL = `INSERT INTO prices (id,user_id,pair,base,quote,at,value,source,archived,corrected)
+ VALUES (@id,@user,@pair,@base,@quote,@at::timestamptz,@value,@source,@archived,@corrected)
+ ON CONFLICT (user_id,pair,at) DO UPDATE SET id=EXCLUDED.id, base=EXCLUDED.base, quote=EXCLUDED.quote,
+ value=EXCLUDED.value, source=EXCLUDED.source, archived=EXCLUDED.archived, corrected=EXCLUDED.corrected`
+		_, e := s.repo.db.Exec(tx, writeSQL, pgx.NamedArgs{"id": q.ID, "user": q.UserID, "pair": q.Pair, "base": q.Base, "quote": q.Quote, "at": q.At, "value": q.Value, "source": q.Source, "archived": q.Archived, "corrected": q.Corrected})
 		return e
 	})
 	return Result{q, id}, e
@@ -121,17 +131,17 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, pairs []string
 		at = time.Now().UTC().Format(time.RFC3339)
 		if expressions.Tracking(ctx) {
 			next, err := reqcache.Do(ctx, "next-rate-change|"+p.UserID, func() (time.Time, error) {
-				var q struct {
-					At string `bson:"at"`
-				}
-				err := s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "at": bson.M{"$gt": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: 1}}).SetProjection(bson.M{"at": 1})).Decode(&q)
-				if errors.Is(err, mongo.ErrNoDocuments) {
+				var next string
+				const nextSQL = `SELECT to_char(at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') FROM prices
+                WHERE user_id=@user AND at>@at::timestamptz AND archived=false ORDER BY at LIMIT 1`
+				err := s.repo.db.QueryRow(ctx, nextSQL, pgx.NamedArgs{"user": p.UserID, "at": at}).Scan(&next)
+				if errors.Is(err, pgx.ErrNoRows) {
 					return time.Time{}, nil
 				}
 				if err != nil {
 					return time.Time{}, err
 				}
-				return time.Parse(time.RFC3339, q.At)
+				return time.Parse(time.RFC3339, next)
 			})
 			if err != nil {
 				expressions.MarkVolatile(ctx)
@@ -150,7 +160,7 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, pairs []string
 			return nil, e
 		}
 		q, e := s.quote(ctx, p, a, b, at)
-		if errors.Is(e, mongo.ErrNoDocuments) {
+		if errors.Is(e, pgx.ErrNoRows) {
 			inv, ie := s.quote(ctx, p, b, a, at)
 			if ie != nil {
 				return nil, fmt.Errorf("%w for %s at or before %s", ErrNoQuote, pair, at)
@@ -201,24 +211,14 @@ func (s *Service) History(ctx context.Context, p principal.Principal, pairs []st
 	if e != nil {
 		return nil, e
 	}
-	window := bson.M{}
-	if lo != "" {
-		window["$gte"] = lo
-	}
-	if hi != "" {
-		window["$lte"] = hi
-	}
+	const historySQL = `SELECT ` + quoteColumns + ` FROM prices WHERE user_id=@user AND pair=@pair AND archived=false
+    AND (@lo='' OR at>=NULLIF(@lo,'')::timestamptz) AND (@hi='' OR at<=NULLIF(@hi,'')::timestamptz) ORDER BY at LIMIT 5001`
 	find := func(pair string) ([]Quote, error) {
-		f := bson.M{"user_id": p.UserID, "pair": pair, "archived": bson.M{"$ne": true}}
-		if len(window) > 0 {
-			f["at"] = window
-		}
-		cur, e := s.repo.db.Collection("prices").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "at", Value: 1}}).SetLimit(5001))
+		rows, e := s.repo.db.Query(ctx, historySQL, pgx.NamedArgs{"user": p.UserID, "pair": pair, "lo": lo, "hi": hi})
 		if e != nil {
 			return nil, e
 		}
-		var qs []Quote
-		return qs, cur.All(ctx, &qs)
+		return pgx.CollectRows(rows, pgx.RowToStructByName[Quote])
 	}
 	out := []Quote{}
 	for _, pair := range pairs {
@@ -255,9 +255,12 @@ func (s *Service) quote(ctx context.Context, p principal.Principal, base, quote,
 	if c, ok := ctx.Value(cacheKey{}).(*quoteCache); ok {
 		return s.cachedQuote(ctx, c, p, base+"/"+quote, at)
 	}
-	var q Quote
-	e := s.repo.db.Collection("prices").FindOne(ctx, bson.M{"user_id": p.UserID, "pair": base + "/" + quote, "at": bson.M{"$lte": at}, "archived": bson.M{"$ne": true}}, options.FindOne().SetSort(bson.D{{Key: "at", Value: -1}})).Decode(&q)
-	return q, e
+	const quoteSQL = `SELECT ` + quoteColumns + ` FROM prices WHERE user_id=@user AND pair=@pair AND at<=@at::timestamptz AND archived=false ORDER BY at DESC LIMIT 1`
+	rows, e := s.repo.db.Query(ctx, quoteSQL, pgx.NamedArgs{"user": p.UserID, "pair": base + "/" + quote, "at": at})
+	if e != nil {
+		return Quote{}, e
+	}
+	return pgx.CollectOneRow(rows, pgx.RowToStructByName[Quote])
 }
 
 // rate uses the exact inverse of an opposite quote, unlike the rounded inverse Get reports.
@@ -269,14 +272,14 @@ func (s *Service) rate(ctx context.Context, p principal.Principal, base, quote, 
 	if e == nil {
 		return q.Value.Rat(), nil
 	}
-	if !errors.Is(e, mongo.ErrNoDocuments) {
+	if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
 	q, e = s.quote(ctx, p, quote, base, at)
 	if e == nil {
 		return new(big.Rat).Inv(q.Value.Rat()), nil
 	}
-	if !errors.Is(e, mongo.ErrNoDocuments) {
+	if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
 	return nil, fmt.Errorf("%w for %s/%s at or before %s", ErrNoQuote, base, quote, at)

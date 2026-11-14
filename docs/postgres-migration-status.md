@@ -32,3 +32,13 @@ Production still runs MongoDB. This branch is not ready for cutover.
 Phase 0 swap prerequisite; complete Phase 2 schema/Decimal/harness/sweeper; all component ports and Gates A–C; copy and verification tool and Gates D/E; cutover merge/deployment/smoke/production parity; day-30 reminder and delayed cleanup. None of these gates is claimed complete by the infrastructure checks above.
 
 Unrelated pre-existing edits to `agentpack.toml` and `pack.lock` are preserved and excluded from migration commits.
+
+## Rates port
+
+- `rates` now uses PostgreSQL only. `prices.at` is timestamptz; projections return the same UTC RFC3339 second strings as the original code. Values remain exact numeric through Decimal's SQL methods. Provider-state string fields remain strings.
+- Ported quote set/get/history, inverse lookups, request cache, archival, provider tracking/skip, ECB backfill and gold quote discovery. Unique `(user_id,pair,at)` and per-user time/provider indexes are in DDL.
+- R2: all prices `$ne:true` filters become `archived=false` with `NOT NULL DEFAULT false`; `$in` pair lookup becomes `pair=ANY(@pairs::text[])`; absent provider state is `pgx.ErrNoRows`. No `$exists`, `$nin`, `$or` or null filters in this component.
+- Existing cache query-count and provider-sync/correction tests pass with unchanged assertions against PostgreSQL; combined run 2.708 s. Rates unit tests, vet, and whole-app build pass.
+- During the staged branch port, API startup opens/migrates PostgreSQL for ported components, while unported components still use their original MongoDB holders. There is no alternate driver implementation or datastore feature flag. This intermediate branch requires both connections and must not deploy. Final wiring will remove Mongo completely, put DATABASE_URL validation in loadConfig, and switch the health ping.
+- Existing integration fixture setup now gives rates its own disposable PG database while other components remain unported; the cache test uses a pgx query tracer instead of Mongo's command monitor. No assertion values changed.
+- The off-VM nightly timer's actual archive was restored successfully on PostgreSQL 18. It currently covers the empty pre-cutover database; populated-data verification is still required at cutover.

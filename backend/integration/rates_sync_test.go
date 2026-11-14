@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -51,7 +52,7 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	}
 	p := identity.Principal(u)
 	a := audit.NewService(audit.NewMongoRepository(db))
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 
 	var goldDown atomic.Bool
 	goldDown.Store(true)

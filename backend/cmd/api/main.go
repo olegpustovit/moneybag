@@ -27,6 +27,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/screenshot"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
@@ -81,6 +82,17 @@ func run() error {
 		return e
 	}
 	defer client.Disconnect(context.Background())
+	if cfg.DatabaseURL == "" {
+		return fmt.Errorf("MONEYBAG_DATABASE_URL is required")
+	}
+	pool, e := postgres.Open(ctx, cfg.DatabaseURL)
+	if e != nil {
+		return e
+	}
+	defer pool.Close()
+	if e := postgres.Migrate(ctx, pool); e != nil {
+		return e
+	}
 	db := client.Database(cfg.MongoDB)
 	ids := identity.NewService(identity.NewMongoRepository(db))
 	if e = ids.Init(ctx); e != nil {
@@ -101,7 +113,7 @@ func run() error {
 		return e
 	}
 	book.Expr = expr
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
+	prices := rates.NewService(rates.NewPostgresRepository(pool), a)
 	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	tab.Ledger = book

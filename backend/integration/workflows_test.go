@@ -25,6 +25,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -64,7 +65,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal(e)
 	}
 	book.Expr = expr
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
