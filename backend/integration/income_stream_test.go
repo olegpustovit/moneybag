@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
@@ -15,7 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -39,7 +39,7 @@ func TestIncomeReconcileStreamsJournalAndPreservesLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := model.NewService(model.NewMongoRepository(db), tables.NewService(tables.NewMongoRepository(db), nil, expr), nil, expr)
+	service := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tables.NewService(tables.NewMongoRepository(db), nil, expr), nil, expr)
 	service.Ledger = sources.Ledger
 	reads.Store(0)
 	empty, err := service.IncomeReconcile(ctx, p, model.ReconcileInput{From: "2026-01-01", To: "2026-01-31"})
@@ -53,7 +53,7 @@ func TestIncomeReconcileStreamsJournalAndPreservesLimit(t *testing.T) {
 		t.Fatal("missing stream", err)
 	}
 	streams := []model.Income{{ID: "tagged", Currency: "EUR", Frequency: "monthly", PayerMatch: `"synthetic" in row.tags`, LandsIn: "assets:test"}}
-	if _, err = db.Collection("income_models").InsertOne(ctx, bson.M{"_id": p.UserID, "streams": streams}); err != nil {
+	if _, err = pgtest.New(t).Exec(ctx, `INSERT INTO income_models(id,streams) VALUES (@user,@streams)`, pgx.NamedArgs{"user": p.UserID, "streams": streams}); err != nil {
 		t.Fatal(err)
 	}
 	extra := make([]ledger.Entry, 497)

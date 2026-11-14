@@ -118,7 +118,7 @@ func run() error {
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
-	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
+	models := model.NewService(model.NewPostgresRepository(pool), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	models.Views = func(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error) {

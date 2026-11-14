@@ -4,17 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math"
 	"strings"
 	"time"
@@ -34,7 +34,7 @@ type Event struct {
 	Account string  `json:"account,omitempty" bson:"account,omitempty"`
 }
 type SpendLine struct {
-	Name     string  `json:"name" bson:"name"`
+	Name     string  `json:"name" bson:"name" db:"name"`
 	Amount   float64 `json:"amount" bson:"amount"`
 	Currency string  `json:"currency" bson:"currency"`
 	USD      float64 `json:"usd" bson:"usd"`
@@ -49,21 +49,21 @@ type LegacyInputs struct {
 	YieldPct                 float64     `json:"yieldPct" bson:"yield_pct"`
 }
 type Scenario struct {
-	Archived         bool          `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key              string        `json:"-" bson:"_id"`
-	UserID           string        `json:"-" bson:"user_id"`
-	ID               string        `json:"id" bson:"id"`
-	Name             string        `json:"name" bson:"name"`
-	Revision         int           `json:"revision,omitempty" bson:"revision"`
-	ExpectedRevision *int          `json:"expected_revision,omitempty" bson:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
-	Overrides        []Override    `json:"overrides" bson:"overrides"`
-	Events           []Event       `json:"events,omitempty" bson:"events,omitempty"`
-	Legacy           *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty"`
+	Archived         bool          `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
+	Key              string        `json:"-" bson:"_id" db:"storage_key"`
+	UserID           string        `json:"-" bson:"user_id" db:"user_id"`
+	ID               string        `json:"id" bson:"id" db:"id"`
+	Name             string        `json:"name" bson:"name" db:"name"`
+	Revision         int           `json:"revision,omitempty" bson:"revision" db:"revision"`
+	ExpectedRevision *int          `json:"expected_revision,omitempty" bson:"-" db:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
+	Overrides        []Override    `json:"overrides" bson:"overrides" db:"overrides"`
+	Events           []Event       `json:"events,omitempty" bson:"events,omitempty" db:"events"`
+	Legacy           *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty" db:"legacy"`
 	// DropLegacy removes a stored legacy block; omitting legacy otherwise keeps it.
-	DropLegacy bool `json:"drop_legacy,omitempty" bson:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
+	DropLegacy bool `json:"drop_legacy,omitempty" bson:"-" db:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
 }
 type Income struct {
-	ID        string  `json:"id" bson:"id"`
+	ID        string  `json:"id" bson:"id" db:"id"`
 	Amount    float64 `json:"amount" bson:"amount"`
 	Currency  string  `json:"currency" bson:"currency"`
 	Frequency string  `json:"frequency" bson:"frequency"`
@@ -118,9 +118,9 @@ type Projection struct {
 	RunwayExGold   *float64 `json:"runway_ex_gold"`
 	Provenance
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	tables *tables.Service
 	audit  *audit.Service
 	expr   *expressions.Engine
@@ -135,8 +135,8 @@ type Service struct {
 // EngineAssumptions are the names Project reads; scenarios may override them without a stored row.
 var EngineAssumptions = []string{"start_net_usd", "wise_usd", "kyiv_usd", "gold_g", "gold_usd_g", "eurusd", "income_usd", "spend_eur", "kyiv_extra_drain_usd", "yield_pct", "buffer_usd", "gold_shock_pct", "horizon"}
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, t *tables.Service, a *audit.Service, e *expressions.Engine) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, t *tables.Service, a *audit.Service, e *expressions.Engine) *Service {
 	return &Service{repo: r, tables: t, audit: a, expr: e}
 }
 func (s *Service) Get(ctx context.Context, p principal.Principal) (State, error) {
@@ -153,13 +153,16 @@ func (s *Service) load(ctx context.Context, p principal.Principal) (State, error
 	} else if !errors.Is(e, principal.ErrNotFound) {
 		return out, e
 	}
-	cur, e := s.repo.db.Collection("scenarios").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}).SetLimit(101))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM scenarios WHERE user_id=@user AND NOT archived ORDER BY id LIMIT 101`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return out, e
 	}
-	defer cur.Close(ctx)
-	if e = cur.All(ctx, &out.Scenarios); e != nil {
+	out.Scenarios, e = pgx.CollectRows(cur, pgx.RowToStructByName[Scenario])
+	if e != nil {
 		return out, e
+	}
+	if out.Scenarios == nil {
+		out.Scenarios = []Scenario{}
 	}
 	if len(out.Scenarios) > 100 {
 		return out, fmt.Errorf("at most 100 scenarios")
@@ -167,10 +170,10 @@ func (s *Service) load(ctx context.Context, p principal.Principal) (State, error
 	var streams struct {
 		Streams []Income `bson:"streams"`
 	}
-	e = s.repo.db.Collection("income_models").FindOne(ctx, bson.M{"_id": p.UserID}).Decode(&streams)
+	e = s.repo.db.QueryRow(ctx, `SELECT streams FROM income_models WHERE id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&streams.Streams)
 	if e == nil {
 		out.Streams = streams.Streams
-	} else if !errors.Is(e, mongo.ErrNoDocuments) {
+	} else if !postgres.IsNotFound(e) {
 		return out, e
 	}
 	return out, nil
@@ -220,12 +223,13 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 	in.UserID = p.UserID
 	in.Key = p.UserID + ":" + in.ID
 	err := s.audit.Workflow(ctx, func(tx context.Context) error {
-		collection := s.repo.db.Collection("scenarios")
-		filter := bson.M{"user_id": p.UserID, "id": in.ID}
-		var before Scenario
-		err := collection.FindOne(tx, filter).Decode(&before)
+		rows, err := s.repo.db.Query(tx, `SELECT * FROM scenarios WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": in.ID})
+		if err != nil {
+			return err
+		}
+		before, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[Scenario])
 		exists := err == nil
-		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		if err != nil && !postgres.IsNotFound(err) {
 			return err
 		}
 		if in.ExpectedRevision != nil && ((!exists && *in.ExpectedRevision != -1) || (exists && *in.ExpectedRevision != before.Revision)) {
@@ -238,20 +242,17 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 		in.ExpectedRevision = nil
 		in.Revision = before.Revision + 1
 		_, err = s.audit.Write(tx, p, "scenario_upsert", audit.Target{Collection: "scenarios", ID: in.ID}, "", before, in, func(tx context.Context) error {
+			args := pgx.NamedArgs{"key": in.Key, "user": p.UserID, "id": in.ID, "name": in.Name, "revision": in.Revision, "overrides": in.Overrides, "events": in.Events, "legacy": in.Legacy, "old": before.Revision}
 			if !exists {
-				_, err := collection.InsertOne(tx, in)
-				if mongo.IsDuplicateKeyError(err) {
+				delete(args, "old")
+				_, err := s.repo.db.Exec(tx, `INSERT INTO scenarios(storage_key,user_id,id,name,revision,overrides,events,legacy) VALUES (@key,@user,@id,@name,@revision,COALESCE(@overrides::jsonb,'null'::jsonb),@events,@legacy)`, args)
+				if postgres.IsUniqueViolation(err) {
 					return principal.ErrConflict
 				}
 				return err
 			}
-			if before.Revision == 0 {
-				filter["$or"] = []bson.M{{"revision": 0}, {"revision": bson.M{"$exists": false}}}
-			} else {
-				filter["revision"] = before.Revision
-			}
-			result, err := collection.ReplaceOne(tx, filter, in)
-			if err == nil && result.MatchedCount == 0 {
+			result, err := s.repo.db.Exec(tx, `UPDATE scenarios SET storage_key=@key,name=@name,revision=@revision,overrides=COALESCE(@overrides::jsonb,'null'::jsonb),events=@events,legacy=@legacy,archived=false WHERE user_id=@user AND id=@id AND revision=@old`, args)
+			if err == nil && result.RowsAffected() == 0 {
 				return principal.ErrConflict
 			}
 			return err
@@ -299,12 +300,12 @@ func (s *Service) SetIncome(ctx context.Context, p principal.Principal, streams 
 	var before struct {
 		Streams []Income `bson:"streams"`
 	}
-	e := s.repo.db.Collection("income_models").FindOne(ctx, bson.M{"_id": p.UserID}).Decode(&before)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	e := s.repo.db.QueryRow(ctx, `SELECT streams FROM income_models WHERE id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&before.Streams)
+	if e != nil && !postgres.IsNotFound(e) {
 		return nil, e
 	}
 	_, e = s.audit.Write(ctx, p, "income_model_set", audit.Target{Collection: "income_models", ID: p.UserID}, "", before.Streams, streams, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("income_models").ReplaceOne(tx, bson.M{"_id": p.UserID}, bson.M{"_id": p.UserID, "user_id": p.UserID, "streams": streams}, options.Replace().SetUpsert(true))
+		_, e := s.repo.db.Exec(tx, `INSERT INTO income_models(id,user_id,streams) VALUES (@user,@user,COALESCE(@streams::jsonb,'null'::jsonb)) ON CONFLICT(id) DO UPDATE SET user_id=EXCLUDED.user_id,streams=EXCLUDED.streams`, pgx.NamedArgs{"user": p.UserID, "streams": streams})
 		return e
 	})
 	return streams, e

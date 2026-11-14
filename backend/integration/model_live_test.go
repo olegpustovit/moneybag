@@ -16,7 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
 	"os"
 	"strings"
@@ -62,7 +61,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
-	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
+	models := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test"}); e != nil {
 		t.Fatal(e)
@@ -97,7 +96,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test", ExpectedRevision: &twoBudget}); !errors.Is(e, principal.ErrConflict) {
 		t.Fatal("archive did not invalidate budget revision", e)
 	}
-	if _, e = db.Collection("scenarios").InsertOne(ctx, bson.M{"_id": p.UserID + ":old", "user_id": p.UserID, "id": "old", "name": "Old", "overrides": bson.A{}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `INSERT INTO scenarios(storage_key,user_id,id,name,overrides) VALUES (@key,@user,'old','Old','[]')`, pgx.NamedArgs{"key": p.UserID + ":old", "user": p.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	zero, absent := 0, -1

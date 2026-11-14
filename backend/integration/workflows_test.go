@@ -71,7 +71,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	tab.Ledger = book
 	tab.Rates = prices
 	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
-	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
+	models := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tab, a, expr)
 	for _, p := range []principal.Principal{pa, pb} {
 		if e = models.Initialize(ctx, p); e != nil {
 			t.Fatal("default model", e)

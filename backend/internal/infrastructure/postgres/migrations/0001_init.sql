@@ -320,3 +320,21 @@ CREATE TABLE discrepancies (
  archived boolean NOT NULL DEFAULT false
 );
 CREATE INDEX discrepancies_user_status_account ON discrepancies (user_id,status,account);
+
+CREATE TABLE scenarios (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ name text NOT NULL DEFAULT '',
+ revision integer NOT NULL DEFAULT 0,
+ overrides jsonb NOT NULL DEFAULT '[]',
+ events jsonb,
+ legacy jsonb,
+ archived boolean NOT NULL DEFAULT false,
+ UNIQUE (user_id,id)
+);
+CREATE TABLE income_models (
+ id text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ streams jsonb NOT NULL DEFAULT '[]'
+);

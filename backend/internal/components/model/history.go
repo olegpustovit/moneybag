@@ -2,9 +2,9 @@ package model
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (s *Service) Archive(ctx context.Context, p principal.Principal, id string, archived bool, reason string) error {
@@ -15,14 +15,15 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 		var old struct {
 			Archived bool `json:"archived" bson:"archived"`
 		}
-		filter := bson.M{"user_id": p.UserID, "id": id}
-		if e := s.repo.db.Collection("scenarios").FindOne(tx, filter).Decode(&old); e != nil {
+		args := pgx.NamedArgs{"user": p.UserID, "id": id}
+		if e := s.repo.db.QueryRow(tx, `SELECT archived FROM scenarios WHERE user_id=@user AND id=@id`, args).Scan(&old.Archived); e != nil {
 			return e
 		}
 		next := old
 		next.Archived = archived
 		_, e := s.audit.Write(tx, p, "scenario_archive", audit.Target{Collection: "scenarios", ID: id}, reason, old, next, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("scenarios").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}, "$inc": bson.M{"revision": 1}})
+			args["archived"] = archived
+			_, e := s.repo.db.Exec(tx, `UPDATE scenarios SET archived=@archived,revision=revision+1 WHERE user_id=@user AND id=@id`, args)
 			return e
 		})
 		return e
