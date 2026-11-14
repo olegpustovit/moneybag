@@ -81,7 +81,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	imp := imports.NewService(imports.NewPostgresRepository(pgtest.New(t)), book, classes, rec, a)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
-	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
+	meaning := semantic.NewService(semantic.NewPostgresRepository(pgtest.New(t)), book, prices, a, expr)
 	dash := dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	check := &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
 	dash.Lint = check.SpecLint

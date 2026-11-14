@@ -454,3 +454,53 @@ CREATE TABLE views (
  query jsonb NOT NULL DEFAULT '{}',
  UNIQUE(user_id,id)
 );
+CREATE TABLE metrics (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ label text NOT NULL DEFAULT '',
+ description text NOT NULL DEFAULT '',
+ unit text NOT NULL DEFAULT '',
+ kind text NOT NULL DEFAULT '',
+ additivity text NOT NULL DEFAULT '',
+ per text NOT NULL DEFAULT '',
+ estimates text NOT NULL DEFAULT '',
+ accounts text[],
+ exclude text[],
+ sign integer NOT NULL DEFAULT 0,
+ "where" text NOT NULL DEFAULT '',
+ dimensions text[]
+);
+CREATE INDEX metrics_user_id ON metrics(user_id,id);
+CREATE TABLE labels (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ kind text NOT NULL DEFAULT '',
+ key text NOT NULL DEFAULT '',
+ label text NOT NULL DEFAULT ''
+);
+CREATE INDEX labels_user_key ON labels(user_id,key);
+CREATE TABLE payee_aliases (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ pattern text NOT NULL DEFAULT '',
+ name text NOT NULL DEFAULT '',
+ note text NOT NULL DEFAULT ''
+);
+CREATE INDEX aliases_user_pattern ON payee_aliases(user_id,pattern);
+CREATE TABLE annotations (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ label text NOT NULL DEFAULT '',
+ "from" text NOT NULL DEFAULT '',
+ "to" text NOT NULL DEFAULT '',
+ tag_rule text NOT NULL DEFAULT '',
+ kind text NOT NULL DEFAULT ''
+);
+CREATE INDEX annotations_user_id ON annotations(user_id,id);
+CREATE TABLE nav (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ items jsonb NOT NULL DEFAULT '[]'
+);

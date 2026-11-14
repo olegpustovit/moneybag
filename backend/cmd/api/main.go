@@ -93,7 +93,6 @@ func run() error {
 	if e := postgres.Migrate(ctx, pool); e != nil {
 		return e
 	}
-	db := client.Database(cfg.MongoDB)
 	ids := identity.NewService(identity.NewPostgresRepository(pool))
 	if e = ids.Init(ctx); e != nil {
 		return fmt.Errorf("initialize identity: %w", e)
@@ -124,7 +123,7 @@ func run() error {
 	models.Views = func(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error) {
 		return sources.Rows(ctx, p, "view:"+id)
 	}
-	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
+	meaning := semantic.NewService(semantic.NewPostgresRepository(pool), book, prices, a, expr)
 	dash := dashboard.NewService(dashboard.NewPostgresRepository(pool), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	sources.Views, sources.Expr = dash, expr
 	classes := classify.NewService(classify.NewPostgresRepository(pool), book, a, expr)

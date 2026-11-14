@@ -166,7 +166,7 @@ func (s *Service) Cube(ctx context.Context, p principal.Principal, revision int6
 	if out.Annotations, e = s.Annotations(ctx, p, "trips", "", ""); e != nil {
 		return Cube{}, e
 	}
-	aliases, e := list[PayeeAlias](ctx, s.repo.db.Collection("payee_aliases"), p.UserID, "pattern")
+	aliases, e := list[PayeeAlias](ctx, s.repo.db, `SELECT * FROM payee_aliases WHERE user_id=@user ORDER BY "pattern" LIMIT 1001`, "payee_aliases", p.UserID)
 	if e != nil {
 		return Cube{}, e
 	}
@@ -328,7 +328,7 @@ func (s *Service) cubeRates(ctx context.Context, p principal.Principal, b *book,
 
 // PayeeNamer returns the readable name for a bank's payee text, or the text itself when no alias matches.
 func (s *Service) PayeeNamer(ctx context.Context, p principal.Principal) (func(string) string, error) {
-	rows, e := list[PayeeAlias](ctx, s.repo.db.Collection("payee_aliases"), p.UserID, "pattern")
+	rows, e := list[PayeeAlias](ctx, s.repo.db, `SELECT * FROM payee_aliases WHERE user_id=@user ORDER BY "pattern" LIMIT 1001`, "payee_aliases", p.UserID)
 	if e != nil {
 		return nil, e
 	}
