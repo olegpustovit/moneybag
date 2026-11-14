@@ -145,6 +145,7 @@ func (s *Service) Shock(ctx context.Context, p principal.Principal, in ShockInpu
 	for pot, delta := range byPot {
 		out.ByPot = append(out.ByPot, PotShock{Pot: pot, Delta: round(delta)})
 	}
+	slices.SortFunc(out.ByPot, func(a, b PotShock) int { return strings.Compare(a.Pot, b.Pot) })
 	if in.ScenarioID != "" {
 		series, e := s.Forecast(ctx, p, ForecastInput{ScenarioIDs: []string{in.ScenarioID}, HorizonMonths: 12})
 		if e != nil {

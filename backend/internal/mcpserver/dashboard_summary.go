@@ -1,6 +1,9 @@
 package mcpserver
 
-import "github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+import (
+	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
+	"slices"
+)
 
 const maxAgentTableRows = 50
 
@@ -50,6 +53,7 @@ func summarizeDashboard(result dashboard.GetResult) dashboardSummary {
 	for name := range spec.Data {
 		out.Sources = append(out.Sources, name)
 	}
+	slices.Sort(out.Sources)
 	for _, page := range spec.Pages {
 		ps := pageSummary{ID: page.ID, Title: page.Title, Components: []string{}}
 		for _, row := range page.Layout {

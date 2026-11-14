@@ -1,5 +1,14 @@
 # Implementation and verification ledger
 
+## PostgreSQL migration (2026-11-14, work branch)
+
+This branch uses PostgreSQL 18 through pgx, embedded forward Goose migrations, exact native Decimal values and JSONB for nested records. Dynamic rows and their unique key records commit together; multi-row audited workflows retain their partial-write contract. `MONEYBAG_DATABASE_URL` replaces MongoDB configuration in the running application. The temporary copy command is the sole MongoDB-driver consumer during rollback retention.
+
+Local backend/UI/speed checks, corrected double copy/verification and real-data API/MCP parity pass. Production cutover is still pending; [the execution ledger](docs/postgres-migration-status.md) contains the authoritative state and evidence. [Architecture](docs/architecture.md), [configuration](docs/configuration.md), [operations](docs/operations.md) and the [parity runbook](e2e/PARITY.md) describe this build.
+
+The dated records below describe earlier MongoDB releases and their original guarantees. Their old topology statements are historical, superseded for this branch by the PostgreSQL rules in `AGENTS.md`.
+
+
 ## Ledger-aware tables and receipts (2026-11-04)
 
 Source proposal: https://artifacts.microapps.space/a/x8kpzrphvgs7, version 3; saved verbatim at `docs/receipt-line-items.html` (SHA-256 `1a218ece493aa5d67c7936875dd63026a774fcbf054d3bb221c1480475120ff5`).

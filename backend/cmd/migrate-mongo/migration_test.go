@@ -31,6 +31,33 @@ func TestCopyVerifyAndCorruption(t *testing.T) {
 	db := client.Database("moneybag_migrate_test_" + ulid.Make().String())
 	defer db.Drop(context.Background())
 	pool := pgtest.New(t)
+	columns, err := pool.Query(ctx, `SELECT table_name,column_name FROM information_schema.columns WHERE table_schema='public' AND table_name NOT IN ('goose_db_version','row_keys') AND is_identity='NO'`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for columns.Next() {
+		var table, column string
+		if err = columns.Scan(&table, &column); err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, mapping := range mappings {
+			if mapping.name == table {
+				for _, mapped := range mapping.columns {
+					if mapped == column {
+						found = true
+					}
+				}
+			}
+		}
+		if !found {
+			t.Errorf("unmapped application column %s.%s", table, column)
+		}
+	}
+	if err = columns.Err(); err != nil {
+		t.Fatal(err)
+	}
+	columns.Close()
 	m := migration{source: db, target: pool, out: io.Discard}
 	decimal, err := bson.ParseDecimal128("1.50")
 	if err != nil {
@@ -44,6 +71,7 @@ func TestCopyVerifyAndCorruption(t *testing.T) {
 		"accounts":            {bson.M{"_id": "owner:assets:bank", "user_id": "owner", "id": "assets:bank", "type": "asset", "commodities": bson.A{"EUR"}}},
 		"journal":             {bson.M{"_id": "entry", "user_id": "owner", "seq": int64(1), "date": "2026-01-01", "status": "posted", "payee": "Original", "postings": bson.A{bson.M{"account": "assets:bank", "amount": bson.M{"v": decimal, "c": "EUR"}}, bson.M{"account": "expenses:food", "amount": bson.M{"v": negative, "c": "EUR"}}}}},
 		"counters":            {bson.M{"_id": "owner:journal", "user_id": "owner", "name": "journal", "n": int64(1)}},
+		"rules":               {bson.M{"_id": "owner:rule", "user_id": "owner", "id": "rule", "note": "Preserve this note", "match": "false", "set": bson.M{}}},
 		"credentials":         {bson.M{"_id": "owner", "hash": []byte{0, 1, 2, 255}, "salt": []byte{0, 3, 4, 255}}},
 		"rows":                {bson.M{"_id": "owner:table:row", "user_id": "owner", "table_id": "table", "id": "row", "version": 1, "cells": bson.M{"computed": decimal, "plain": "1.50"}, "key_hashes": bson.A{"synthetic-key"}}},
 		"dashboard_snapshots": {bson.M{"_id": "frozen", "owner_user": "owner", "dashboard_id": "dashboard", "rendered": bson.M{"html": "<p>Frozen</p>"}}},
@@ -58,6 +86,10 @@ func TestCopyVerifyAndCorruption(t *testing.T) {
 	}
 	if err = m.verify(ctx); err != nil {
 		t.Fatal(err)
+	}
+	var note string
+	if err = pool.QueryRow(ctx, `SELECT note FROM rules WHERE id='rule'`).Scan(&note); err != nil || note != "Preserve this note" {
+		t.Fatal("rule note lost", err)
 	}
 	if _, err = pool.Exec(ctx, `UPDATE row_keys SET key_hash='wrong-key' WHERE row_id='row'`); err != nil {
 		t.Fatal(err)

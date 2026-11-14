@@ -203,3 +203,17 @@ func TestRequiredClass(t *testing.T) {
 		}
 	}
 }
+
+func TestFunctionCatalogHasStableOverloadOrder(t *testing.T) {
+	e, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	functions := e.Functions()
+	for i := 1; i < len(functions); i++ {
+		previous, current := functions[i-1], functions[i]
+		if previous.Name == current.Name && previous.Signature == current.Signature && previous.Member && !current.Member {
+			t.Fatalf("member overload precedes global overload: %s", current.Signature)
+		}
+	}
+}

@@ -10,7 +10,7 @@ import (
 var mappings = []mapping{{name: "accounts", columns: []string{"user_id", "storage_key", "id", "type", "name", "pot", "commodities", "location", "class", "groups", "closed_at", "display_name", "note", "estimated"}, sourceKeys: []string{"user_id", "_id", "id", "type", "name", "pot", "commodities", "location", "class", "groups", "closed_at", "display_name", "note", "estimated"}},
 	{name: "journal", columns: []string{"user_id", "id", "seq", "date", "kind", "payee", "postings", "tags", "links", "status", "actor", "created_at"}, sourceKeys: []string{"user_id", "_id", "seq", "date", "kind", "payee", "postings", "tags", "links", "status", "actor", "created_at"}},
 	{name: "budgets", columns: []string{"archived", "storage_key", "user_id", "id", "name", "revision", "limit", "accounts", "group_ref", "order", "limit_lexeme"}, sourceKeys: []string{"archived", "_id", "user_id", "id", "name", "revision", "limit", "accounts", "group_ref", "order"}},
-	{name: "rules", columns: []string{"storage_key", "user_id", "id", "priority", "match", "set", "enabled", "version"}, sourceKeys: []string{"_id", "user_id", "id", "priority", "match", "set", "note", "enabled", "version"}},
+	{name: "rules", columns: []string{"storage_key", "user_id", "id", "priority", "match", "set", "note", "enabled", "version"}, sourceKeys: []string{"_id", "user_id", "id", "priority", "match", "set", "note", "enabled", "version"}},
 	{name: "users", columns: []string{"id", "email", "name", "is_admin", "created_at", "disabled"}, sourceKeys: []string{"_id", "email", "name", "is_admin", "created_at", "disabled"}},
 	{name: "credentials", columns: []string{"id", "hash", "salt"}, sourceKeys: []string{"_id", "hash", "salt"}},
 	{name: "sessions", columns: []string{"id", "user_id", "csrf", "expires_at"}, sourceKeys: []string{"_id", "user_id", "csrf", "expires_at"}},
@@ -87,7 +87,7 @@ func decodeRecord(table string, raw bson.Raw) ([]any, error) {
 			return nil, err
 		}
 		v := src.value()
-		return []any{v.Key, v.UserID, v.ID, v.Priority, v.Match, v.Set, v.Enabled, v.Version}, nil
+		return []any{v.Key, v.UserID, v.ID, v.Priority, v.Match, v.Set, v.Note, v.Enabled, v.Version}, nil
 	case "users":
 		var src legacyIdentityUser
 		if err := decodeLegacy(raw, &src); err != nil {

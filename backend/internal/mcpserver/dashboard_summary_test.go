@@ -45,3 +45,13 @@ func TestCapTableRowsKeepsCountAndTruncates(t *testing.T) {
 		t.Fatal("non-table value changed")
 	}
 }
+
+func TestSummarySourcesHaveStableOrder(t *testing.T) {
+	spec := dashboard.Spec{Data: map[string]dashboard.Query{"z": {}, "a": {}, "m": {}}}
+	for range 20 {
+		out := summarizeDashboard(dashboard.GetResult{Spec: spec})
+		if !reflect.DeepEqual(out.Sources, []string{"a", "m", "z"}) {
+			t.Fatalf("unordered sources: %v", out.Sources)
+		}
+	}
+}

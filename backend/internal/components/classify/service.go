@@ -30,7 +30,7 @@ type Rule struct {
 	Priority int     `json:"priority" db:"priority"`
 	Match    string  `json:"match" db:"match"`
 	Set      RuleSet `json:"set" db:"set"`
-	Note     string  `json:"note,omitempty"`
+	Note     string  `json:"note,omitempty" db:"note"`
 	Enabled  bool    `json:"enabled" db:"enabled"`
 	Version  int     `json:"version" db:"version"`
 }
