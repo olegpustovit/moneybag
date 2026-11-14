@@ -29,7 +29,7 @@ Production still runs MongoDB. This branch is not ready for cutover.
 
 ## Remaining work
 
-Phase 0 swap prerequisite; complete Phase 2 schema/Decimal/harness/sweeper; all component ports and Gates A–C; copy and verification tool and Gates D/E; cutover merge/deployment/smoke/production parity; day-30 reminder and delayed cleanup. None of these gates is claimed complete by the infrastructure checks above.
+Phase 0 swap prerequisite; API/MCP real-data parity (Gate E); cutover merge/deployment/smoke/production parity; day-30 reminder and delayed cleanup. Component ports, PostgreSQL-only wiring, local backend/UI/speed gates and two restored-data copy/verify cycles are complete; see the dated evidence below.
 
 Unrelated pre-existing edits to `agentpack.toml` and `pack.lock` are preserved and excluded from migration commits.
 
@@ -155,3 +155,11 @@ The owner requested no GitHub CI on 2026-11-14. The earlier branch pushes had tr
 
 - PostgreSQL 18 disposable database, built embedded app and real Chromium pass `e2e/speed-budget-ci.sh` locally. Navigation median 15 ms / worst 28 ms versus Mongo 18 / 24; range median 15 / worst 21 versus 18 / 23. The worst navigation is 16.7% above baseline; all compared speed figures are within 20%. Payloads remain 2.4 KB bootstrap / 16.3 KB view, CLS 0.0003 and one view request; frame median/worst 13/18 ms versus 12/17. Focus, first-paint figures and slow-server states pass.
 - Both runs retain the same pre-existing synthetic cash-dashboard publish-lint refusal; the spending dashboard used by the speed budget passes. No publication check was relaxed. Log: `/tmp/moneybag-pg-speed-budget.log`; baseline `/tmp/moneybag-mongo-speed-baseline.log`. Full PostgreSQL backend and UI gates above are green; restored-production data parity and cutover are still required.
+
+
+## Restored-data copy and verification (Gate D)
+
+- Added isolated `cmd/migrate-mongo`, the only Go MongoDB-driver consumer. Static typed adapters cover all 44 application collections, preserving legacy IDs, raw audit bytes, binary credentials/files, nested money, nullable values and frozen rendered HTML. Rows derive Decimal-valued cell names and transactional `row_keys` records. Source shape, every target unique constraint, C collation and sequence counters are checked explicitly; unknown fields/collections fail instead of disappearing.
+- Copy refuses nonempty targets without explicit `--truncate`. Verification compares counts and canonical per-document fingerprints, exact row-key tuples, counters and Mongo Decimal128 versus PostgreSQL numeric posting totals. Operational `system.profile` requires an explicit private raw-BSON archive; it is never silently dropped or treated as application state. Usage and source-writer requirements are in the command README.
+- Real restored snapshot passed two copy/verify cycles into isolated C-collation PostgreSQL `moneybag_copy`: **69,678 application documents, 127 derived row keys, 137 exact owner/account/currency posting-total groups**. Second copy explicitly exercised truncate/retry. Logs: `/tmp/moneybag-data-copy-1.log`, `/tmp/moneybag-data-verify-1.log`, `/tmp/moneybag-data-copy-2.log`, `/tmp/moneybag-data-verify-2.log`; all commands exited 0. No production writes or cutover occurred.
+- Command tests cover exact nested money, old BSON spellings/private fields, credential bytes, audit byte order, frozen HTML, copy/verify/retry, duplicate preflight, unknown collections, deliberately corrupted documents and same-count key corruption, and explicit profiler archival/overwrite refusal. The real disposable-server tests pass (2.165 s); command vet/build pass. API/MCP response parity is next and remains unclaimed.
