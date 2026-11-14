@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
 
@@ -18,10 +19,10 @@ func testAgentEvalTasks(t *testing.T, ctx context.Context, pa principal.Principa
 	t.Helper()
 	spec := dashboard.Spec{ID: "eval-agent", Title: "Eval", Version: 2, Pages: []dashboard.Page{{ID: "main", Title: "Main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 12, Component: "value"}}}}}}, Components: []dashboard.Component{{ID: "value", Type: "kpi", Title: "Value", Value: "1"}}}
 	head := dashboard.Head{Key: pa.UserID + ":eval-agent", UserID: pa.UserID, ID: "eval-agent", Title: "Eval", PublishedVersion: 2, DraftVersion: 2, Revision: 2}
-	if _, e := db.Collection("dashboards").InsertOne(ctx, head); e != nil {
+	if _, e := insertHeads(ctx, pgtest.New(t), head); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := db.Collection("dashboard_versions").InsertOne(ctx, dashboard.Version{Key: pa.UserID + ":eval-agent:2", UserID: pa.UserID, DashboardID: "eval-agent", Version: 2, Spec: spec}); e != nil {
+	if _, e := insertVersions(ctx, pgtest.New(t), dashboard.Version{Key: pa.UserID + ":eval-agent:2", UserID: pa.UserID, DashboardID: "eval-agent", Version: 2, Spec: spec}); e != nil {
 		t.Fatal(e)
 	}
 	cs := mcpSession(t, ctx, pa, s, false)

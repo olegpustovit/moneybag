@@ -6,15 +6,14 @@ import (
 	"errors"
 	"fmt"
 	jsonpatch "github.com/evanphx/json-patch/v5"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"github.com/tiendc/go-deepcopy"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"log/slog"
 	"regexp"
 	"strconv"
@@ -27,9 +26,9 @@ var dashboardID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}$`)
 // ErrNotPublished means the requested reference has no version to show.
 var ErrNotPublished = errors.New("dashboard has no published version")
 
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo      *MongoRepository
+	repo      *PostgresRepository
 	engine    *Engine
 	audit     *audit.Service
 	snapshots *Snapshots
@@ -40,21 +39,22 @@ type Service struct {
 	RenderCheck func(ctx context.Context, p principal.Principal, id string, version int) error
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, e *Engine, a *audit.Service) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, e *Engine, a *audit.Service) *Service {
 	return &Service{repo: r, engine: e, audit: a}
 }
 func (s *Service) List(ctx context.Context, p principal.Principal) ([]Head, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("dashboards").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}).SetLimit(501))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM dashboards WHERE user_id=@user AND NOT archived ORDER BY id LIMIT 501`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Head{}
-	e = cur.All(ctx, &out)
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByName[Head])
+	if out == nil {
+		out = []Head{}
+	}
 	if len(out) > 500 {
 		return nil, fmt.Errorf("dashboard catalog exceeds 500")
 	}
@@ -64,9 +64,8 @@ func (s *Service) head(ctx context.Context, p principal.Principal, id string) (H
 	if e := p.Valid(); e != nil {
 		return Head{}, e
 	}
-	var h Head
-	e := s.repo.db.Collection("dashboards").FindOne(ctx, bson.M{"user_id": p.UserID, "id": id, "archived": bson.M{"$ne": true}}).Decode(&h)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	h, e := s.repo.head(ctx, p.UserID, id)
+	if postgres.IsNotFound(e) {
 		e = principal.ErrNotFound
 	}
 	return h, e
@@ -147,9 +146,8 @@ func (s *Service) get(ctx context.Context, p principal.Principal, id, ref string
 	if n == 0 {
 		return GetResult{}, ErrNotPublished
 	}
-	var v Version
-	e = s.repo.db.Collection("dashboard_versions").FindOne(ctx, bson.M{"user_id": p.UserID, "dashboard_id": id, "version": n}).Decode(&v)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	v, e := s.repo.version(ctx, p.UserID, id, n)
+	if postgres.IsNotFound(e) {
 		e = principal.ErrNotFound
 	}
 	if e != nil {
@@ -224,15 +222,15 @@ func (s *Service) Create(ctx context.Context, p principal.Principal, in CreateIn
 		}
 	}
 	h := Head{Key: p.UserID + ":" + in.ID, UserID: p.UserID, ID: in.ID, Title: in.Title, DraftVersion: 1, Revision: 1}
-	v := Version{Key: h.Key + ":1", UserID: p.UserID, DashboardID: in.ID, Version: 1, Spec: spec, Author: p.Actor, CreatedAt: time.Now().UTC()}
+	v := Version{Key: h.Key + ":1", UserID: p.UserID, DashboardID: in.ID, Version: 1, Spec: spec, Author: p.Actor, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
 	_, e := s.audit.Write(ctx, p, "dashboard_create", audit.Target{Collection: "dashboards", ID: in.ID}, "", nil, v, func(tx context.Context) error {
-		if _, e := s.repo.db.Collection("dashboards").InsertOne(tx, h); e != nil {
-			if mongo.IsDuplicateKeyError(e) {
+		if _, e := s.repo.insertHead(tx, h); e != nil {
+			if postgres.IsUniqueViolation(e) {
 				return principal.ErrConflict
 			}
 			return e
 		}
-		_, e := s.repo.db.Collection("dashboard_versions").InsertOne(tx, v)
+		_, e := s.repo.insertVersion(tx, v)
 		return e
 	})
 	return GetResult{Spec: spec, Version: 1, Status: "draft", Author: p.Actor}, e
@@ -272,13 +270,13 @@ func (s *Service) edit(ctx context.Context, p principal.Principal, id, tool stri
 		}
 		spec.ID = id
 		spec.Version = h.Revision + 1
-		v := Version{Key: h.Key + ":" + strconv.Itoa(spec.Version), UserID: p.UserID, DashboardID: id, Version: spec.Version, Spec: spec, Author: p.Actor, CreatedAt: time.Now().UTC()}
+		v := Version{Key: h.Key + ":" + strconv.Itoa(spec.Version), UserID: p.UserID, DashboardID: id, Version: spec.Version, Spec: spec, Author: p.Actor, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
 		eventID, e := s.audit.Write(tx, p, tool, audit.Target{Collection: "dashboards", ID: id}, "", old, v, func(tx context.Context) error {
-			if _, e := s.repo.db.Collection("dashboard_versions").InsertOne(tx, v); e != nil {
+			if _, e := s.repo.insertVersion(tx, v); e != nil {
 				return e
 			}
-			r, e := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"draft_version": spec.Version, "revision": spec.Version, "title": spec.Title}})
-			if e == nil && r.ModifiedCount != 1 {
+			r, e := s.repo.db.Exec(tx, `UPDATE dashboards SET draft_version=@version,revision=@version,title=@title WHERE user_id=@user AND id=@id AND revision=@old`, pgx.NamedArgs{"version": spec.Version, "title": spec.Title, "user": p.UserID, "id": id, "old": h.Revision})
+			if e == nil && r.RowsAffected() != 1 {
 				return principal.ErrConflict
 			}
 			return e
@@ -632,17 +630,13 @@ func (s *Service) publish(ctx context.Context, p principal.Principal, id string,
 			return fmt.Errorf("publish gate failed: %s", strings.Join(reasons, "; "))
 		}
 		eventID, e := s.audit.Write(tx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, note, h, out, func(tx context.Context) error {
-			update := bson.M{"published_version": version, "published_by": p.Actor, "publish_note": note, "published_at": time.Now().UTC(), "home": v.Spec.Home}
 			if v.Spec.Home {
-				if _, e := s.repo.db.Collection("dashboards").UpdateMany(tx, bson.M{"user_id": p.UserID, "id": bson.M{"$ne": id}, "home": true}, bson.M{"$set": bson.M{"home": false}}); e != nil {
+				if _, e := s.repo.db.Exec(tx, `UPDATE dashboards SET home=false WHERE user_id=@user AND id<>@id AND home`, pgx.NamedArgs{"user": p.UserID, "id": id}); e != nil {
 					return e
 				}
 			}
-			if h.DraftVersion == version {
-				update["draft_version"] = 0
-			}
-			r, e := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": update})
-			if e == nil && r.MatchedCount != 1 {
+			r, e := s.repo.db.Exec(tx, `UPDATE dashboards SET published_version=@version,published_by=@actor,publish_note=@note,published_at=@at,home=@home,draft_version=CASE WHEN @clear THEN 0 ELSE draft_version END WHERE user_id=@user AND id=@id AND revision=@old`, pgx.NamedArgs{"version": version, "actor": p.Actor, "note": note, "at": time.Now().UTC().Truncate(time.Millisecond), "home": v.Spec.Home, "clear": h.DraftVersion == version, "user": p.UserID, "id": id, "old": h.Revision})
+			if e == nil && r.RowsAffected() != 1 {
 				return principal.ErrConflict
 			}
 			return e
@@ -722,8 +716,8 @@ func (s *Service) Unpublish(ctx context.Context, p principal.Principal, id, reas
 		_, e = s.audit.Write(tx, p, "dashboard_unpublish", audit.Target{Collection: "dashboards", ID: id}, reason, h, struct {
 			PublishedVersion int `json:"published_version"`
 		}{0}, func(tx context.Context) error {
-			r, e := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"published_version": 0, "draft_version": draft}})
-			if e == nil && r.MatchedCount != 1 {
+			r, e := s.repo.db.Exec(tx, `UPDATE dashboards SET published_version=0,draft_version=@draft WHERE user_id=@user AND id=@id AND revision=@old`, pgx.NamedArgs{"draft": draft, "user": p.UserID, "id": id, "old": h.Revision})
+			if e == nil && r.RowsAffected() != 1 {
 				return principal.ErrConflict
 			}
 			return e

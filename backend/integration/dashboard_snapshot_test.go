@@ -3,9 +3,6 @@ package integration
 import (
 	"context"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
-	"net/url"
-	"os"
-	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -15,9 +12,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type snapshotReader struct {
@@ -30,32 +24,12 @@ func (r *snapshotReader) Rows(context.Context, principal.Principal, string) ([]m
 	return []map[string]any{{"value": float64(r.value.Load())}}, nil
 }
 func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	var reads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" {
-			reads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_snapshots")
-	if err := db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
+	var err error
+	var reads atomic.Int64
+	pool := tracedPool(t, sqlQueryCounter{reads: &reads})
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write", "dash:write", "model:write"}}
-	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
+	a := audit.NewService(audit.NewPostgresRepository(pool))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
 		t.Fatal(err)
@@ -67,9 +41,9 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	}
 	reader := &snapshotReader{}
 	reader.value.Store(1)
-	service := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
+	service := dashboard.NewService(dashboard.NewPostgresRepository(pool), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	service.UseSnapshots(cache)
-	tableService := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
+	tableService := tables.NewService(tables.NewPostgresRepository(pool), a, expr)
 	if _, err := tableService.CreateNamed(ctx, p, "catalog", tables.CreateInput{Name: "Catalog", Columns: []tables.Column{{ID: "value", Type: "number"}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -108,10 +82,10 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	}}
 	head := dashboard.Head{Key: p.UserID + ":sample", UserID: p.UserID, ID: "sample", Title: "Synthetic", PublishedVersion: 1, Revision: 1}
 	version := dashboard.Version{Key: p.UserID + ":sample:1", UserID: p.UserID, DashboardID: "sample", Version: 1, Spec: spec}
-	if _, err := db.Collection("dashboards").InsertOne(ctx, head); err != nil {
+	if _, err := insertHeads(ctx, pgtest.New(t), head); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection("dashboard_versions").InsertOne(ctx, version); err != nil {
+	if _, err := insertVersions(ctx, pgtest.New(t), version); err != nil {
 		t.Fatal(err)
 	}
 	first, err := service.Preview(ctx, p, "sample", "published", nil)
@@ -142,7 +116,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	if err != nil || reader.calls.Load() != 3 {
 		t.Fatalf("parameter override must use a separate snapshot: %v, builds=%d", err, reader.calls.Load())
 	}
-	bookRepo := ledger.NewPostgresRepository(pgtest.New(t))
+	bookRepo := ledger.NewPostgresRepository(pool)
 	if err := bookRepo.Init(ctx, p); err != nil {
 		t.Fatal(err)
 	}
@@ -156,14 +130,14 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 		}
 	}
 	journalSpec := dashboard.Spec{ID: "journal-count", Title: "Synthetic journal", Version: 1, Data: map[string]dashboard.Query{"entries": {From: "journal"}}, Pages: []dashboard.Page{{ID: "main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 12, Component: "count"}}}}}}, Components: []dashboard.Component{{ID: "count", Type: "kpi", Value: "size(data.entries)"}}}
-	if _, err := db.Collection("dashboards").InsertOne(ctx, dashboard.Head{Key: p.UserID + ":journal-count", UserID: p.UserID, ID: "journal-count", PublishedVersion: 1, Revision: 1}); err != nil {
+	if _, err := insertHeads(ctx, pgtest.New(t), dashboard.Head{Key: p.UserID + ":journal-count", UserID: p.UserID, ID: "journal-count", PublishedVersion: 1, Revision: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection("dashboard_versions").InsertOne(ctx, dashboard.Version{Key: p.UserID + ":journal-count:1", UserID: p.UserID, DashboardID: "journal-count", Version: 1, Spec: journalSpec}); err != nil {
+	if _, err := insertVersions(ctx, pgtest.New(t), dashboard.Version{Key: p.UserID + ":journal-count:1", UserID: p.UserID, DashboardID: "journal-count", Version: 1, Spec: journalSpec}); err != nil {
 		t.Fatal(err)
 	}
 	sources := &dashboard.Sources{Ledger: book, Snapshots: cache}
-	journal := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources}, a)
+	journal := dashboard.NewService(dashboard.NewPostgresRepository(pool), &dashboard.Engine{Expr: expr, Reader: sources}, a)
 	journal.UseSnapshots(cache)
 	beforePost, err := journal.Preview(ctx, p, "journal-count", "published", nil)
 	if err != nil || beforePost.Values["count"].(map[string]any)["value"] != float64(0) {

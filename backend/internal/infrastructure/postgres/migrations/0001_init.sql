@@ -421,3 +421,36 @@ CREATE TABLE feeds (
  token_encrypted text NOT NULL DEFAULT ''
 );
 CREATE INDEX feeds_user ON feeds(user_id);
+CREATE TABLE dashboards (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ title text NOT NULL DEFAULT '',
+ published_version integer NOT NULL DEFAULT 0,
+ draft_version integer NOT NULL DEFAULT 0,
+ revision integer NOT NULL DEFAULT 0,
+ home boolean NOT NULL DEFAULT false,
+ archived boolean NOT NULL DEFAULT false,
+ published_by jsonb NOT NULL DEFAULT '{}',
+ published_at timestamptz,
+ publish_note text NOT NULL DEFAULT '',
+ UNIQUE(user_id,id)
+);
+CREATE TABLE dashboard_versions (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ dashboard_id text NOT NULL DEFAULT '',
+ version integer NOT NULL DEFAULT 0,
+ spec jsonb NOT NULL DEFAULT '{}',
+ author jsonb NOT NULL DEFAULT '{}',
+ created_at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+ note text NOT NULL DEFAULT '',
+ UNIQUE(user_id,dashboard_id,version)
+);
+CREATE TABLE views (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ query jsonb NOT NULL DEFAULT '{}',
+ UNIQUE(user_id,id)
+);

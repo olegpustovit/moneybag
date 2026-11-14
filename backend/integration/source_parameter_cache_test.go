@@ -3,9 +3,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
-	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,10 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type blockedSourceValuer struct {
@@ -43,31 +38,9 @@ func (v *blockedSourceValuer) Convert(ctx context.Context, p principal.Principal
 }
 
 func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
+	ctx := context.Background()
+	var err error
 	var journalReads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
-			journalReads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_source_parameters")
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) }()
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
 	other := p
 	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
@@ -164,11 +137,11 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("balance sources missed the shared cache")
 	}
 	sources.Expr = expr
-	sources.Views = dashboard.NewService(dashboard.NewMongoRepository(db), &engine, a)
+	sources.Views = dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &engine, a)
 	leaf := dashboard.View{Key: p.UserID + ":leaf", UserID: p.UserID, ID: "leaf", Query: dashboard.Query{From: "postings", Where: "row.amount > 0.0"}}
 	parameterized := dashboard.View{Key: p.UserID + ":parameterized", UserID: p.UserID, ID: "parameterized", Query: dashboard.Query{From: "postings", Where: "row.amount > params.floor"}}
 	if err := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").InsertMany(tx, []any{leaf, parameterized})
+		_, e := insertViews(tx, pgtest.New(t), leaf, parameterized)
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -204,7 +177,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("view crossed owner boundary")
 	}
 	if err := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > 2.0"}})
+		_, e := pgtest.New(t).Exec(tx, `UPDATE views SET query=jsonb_set(query,'{where}',to_jsonb(@where::text)) WHERE storage_key=@key`, pgx.NamedArgs{"where": "row.amount > 2.0", "key": leaf.Key})
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -213,7 +186,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("view edit did not invalidate cached output")
 	}
 	if err := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > 0.0"}})
+		_, e := pgtest.New(t).Exec(tx, `UPDATE views SET query=jsonb_set(query,'{where}',to_jsonb(@where::text)) WHERE storage_key=@key`, pgx.NamedArgs{"where": "row.amount > 0.0", "key": leaf.Key})
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -229,7 +202,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("view did not reach the blocked source")
 	}
 	writeErr := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > params.floor"}})
+		_, e := pgtest.New(t).Exec(tx, `UPDATE views SET query=jsonb_set(query,'{where}',to_jsonb(@where::text)) WHERE storage_key=@key`, pgx.NamedArgs{"where": "row.amount > params.floor", "key": leaf.Key})
 		return e
 	})
 	close(blocker.release)

@@ -125,7 +125,7 @@ func run() error {
 		return sources.Rows(ctx, p, "view:"+id)
 	}
 	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
+	dash := dashboard.NewService(dashboard.NewPostgresRepository(pool), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	sources.Views, sources.Expr = dash, expr
 	classes := classify.NewService(classify.NewPostgresRepository(pool), book, a, expr)
 	rec := reconcile.NewService(reconcile.NewPostgresRepository(pool), book, a)

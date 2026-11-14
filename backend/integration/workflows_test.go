@@ -29,7 +29,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"log/slog"
 	"net"
@@ -83,7 +82,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
+	dash := dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	check := &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
 	dash.Lint = check.SpecLint
 	shares := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, sources, expr, a)
@@ -441,7 +440,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	hist := &history.Service{Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Reconcile: rec}
 	testViewsTablesUnpublish(t, ctx, pa, pb, dash, tab, hist, sources, expr)
 	createShared("undo-publish", "1", map[string]dashboard.Query{})
-	if _, e = db.Collection("dashboards").UpdateOne(ctx, bson.M{"user_id": pa.UserID, "id": "undo-publish"}, bson.M{"$unset": bson.M{"published_at": ""}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `UPDATE dashboards SET published_at=NULL WHERE user_id=@user AND id='undo-publish'`, pgx.NamedArgs{"user": pa.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	legacyEvents, err := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_publish", Target: "undo-publish", Limit: 1})

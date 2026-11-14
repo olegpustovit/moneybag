@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
@@ -90,4 +91,42 @@ func insertRows(ctx context.Context, db *pgxpool.Pool, rows ...tables.Row) (int6
 		values = append(values, []any{row.Key, row.UserID, row.TableID, row.ID, cells, row.Version, row.KeyHashes, row.Archived})
 	}
 	return db.CopyFrom(ctx, pgx.Identifier{"rows"}, []string{"storage_key", "user_id", "table_id", "id", "cells", "version", "key_hashes", "archived"}, pgx.CopyFromRows(values))
+}
+
+func insertHeads(ctx context.Context, db *pgxpool.Pool, heads ...dashboard.Head) (int64, error) {
+	rows := make([][]any, 0, len(heads))
+	for _, h := range heads {
+		actor, err := json.Marshal(h.PublishedBy)
+		if err != nil {
+			return 0, err
+		}
+		rows = append(rows, []any{h.Key, h.UserID, h.ID, h.Title, h.PublishedVersion, h.DraftVersion, h.Revision, h.Home, h.Archived, actor, h.PublishedAt, h.PublishNote})
+	}
+	return db.CopyFrom(ctx, pgx.Identifier{"dashboards"}, []string{"storage_key", "user_id", "id", "title", "published_version", "draft_version", "revision", "home", "archived", "published_by", "published_at", "publish_note"}, pgx.CopyFromRows(rows))
+}
+func insertVersions(ctx context.Context, db *pgxpool.Pool, versions ...dashboard.Version) (int64, error) {
+	rows := make([][]any, 0, len(versions))
+	for _, v := range versions {
+		spec, err := json.Marshal(v.Spec)
+		if err != nil {
+			return 0, err
+		}
+		actor, err := json.Marshal(v.Author)
+		if err != nil {
+			return 0, err
+		}
+		rows = append(rows, []any{v.Key, v.UserID, v.DashboardID, v.Version, spec, actor, v.CreatedAt, v.Note})
+	}
+	return db.CopyFrom(ctx, pgx.Identifier{"dashboard_versions"}, []string{"storage_key", "user_id", "dashboard_id", "version", "spec", "author", "created_at", "note"}, pgx.CopyFromRows(rows))
+}
+func insertViews(ctx context.Context, db *pgxpool.Pool, views ...dashboard.View) (int64, error) {
+	rows := make([][]any, 0, len(views))
+	for _, v := range views {
+		query, err := json.Marshal(v.Query)
+		if err != nil {
+			return 0, err
+		}
+		rows = append(rows, []any{v.Key, v.UserID, v.ID, query})
+	}
+	return db.CopyFrom(ctx, pgx.Identifier{"views"}, []string{"storage_key", "user_id", "id", "query"}, pgx.CopyFromRows(rows))
 }

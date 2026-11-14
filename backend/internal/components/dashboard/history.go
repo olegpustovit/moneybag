@@ -2,13 +2,11 @@ package dashboard
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"strconv"
 )
 
@@ -20,9 +18,9 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 		var old struct {
 			Archived bool `json:"archived" bson:"archived"`
 		}
-		filter := bson.M{"user_id": p.UserID, "id": id}
-		if e := s.repo.db.Collection("dashboards").FindOne(tx, filter).Decode(&old); e != nil {
-			if errors.Is(e, mongo.ErrNoDocuments) {
+		args := pgx.NamedArgs{"user": p.UserID, "id": id}
+		if e := s.repo.db.QueryRow(tx, `SELECT archived FROM dashboards WHERE user_id=@user AND id=@id`, args).Scan(&old.Archived); e != nil {
+			if postgres.IsNotFound(e) {
 				return principal.ErrNotFound
 			}
 			return e
@@ -30,7 +28,8 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 		next := old
 		next.Archived = archived
 		_, e := s.audit.Write(tx, p, "dashboard_archive", audit.Target{Collection: "dashboards", ID: id}, reason, old, next, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("dashboards").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}})
+			args["archived"] = archived
+			_, e := s.repo.db.Exec(tx, `UPDATE dashboards SET archived=@archived WHERE user_id=@user AND id=@id`, args)
 			return e
 		})
 		return e
@@ -50,7 +49,7 @@ func (s *Service) RestorePublication(ctx context.Context, p principal.Principal,
 			return e
 		}
 		return s.audit.Mutation(ctx, p, func(tx context.Context) error {
-			_, err := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"draft_version": old.DraftVersion}})
+			_, err := s.repo.db.Exec(tx, `UPDATE dashboards SET draft_version=@draft WHERE user_id=@user AND id=@id AND revision=@old`, pgx.NamedArgs{"draft": old.DraftVersion, "user": p.UserID, "id": id, "old": h.Revision})
 			return err
 		})
 	}
@@ -65,7 +64,7 @@ func (s *Service) RestorePublication(ctx context.Context, p principal.Principal,
 	_, e = s.audit.Write(ctx, p, "dashboard_publish", audit.Target{Collection: "dashboards", ID: id}, reason, h, struct {
 		PublishedVersion int `json:"published_version"`
 	}{0}, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("dashboards").UpdateOne(tx, bson.M{"user_id": p.UserID, "id": id, "revision": h.Revision}, bson.M{"$set": bson.M{"published_version": 0, "draft_version": draft}})
+		_, e := s.repo.db.Exec(tx, `UPDATE dashboards SET published_version=0,draft_version=@draft WHERE user_id=@user AND id=@id AND revision=@old`, pgx.NamedArgs{"draft": draft, "user": p.UserID, "id": id, "old": h.Revision})
 		return e
 	})
 	return e
@@ -84,13 +83,12 @@ func (s *Service) Versions(ctx context.Context, p principal.Principal, id string
 	if _, e := s.head(ctx, p, id); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("dashboard_versions").Find(ctx, bson.M{"user_id": p.UserID, "dashboard_id": id}, options.Find().SetSort(bson.D{{Key: "version", Value: -1}}).SetLimit(201))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM dashboard_versions WHERE user_id=@user AND dashboard_id=@id ORDER BY version DESC LIMIT 201`, pgx.NamedArgs{"user": p.UserID, "id": id})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	var versions []Version
-	if e = cur.All(ctx, &versions); e != nil {
+	versions, e := pgx.CollectRows(cur, pgx.RowToStructByName[Version])
+	if e != nil {
 		return nil, e
 	}
 	if len(versions) > 200 {

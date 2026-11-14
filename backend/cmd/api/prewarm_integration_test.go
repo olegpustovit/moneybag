@@ -8,8 +8,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"log/slog"
-	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -20,9 +18,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type blockedWarmReader struct {
@@ -61,31 +56,9 @@ func (s observedWarmDashboard) Preview(ctx context.Context, p principal.Principa
 }
 
 func TestPrewarmAfterPostedEntriesAndCancellation(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	var reads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" {
-			reads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_prewarm")
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	var reads atomic.Int64
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write"}}
 	pgdb := pgtest.New(t)
 	config := pgdb.Config().Copy()
@@ -96,7 +69,7 @@ func TestPrewarmAfterPostedEntriesAndCancellation(t *testing.T) {
 	}
 	t.Cleanup(traced.Close)
 	a := audit.NewService(audit.NewPostgresRepository(traced))
-	repo := ledger.NewPostgresRepository(pgtest.New(t))
+	repo := ledger.NewPostgresRepository(traced)
 	if err = repo.Init(ctx, p); err != nil {
 		t.Fatal(err)
 	}
@@ -120,17 +93,17 @@ func TestPrewarmAfterPostedEntriesAndCancellation(t *testing.T) {
 	}
 	sources := &dashboard.Sources{Ledger: book, Expr: expr, Snapshots: cache}
 	reader := &blockedWarmReader{reader: sources, entered: make(chan struct{}), cancelled: make(chan struct{})}
-	service := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
+	service := dashboard.NewService(dashboard.NewPostgresRepository(traced), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	service.UseSnapshots(cache)
 	for i := 0; i < 7; i++ {
 		id := fmt.Sprintf("dash-%d", i)
 		spec := dashboard.Spec{ID: id, Title: id, Version: 1, Data: map[string]dashboard.Query{"rows": {From: "journal", Where: "row.payee == 'Second'"}}, Pages: []dashboard.Page{{ID: "main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 12, Component: "count"}}}}}}, Components: []dashboard.Component{{ID: "count", Type: "kpi", Value: "size(data.rows)"}}}
 		head := dashboard.Head{Key: p.UserID + ":" + id, UserID: p.UserID, ID: id, Title: id, PublishedVersion: 1, Revision: 1}
 		version := dashboard.Version{Key: p.UserID + ":" + id + ":1", UserID: p.UserID, DashboardID: id, Version: 1, Spec: spec}
-		if _, err = db.Collection("dashboards").InsertOne(ctx, head); err != nil {
+		if _, err = pgdb.Exec(ctx, `INSERT INTO dashboards(storage_key,user_id,id,title,published_version,revision) VALUES (@key,@user,@id,@title,@published,@revision)`, pgx.NamedArgs{"key": head.Key, "user": head.UserID, "id": head.ID, "title": head.Title, "published": head.PublishedVersion, "revision": head.Revision}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err = db.Collection("dashboard_versions").InsertOne(ctx, version); err != nil {
+		if _, err = pgdb.Exec(ctx, `INSERT INTO dashboard_versions(storage_key,user_id,dashboard_id,version,spec) VALUES (@key,@user,@id,@version,@spec)`, pgx.NamedArgs{"key": version.Key, "user": version.UserID, "id": version.DashboardID, "version": version.Version, "spec": version.Spec}); err != nil {
 			t.Fatal(err)
 		}
 		before, err := service.Preview(ctx, p, id, "published", nil)

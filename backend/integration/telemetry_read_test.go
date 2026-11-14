@@ -124,7 +124,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	if extra != nil {
 		reader = extra
 	}
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
+	dash := dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	dash.UseSnapshots(cache)
 	shares := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, reader, expr, a)
 	rec := reconcile.NewService(reconcile.NewPostgresRepository(pgtest.New(t)), book, a)

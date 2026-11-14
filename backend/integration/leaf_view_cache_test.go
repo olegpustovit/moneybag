@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
-	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,38 +17,17 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestNestedLeafViewMemoization(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
+	ctx := context.Background()
+	var err error
 	var viewReads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" && e.Command.Lookup("find").StringValue() == "views" {
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "FROM views") {
 			viewReads.Add(1)
 		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_leaf_views")
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) }()
+	}))
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
 	other := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Scopes: []string{"ledger:read"}}
 	repo := ledger.NewPostgresRepository(pgtest.New(t))
@@ -67,7 +45,7 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	for _, v := range []dashboard.View{{ID: "leaf", Query: dashboard.Query{From: "postings"}}, {ID: "middle", Query: dashboard.Query{From: "view:leaf"}}, {ID: "dynamic", Query: dashboard.Query{From: "postings", Derive: map[string]string{"stamp": "now()"}}}, {ID: "left", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-left'"}}}, {ID: "right", Query: dashboard.Query{From: "view:middle", Derive: map[string]string{"label": "row.payee + '-right'"}}}, {ID: "cycle-a", Query: dashboard.Query{From: "view:cycle-b"}}, {ID: "cycle-b", Query: dashboard.Query{From: "view:cycle-a"}}} {
 		v.UserID = p.UserID
 		v.Key = p.UserID + ":" + v.ID
-		if _, err = db.Collection("views").InsertOne(ctx, v); err != nil {
+		if _, err = insertViews(ctx, pgtest.New(t), v); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -76,7 +54,7 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 		if i == 6 {
 			next = "middle"
 		}
-		if _, err = db.Collection("views").InsertOne(ctx, dashboard.View{Key: p.UserID + ":" + id, UserID: p.UserID, ID: id, Query: dashboard.Query{From: "view:" + next}}); err != nil {
+		if _, err = insertViews(ctx, pgtest.New(t), dashboard.View{Key: p.UserID + ":" + id, UserID: p.UserID, ID: id, Query: dashboard.Query{From: "view:" + next}}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -86,7 +64,7 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	}
 	sources := &dashboard.Sources{Ledger: ledger.NewService(repo, nil), Valuer: testValuer{}, Expr: expr}
 	engine := &dashboard.Engine{Expr: expr, Reader: sources}
-	sources.Views = dashboard.NewService(dashboard.NewMongoRepository(db), engine, nil)
+	sources.Views = dashboard.NewService(dashboard.NewPostgresRepository(pool), engine, nil)
 	viewReads.Store(0)
 	result, err := engine.Evaluate(ctx, p, "[data.left[0].label, data.right[0].label]", map[string]dashboard.Query{"left": {From: "view:left"}, "right": {From: "view:right"}}, nil)
 	if err != nil || fmt.Sprint(result.Value) != "[Example-left Example-right]" {
@@ -160,7 +138,7 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 		}
 	}
 	cache.Changed(p.UserID, false)
-	_, err = db.Collection("views").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": "leaf"}, bson.M{"$set": bson.M{"query": dashboard.Query{From: "postings", Derive: map[string]string{"payee": "'Changed'"}}}})
+	_, err = pgtest.New(t).Exec(ctx, `UPDATE views SET query=@query WHERE user_id=@user AND id='leaf'`, pgx.NamedArgs{"query": dashboard.Query{From: "postings", Derive: map[string]string{"payee": "'Changed'"}}, "user": p.UserID})
 	cache.Changed(p.UserID, true)
 	if err != nil {
 		t.Fatal(err)
