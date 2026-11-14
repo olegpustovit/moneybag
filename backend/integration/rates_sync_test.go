@@ -42,7 +42,7 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_ratesync")
 	_ = db.Drop(ctx)
 	defer db.Drop(context.Background())
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -213,6 +213,10 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	case <-timer.C:
 	}
 	afterRate, e := sources.Rows(ctx, p, "rates:EUR/USD")
+	if e == nil && afterRate[0]["value"] != float64(2) {
+		direct, de := prices.Get(ctx, p, []string{"EUR/USD"}, "")
+		t.Logf("scheduled quote diagnostic: now=%s future=%s direct=%+v directError=%v", time.Now().UTC(), future, direct, de)
+	}
 	if e != nil || afterRate[0]["value"] != float64(2) {
 		t.Fatalf("rate after scheduled quote: %v, %v", afterRate, e)
 	}

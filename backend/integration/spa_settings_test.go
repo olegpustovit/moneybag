@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"net/http"
 	"net/url"
@@ -15,7 +17,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -37,7 +38,8 @@ func testSPASettingsWrites(t *testing.T, ctx context.Context, endpoint string, o
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection("oauth_grants").InsertOne(ctx, bson.M{"_id": "settings-test-grant", "user_id": user.ID, "client_id": "settings-test-client", "client_name": "Synthetic", "expires_at": time.Now().Add(time.Hour), "revoked": false})
+	pgdb := pgtest.New(t)
+	_, err = pgdb.Exec(ctx, `INSERT INTO oauth_grants(id,user_id,client_id,client_name,expires_at,revoked) VALUES ('settings-test-grant',@user,'settings-test-client','Synthetic',@expires,false)`, pgx.NamedArgs{"user": user.ID, "expires": time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,9 +74,9 @@ func testSPASettingsWrites(t *testing.T, ctx context.Context, endpoint string, o
 		t.Fatalf("JSON revoke: %d %v", status, body)
 	}
 	var grant struct {
-		Revoked bool `bson:"revoked"`
+		Revoked bool `db:"revoked"`
 	}
-	if err = db.Collection("oauth_grants").FindOne(ctx, bson.M{"_id": "settings-test-grant"}).Decode(&grant); err != nil || !grant.Revoked {
+	if err = pgdb.QueryRow(ctx, `SELECT revoked FROM oauth_grants WHERE id='settings-test-grant'`).Scan(&grant.Revoked); err != nil || !grant.Revoked {
 		t.Fatalf("grant not revoked: %v", err)
 	}
 	feed := url.Values{"id": {"wise"}, "url": {"https://example.com/statement.csv"}, "account": {"assets:settings"}, "format": {"generic_csv"}, "token": {"synthetic-token"}}

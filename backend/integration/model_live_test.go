@@ -42,7 +42,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_live")
 	_ = db.Drop(ctx)
 	defer db.Drop(context.Background())
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)
 	}

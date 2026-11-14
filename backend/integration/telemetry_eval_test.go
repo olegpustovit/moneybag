@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"math/big"
 	"regexp"
 	"slices"
@@ -554,6 +555,7 @@ func evalJSON(v any) string { b, _ := json.Marshal(v); return string(b) }
 
 // testEvalTasks is the table of jobs a fresh agent does through MCP alone, on its own user and ledger. Each ends by checking state.
 func testEvalTasks(t *testing.T, ctx context.Context, admin principal.Principal, s mcpserver.Services, db *mongo.Database) {
+	pgdb := pgtest.New(t)
 	t.Helper()
 	token, e := s.Identity.Invite(ctx, admin, "eval-tasks@example.test")
 	if e != nil {
@@ -840,7 +842,7 @@ func testEvalTasks(t *testing.T, ctx context.Context, admin principal.Principal,
 			}
 		}},
 		{"an agent can be revoked", func(t *testing.T) {
-			oa := oauth.NewService(oauth.NewMongoRepository(db), s.Identity, "http://localhost:6459")
+			oa := oauth.NewService(oauth.NewPostgresRepository(pgdb), s.Identity, "http://localhost:6459")
 			reg, e := oa.Register(ctx, oauth.RegisterInput{Name: "Doomed agent", RedirectURIs: []string{"http://127.0.0.1:8484/callback"}, AuthMethod: "none"})
 			if e != nil {
 				t.Fatal(e)

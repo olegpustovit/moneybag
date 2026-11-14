@@ -9,6 +9,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
@@ -44,7 +45,7 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 			t.Error(e)
 		}
 	})
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -166,7 +167,7 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if _, e = book.Post(ctx, readonly, in); !errors.Is(e, principal.ErrForbidden) {
 		t.Fatal("read-only write accepted", e)
 	}
-	oa := oauth.NewService(oauth.NewMongoRepository(db), ids, "http://localhost:6459")
+	oa := oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "http://localhost:6459")
 	if e = oa.Init(ctx); e != nil {
 		t.Fatal(e)
 	}

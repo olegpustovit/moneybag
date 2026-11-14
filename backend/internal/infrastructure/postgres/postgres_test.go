@@ -16,6 +16,9 @@ import (
 
 func TestNext(t *testing.T) {
 	pool := pgtest.New(t)
+	if pgtest.New(t) != pool {
+		t.Fatal("components in one test must share its database")
+	}
 	ctx := context.Background()
 	for _, name := range []string{"", "alice", ":journal", "alice:"} {
 		if _, err := postgres.Next(ctx, pool, name); err == nil || err.Error() != "counter requires owner and name" {
@@ -55,7 +58,7 @@ func TestNext(t *testing.T) {
 func TestConcurrentMigrate(t *testing.T) {
 	pool := pgtest.New(t)
 	ctx := context.Background()
-	if _, err := pool.Exec(ctx, "DROP TABLE counters, goose_db_version"); err != nil {
+	if _, err := pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup

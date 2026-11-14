@@ -94,11 +94,11 @@ func run() error {
 		return e
 	}
 	db := client.Database(cfg.MongoDB)
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	ids := identity.NewService(identity.NewPostgresRepository(pool))
 	if e = ids.Init(ctx); e != nil {
 		return fmt.Errorf("initialize identity: %w", e)
 	}
-	auth := oauth.NewService(oauth.NewMongoRepository(db), ids, cfg.PublicURL)
+	auth := oauth.NewService(oauth.NewPostgresRepository(pool), ids, cfg.PublicURL)
 	if e = auth.Init(ctx); e != nil {
 		return fmt.Errorf("initialize OAuth: %w", e)
 	}

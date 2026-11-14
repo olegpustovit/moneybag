@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/http"
 	"net/url"
 	"strings"
@@ -453,19 +456,23 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatal("revoked editor evaluate", code)
 		}
 	}
-	_, err = db.Collection("oauth_grants").InsertMany(ctx, []any{
-		bson.M{"_id": "activity-old", "user_id": p.UserID, "client_id": "activity-client", "client_name": "Old name", "created_at": time.Unix(1, 0), "revoked": true, "expires_at": time.Unix(2, 0)},
-		bson.M{"_id": "activity-new", "user_id": p.UserID, "client_id": "activity-client", "client_name": "Former agent", "created_at": time.Unix(3, 0), "revoked": true, "expires_at": time.Unix(4, 0)},
-		bson.M{"_id": "activity-blank", "user_id": p.UserID, "client_id": "activity-client", "client_name": "", "created_at": time.Unix(5, 0), "revoked": true, "expires_at": time.Unix(6, 0)},
-		bson.M{"_id": "activity-expired", "user_id": p.UserID, "client_id": "expired-client", "client_name": "Expired agent", "created_at": time.Unix(4, 0), "revoked": false, "expires_at": time.Unix(6, 0)},
-		bson.M{"_id": "activity-other", "user_id": "other-user", "client_id": "private-client", "client_name": "Private name", "created_at": time.Unix(7, 0)},
-		bson.M{"_id": "activity-overlap", "user_id": "other-user", "client_id": "activity-client", "client_name": "Other user's name", "created_at": time.Unix(8, 0)},
-	})
-	if err != nil {
-		t.Fatal(err)
+	pgdb := pgtest.New(t)
+	grants := []oauth.Grant{
+		{ID: "activity-old", UserID: p.UserID, ClientID: "activity-client", ClientName: "Old name", CreatedAt: time.Unix(1, 0), Revoked: true, ExpiresAt: time.Unix(2, 0)},
+		{ID: "activity-new", UserID: p.UserID, ClientID: "activity-client", ClientName: "Former agent", CreatedAt: time.Unix(3, 0), Revoked: true, ExpiresAt: time.Unix(4, 0)},
+		{ID: "activity-blank", UserID: p.UserID, ClientID: "activity-client", ClientName: "", CreatedAt: time.Unix(5, 0), Revoked: true, ExpiresAt: time.Unix(6, 0)},
+		{ID: "activity-expired", UserID: p.UserID, ClientID: "expired-client", ClientName: "Expired agent", CreatedAt: time.Unix(4, 0), Revoked: false, ExpiresAt: time.Unix(6, 0)},
+		{ID: "activity-other", UserID: "other-user", ClientID: "private-client", ClientName: "Private name", CreatedAt: time.Unix(7, 0)},
+		{ID: "activity-overlap", UserID: "other-user", ClientID: "activity-client", ClientName: "Other user's name", CreatedAt: time.Unix(8, 0)},
+	}
+	for _, g := range grants {
+		_, err = pgdb.Exec(ctx, `INSERT INTO oauth_grants(id,user_id,client_id,client_name,created_at,revoked,expires_at) VALUES (@id,@user,@client,@name,@created,@revoked,@expires)`, pgx.NamedArgs{"id": g.ID, "user": g.UserID, "client": g.ClientID, "name": g.ClientName, "created": g.CreatedAt, "revoked": g.Revoked, "expires": g.ExpiresAt})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() {
-		_, _ = db.Collection("oauth_grants").DeleteMany(context.Background(), bson.M{"_id": bson.M{"$in": []string{"activity-old", "activity-new", "activity-blank", "activity-expired", "activity-other", "activity-overlap"}}})
+		_, _ = pgdb.Exec(context.Background(), `DELETE FROM oauth_grants WHERE id=ANY(@ids::text[])`, pgx.NamedArgs{"ids": []string{"activity-old", "activity-new", "activity-blank", "activity-expired", "activity-other", "activity-overlap"}})
 	})
 	beforeImports, err := services.Imports.StagedCount(ctx, p)
 	if err != nil {

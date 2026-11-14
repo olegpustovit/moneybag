@@ -600,7 +600,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 	testSingleSource(t, ctx, pa, book, budgets, sources)
 	flags := feedback.NewService(feedback.NewPostgresRepository(pgtest.New(t)), a)
-	people := admin.NewService(admin.NewMongoRepository(db), ids, oauth.NewService(oauth.NewMongoRepository(db), ids, "http://localhost:6459"), a, "http://localhost:6459")
+	people := admin.NewService(admin.NewMongoRepository(db), ids, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "http://localhost:6459"), a, "http://localhost:6459")
 	hist.Semantic, hist.Feedback, hist.Admin = meaning, flags, people
 	imp.SetSecretKey(make([]byte, 32))
 	testMCPWorkflows(t, ctx, pa, pb, mcpserver.Services{Semantic: meaning, Feedback: flags, Admin: people, PublicURL: "http://localhost:6459", History: hist, Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Classify: classes, Imports: imp, Reconcile: rec, Sharing: shares, Logger: slog.Default(), Consistency: &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}}, db)

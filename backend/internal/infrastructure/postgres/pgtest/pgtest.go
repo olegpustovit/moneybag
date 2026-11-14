@@ -20,11 +20,21 @@ var template struct {
 	err  error
 }
 
+var testPools = struct {
+	sync.Mutex
+	pools map[testing.TB]*pgxpool.Pool
+}{pools: make(map[testing.TB]*pgxpool.Pool)}
+
 func New(t testing.TB) *pgxpool.Pool {
 	t.Helper()
 	url := os.Getenv("MONEYBAG_TEST_DATABASE_URL")
 	if url == "" {
 		t.Skip("set MONEYBAG_TEST_DATABASE_URL to a dedicated PostgreSQL test server")
+	}
+	testPools.Lock()
+	defer testPools.Unlock()
+	if pool := testPools.pools[t]; pool != nil {
+		return pool
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
@@ -76,5 +86,11 @@ func New(t testing.TB) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
+	testPools.pools[t] = pool
+	t.Cleanup(func() {
+		testPools.Lock()
+		delete(testPools.pools, t)
+		testPools.Unlock()
+	})
 	return pool
 }

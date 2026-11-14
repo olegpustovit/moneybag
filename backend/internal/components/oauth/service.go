@@ -8,13 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -38,12 +37,12 @@ const AccessTTL = 15 * time.Minute
 const RefreshTTL = 30 * 24 * time.Hour
 
 type Client struct {
-	ID           string    `json:"client_id" bson:"_id"`
-	Name         string    `json:"client_name" bson:"name"`
-	RedirectURIs []string  `json:"redirect_uris" bson:"redirect_uris"`
-	AuthMethod   string    `json:"token_endpoint_auth_method" bson:"auth_method"`
-	SecretHash   string    `json:"-" bson:"secret_hash,omitempty"`
-	FetchedUntil time.Time `json:"-" bson:"fetched_until,omitempty"`
+	ID           string    `json:"client_id" db:"id"`
+	Name         string    `json:"client_name" db:"name"`
+	RedirectURIs []string  `json:"redirect_uris" db:"redirect_uris"`
+	AuthMethod   string    `json:"token_endpoint_auth_method" db:"auth_method"`
+	SecretHash   string    `json:"-" db:"secret_hash"`
+	FetchedUntil time.Time `json:"-" db:"fetched_until"`
 }
 type RegisterInput struct {
 	Name          string   `json:"client_name"`
@@ -71,33 +70,33 @@ type Authorization struct {
 	Resource        string `json:"resource"`
 }
 type code struct {
-	Hash      string    `bson:"_id"`
-	ClientID  string    `bson:"client_id"`
-	UserID    string    `bson:"user_id"`
-	Redirect  string    `bson:"redirect_uri"`
-	Challenge string    `bson:"challenge"`
-	Resource  string    `bson:"resource"`
-	Scopes    []string  `bson:"scopes"`
-	ExpiresAt time.Time `bson:"expires_at"`
+	Hash      string    `db:"id"`
+	ClientID  string    `db:"client_id"`
+	UserID    string    `db:"user_id"`
+	Redirect  string    `db:"redirect_uri"`
+	Challenge string    `db:"challenge"`
+	Resource  string    `db:"resource"`
+	Scopes    []string  `db:"scopes"`
+	ExpiresAt time.Time `db:"expires_at"`
 }
 type Grant struct {
-	ID         string    `json:"id" bson:"_id"`
-	UserID     string    `json:"-" bson:"user_id"`
-	ClientID   string    `json:"client_id" bson:"client_id"`
-	ClientName string    `json:"client_name" bson:"client_name"`
-	Resource   string    `json:"resource" bson:"resource"`
-	Scopes     []string  `json:"scopes" bson:"scopes"`
-	Revoked    bool      `json:"revoked" bson:"revoked"`
-	CreatedAt  time.Time `json:"created_at" bson:"created_at"`
-	ExpiresAt  time.Time `json:"expires_at" bson:"expires_at"`
+	ID         string    `json:"id" db:"id"`
+	UserID     string    `json:"-" db:"user_id"`
+	ClientID   string    `json:"client_id" db:"client_id"`
+	ClientName string    `json:"client_name" db:"client_name"`
+	Resource   string    `json:"resource" db:"resource"`
+	Scopes     []string  `json:"scopes" db:"scopes"`
+	Revoked    bool      `json:"revoked" db:"revoked"`
+	CreatedAt  time.Time `json:"created_at" db:"created_at"`
+	ExpiresAt  time.Time `json:"expires_at" db:"expires_at"`
 }
 type token struct {
-	Hash            string    `bson:"_id"`
-	RefreshHash     string    `bson:"refresh_hash"`
-	GrantID         string    `bson:"grant_id"`
-	AccessExpiresAt time.Time `bson:"access_expires_at"`
-	ExpiresAt       time.Time `bson:"expires_at"`
-	Used            bool      `bson:"used"`
+	Hash            string    `db:"id"`
+	RefreshHash     string    `db:"refresh_hash"`
+	GrantID         string    `db:"grant_id"`
+	AccessExpiresAt time.Time `db:"access_expires_at"`
+	ExpiresAt       time.Time `db:"expires_at"`
+	Used            bool      `db:"used"`
 }
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
@@ -106,35 +105,23 @@ type TokenResponse struct {
 	RefreshToken string `json:"refresh_token"`
 	Scope        string `json:"scope"`
 }
-type MongoRepository struct {
-	db     *mongo.Database
-	client *mongo.Client
+type PostgresRepository struct {
+	db *pgxpool.Pool
 }
 type Service struct {
-	repo     *MongoRepository
+	repo     *PostgresRepository
 	identity *identity.Service
 	Issuer   string
 	http     *http.Client
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository {
-	return &MongoRepository{db, db.Client()}
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{db}
 }
-func NewService(r *MongoRepository, i *identity.Service, issuer string) *Service {
+func NewService(r *PostgresRepository, i *identity.Service, issuer string) *Service {
 	return &Service{r, i, strings.TrimRight(issuer, "/"), safefetch.Client()}
 }
-func (s *Service) Init(ctx context.Context) error {
-	for c, models := range map[string][]mongo.IndexModel{
-		"oauth_codes":  {{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}},
-		"oauth_tokens": {{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}, {Keys: bson.D{{Key: "refresh_hash", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"oauth_grants": {{Keys: bson.D{{Key: "user_id", Value: 1}}}},
-	} {
-		if _, e := s.repo.db.Collection(c).Indexes().CreateMany(ctx, models); e != nil {
-			return e
-		}
-	}
-	return nil
-}
+func (s *Service) Init(context.Context) error { return nil }
 
 // AllowedRedirect accepts any HTTPS callback, plain HTTP only on loopback, and native-app custom schemes
 // (RFC 8252 §7.1, e.g. cursor://). The consent page shows the redirect target so users can spot a spoofed client.
@@ -213,17 +200,22 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (Registration,
 		secret = identity.Random()
 		c.SecretHash = identity.Hash(secret)
 	}
-	_, e := s.repo.db.Collection("oauth_clients").InsertOne(ctx, c)
+	const registerSQL = `INSERT INTO oauth_clients (id,name,redirect_uris,auth_method,secret_hash,fetched_until) VALUES (@id,@name,@redirects,@method,@secret,@until)`
+	_, e := s.repo.db.Exec(ctx, registerSQL, pgx.NamedArgs{"id": c.ID, "name": c.Name, "redirects": c.RedirectURIs, "method": c.AuthMethod, "secret": c.SecretHash, "until": c.FetchedUntil.UTC().Truncate(time.Millisecond)})
 	return Registration{c, secret, time.Now().Unix(), 0, []string{"authorization_code", "refresh_token"}, []string{"code"}}, e
 }
 func (s *Service) client(ctx context.Context, id string) (Client, error) {
 	var c Client
-	e := s.repo.db.Collection("oauth_clients").FindOne(ctx, bson.M{"_id": id}).Decode(&c)
+	const clientSQL = `SELECT * FROM oauth_clients WHERE id=@id`
+	rows, e := s.repo.db.Query(ctx, clientSQL, pgx.NamedArgs{"id": id})
+	if e == nil {
+		c, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[Client])
+	}
 	remote := strings.HasPrefix(id, "https://")
 	if e == nil && (!remote || c.FetchedUntil.After(time.Now())) {
 		return c, nil
 	}
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return c, e
 	}
 	if !remote || !AllowedRedirect(id) {
@@ -245,10 +237,11 @@ func (s *Service) client(ctx context.Context, id string) (Client, error) {
 	c.SecretHash = ""
 	c.FetchedUntil = time.Now().Add(ttl)
 	if noStore {
-		_, e = s.repo.db.Collection("oauth_clients").DeleteOne(ctx, bson.M{"_id": id})
+		_, e = s.repo.db.Exec(ctx, `DELETE FROM oauth_clients WHERE id=@id`, pgx.NamedArgs{"id": id})
 		return c, e
 	}
-	_, e = s.repo.db.Collection("oauth_clients").ReplaceOne(ctx, bson.M{"_id": id}, c, options.Replace().SetUpsert(true))
+	_, e = s.repo.db.Exec(ctx, `INSERT INTO oauth_clients (id,name,redirect_uris,auth_method,secret_hash,fetched_until) VALUES (@id,@name,@redirects,@method,@secret,@until)
+ ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,redirect_uris=EXCLUDED.redirect_uris,auth_method=EXCLUDED.auth_method,secret_hash=EXCLUDED.secret_hash,fetched_until=EXCLUDED.fetched_until`, pgx.NamedArgs{"id": c.ID, "name": c.Name, "redirects": c.RedirectURIs, "method": c.AuthMethod, "secret": c.SecretHash, "until": c.FetchedUntil.UTC().Truncate(time.Millisecond)})
 	return c, e
 }
 func (s *Service) resource(raw string) bool {
@@ -289,7 +282,8 @@ func (s *Service) Authorize(ctx context.Context, in Authorization, p principal.P
 		return "", e
 	}
 	raw := identity.Random()
-	_, e = s.repo.db.Collection("oauth_codes").InsertOne(ctx, code{identity.Hash(raw), in.ClientID, p.UserID, in.RedirectURI, in.Challenge, in.Resource, scopes, time.Now().Add(time.Minute)})
+	const codeSQL = `INSERT INTO oauth_codes (id,client_id,user_id,redirect_uri,challenge,resource,scopes,expires_at) VALUES (@id,@client,@user,@redirect,@challenge,@resource,@scopes,@expires)`
+	_, e = s.repo.db.Exec(ctx, codeSQL, pgx.NamedArgs{"id": identity.Hash(raw), "client": in.ClientID, "user": p.UserID, "redirect": in.RedirectURI, "challenge": in.Challenge, "resource": in.Resource, "scopes": scopes, "expires": time.Now().UTC().Add(time.Minute).Truncate(time.Millisecond)})
 	return raw, e
 }
 func (s *Service) AuthenticateClient(ctx context.Context, id, secret, method string) (Client, error) {
@@ -321,21 +315,22 @@ func (s *Service) Exchange(ctx context.Context, c Client, raw, redirect, verifie
 		return TokenResponse{}, ErrAgentsSuspended
 	}
 	var result TokenResponse
-	e := mongodb.Workflow(ctx, func(tx context.Context) error {
-		var auth code
-		f := bson.M{"_id": identity.Hash(raw), "client_id": c.ID, "redirect_uri": redirect, "challenge": Challenge(verifier), "expires_at": bson.M{"$gt": time.Now()}}
-		if resource != "" {
-			f["resource"] = resource
+	e := postgres.Workflow(ctx, func(tx context.Context) error {
+		const exchangeSQL = `DELETE FROM oauth_codes WHERE id=@id AND client_id=@client AND redirect_uri=@redirect AND challenge=@challenge
+ AND expires_at>@now AND (@resource='' OR resource=@resource) RETURNING *`
+		rows, e := s.repo.db.Query(tx, exchangeSQL, pgx.NamedArgs{"id": identity.Hash(raw), "client": c.ID, "redirect": redirect, "challenge": Challenge(verifier), "now": time.Now().UTC().Truncate(time.Millisecond), "resource": resource})
+		if e != nil {
+			return e
 		}
-		e := s.repo.db.Collection("oauth_codes").FindOneAndDelete(tx, f).Decode(&auth)
-		if errors.Is(e, mongo.ErrNoDocuments) {
+		auth, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[code])
+		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrInvalidGrant
 		}
 		if e != nil {
 			return e
 		}
-		g := Grant{ID: identity.Random(), UserID: auth.UserID, ClientID: c.ID, ClientName: c.Name, Resource: auth.Resource, Scopes: auth.Scopes, CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().Add(RefreshTTL)}
-		if _, e = s.repo.db.Collection("oauth_grants").InsertOne(tx, g); e != nil {
+		g := Grant{ID: identity.Random(), UserID: auth.UserID, ClientID: c.ID, ClientName: c.Name, Resource: auth.Resource, Scopes: auth.Scopes, CreatedAt: time.Now().UTC().Truncate(time.Millisecond), ExpiresAt: time.Now().UTC().Add(RefreshTTL).Truncate(time.Millisecond)}
+		if _, e = s.repo.db.Exec(tx, `INSERT INTO oauth_grants (id,user_id,client_id,client_name,resource,scopes,revoked,created_at,expires_at) VALUES (@id,@user,@client,@name,@resource,@scopes,@revoked,@created,@expires)`, pgx.NamedArgs{"id": g.ID, "user": g.UserID, "client": g.ClientID, "name": g.ClientName, "resource": g.Resource, "scopes": g.Scopes, "revoked": g.Revoked, "created": g.CreatedAt, "expires": g.ExpiresAt}); e != nil {
 			return e
 		}
 		result, e = s.issue(tx, g)
@@ -345,7 +340,8 @@ func (s *Service) Exchange(ctx context.Context, c Client, raw, redirect, verifie
 }
 func (s *Service) issue(ctx context.Context, g Grant) (TokenResponse, error) {
 	access, refresh := identity.Random(), identity.Random()
-	_, e := s.repo.db.Collection("oauth_tokens").InsertOne(ctx, token{identity.Hash(access), identity.Hash(refresh), g.ID, time.Now().Add(AccessTTL), g.ExpiresAt, false})
+	const issueSQL = `INSERT INTO oauth_tokens (id,refresh_hash,grant_id,access_expires_at,expires_at,used) VALUES (@id,@refresh,@grant,@access,@expires,false)`
+	_, e := s.repo.db.Exec(ctx, issueSQL, pgx.NamedArgs{"id": identity.Hash(access), "refresh": identity.Hash(refresh), "grant": g.ID, "access": time.Now().UTC().Add(AccessTTL).Truncate(time.Millisecond), "expires": g.ExpiresAt})
 	return TokenResponse{access, "Bearer", int64(AccessTTL.Seconds()), refresh, strings.Join(g.Scopes, " ")}, e
 }
 func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope string) (TokenResponse, error) {
@@ -359,10 +355,14 @@ func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope st
 	}
 	var result TokenResponse
 	reused := false
-	e := mongodb.Workflow(ctx, func(tx context.Context) error {
-		var tok token
-		e := s.repo.db.Collection("oauth_tokens").FindOne(tx, bson.M{"refresh_hash": identity.Hash(raw), "expires_at": bson.M{"$gt": time.Now()}}).Decode(&tok)
-		if errors.Is(e, mongo.ErrNoDocuments) {
+	e := postgres.Workflow(ctx, func(tx context.Context) error {
+		const refreshSQL = `SELECT * FROM oauth_tokens WHERE refresh_hash=@refresh AND expires_at>@now`
+		rows, e := s.repo.db.Query(tx, refreshSQL, pgx.NamedArgs{"refresh": identity.Hash(raw), "now": time.Now().UTC().Truncate(time.Millisecond)})
+		if e != nil {
+			return e
+		}
+		tok, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[token])
+		if errors.Is(e, pgx.ErrNoRows) {
 			return ErrInvalidGrant
 		}
 		if e != nil {
@@ -374,7 +374,7 @@ func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope st
 		}
 		if tok.Used {
 			reused = true
-			_, e = s.repo.db.Collection("oauth_grants").UpdateOne(tx, bson.M{"_id": g.ID}, bson.M{"$set": bson.M{"revoked": true}})
+			_, e = s.repo.db.Exec(tx, `UPDATE oauth_grants SET revoked=true WHERE id=@id`, pgx.NamedArgs{"id": g.ID})
 			return e
 		}
 		if scope != "" {
@@ -385,11 +385,11 @@ func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope st
 			}
 			g.Scopes = strings.Fields(scope)
 		}
-		r, e := s.repo.db.Collection("oauth_tokens").UpdateOne(tx, bson.M{"_id": tok.Hash, "used": false}, bson.M{"$set": bson.M{"used": true}})
+		r, e := s.repo.db.Exec(tx, `UPDATE oauth_tokens SET used=true WHERE id=@id AND used=false`, pgx.NamedArgs{"id": tok.Hash})
 		if e != nil {
 			return e
 		}
-		if r.ModifiedCount != 1 {
+		if r.RowsAffected() != 1 {
 			return ErrInvalidGrant
 		}
 		result, e = s.issue(tx, g)
@@ -401,58 +401,43 @@ func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope st
 	return result, e
 }
 func (s *Service) grant(ctx context.Context, id string) (Grant, error) {
-	var g Grant
-	e := s.repo.db.Collection("oauth_grants").FindOne(ctx, bson.M{"_id": id, "revoked": false, "expires_at": bson.M{"$gt": time.Now()}}).Decode(&g)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const grantSQL = `SELECT * FROM oauth_grants WHERE id=@id AND revoked=false AND expires_at>@now`
+	rows, e := s.repo.db.Query(ctx, grantSQL, pgx.NamedArgs{"id": id, "now": time.Now().UTC().Truncate(time.Millisecond)})
+	if e != nil {
+		return Grant{}, e
+	}
+	g, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Grant])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = ErrInvalidGrant
 	}
 	return g, e
 }
 func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.Principal, error) {
-	now := time.Now()
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"_id": identity.Hash(raw), "access_expires_at": bson.M{"$gt": now}, "$expr": bson.M{"$and": bson.A{bson.M{"$eq": bson.A{bson.M{"$type": "$grant_id"}, "string"}}, bson.M{"$eq": bson.A{bson.M{"$type": "$access_expires_at"}, "date"}}}}}}},
-		{{Key: "$set", Value: bson.M{"token": "$$ROOT"}}},
-		{{Key: "$lookup", Value: bson.M{"from": "oauth_grants", "localField": "grant_id", "foreignField": "_id", "as": "grant"}}},
-		{{Key: "$unwind", Value: "$grant"}},
-		{{Key: "$match", Value: bson.M{"grant.revoked": false, "grant.expires_at": bson.M{"$gt": now}}}},
-		// Authentication needs the current user existence check as well as the current grant.
-		{{Key: "$lookup", Value: bson.M{"from": "users", "localField": "grant.user_id", "foreignField": "_id", "pipeline": mongo.Pipeline{{{Key: "$project", Value: bson.M{"_id": 1, "is_admin": 1, "disabled": 1}}}}, "as": "users"}}},
-		// The emergency stop travels in the same read, so a token check stays one command.
-		{{Key: "$lookup", Value: bson.M{"from": "settings", "pipeline": mongo.Pipeline{{{Key: "$match", Value: bson.M{"_id": "agents_suspended"}}}, {{Key: "$project", Value: bson.M{"_id": 1}}}}, "as": "suspension"}}},
-		{{Key: "$project", Value: bson.M{"token": 1, "grant": 1, "users": 1, "suspension": 1}}},
-	}
-	// The unique token lookup returns at most one row; a two-row batch exhausts the cursor.
-	cursor, err := s.repo.db.Collection("oauth_tokens").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(2))
-	if err != nil {
+	const bearerSQL = `SELECT g.id,g.user_id,g.client_id,g.scopes,g.resource,u.id,u.is_admin,u.disabled,
+ EXISTS(SELECT 1 FROM settings WHERE id='agents_suspended')
+ FROM oauth_tokens t JOIN oauth_grants g ON g.id=t.grant_id LEFT JOIN users u ON u.id=g.user_id
+ WHERE t.id=@id AND t.access_expires_at>@now AND g.revoked=false AND g.expires_at>@now`
+	var result struct{ Grant Grant }
+	var userID *string
+	var userAdmin, userDisabled *bool
+	var suspended bool
+	err := s.repo.db.QueryRow(ctx, bearerSQL, pgx.NamedArgs{"id": identity.Hash(raw), "now": time.Now().UTC().Truncate(time.Millisecond)}).Scan(
+		&result.Grant.ID, &result.Grant.UserID, &result.Grant.ClientID, &result.Grant.Scopes, &result.Grant.Resource, &userID, &userAdmin, &userDisabled, &suspended)
+	if err != nil || result.Grant.Resource != resource {
 		return principal.Principal{}, principal.ErrForbidden
 	}
-	defer cursor.Close(ctx)
-	var result struct {
-		Token token `bson:"token"`
-		Grant Grant `bson:"grant"`
-		Users []struct {
-			ID       string `bson:"_id"`
-			Admin    bool   `bson:"is_admin"`
-			Disabled bool   `bson:"disabled"`
-		} `bson:"users"`
-		Suspension []bson.M `bson:"suspension"`
-	}
-	if !cursor.Next(ctx) || cursor.Decode(&result) != nil || result.Grant.Resource != resource {
-		return principal.Principal{}, principal.ErrForbidden
-	}
-	if len(result.Users) != 1 || result.Users[0].ID != result.Grant.UserID {
+	if userID == nil || *userID != result.Grant.UserID {
 		return principal.Principal{}, principal.ErrNotFound
 	}
-	if result.Users[0].Disabled {
+	if *userDisabled {
 		return principal.Principal{}, principal.ErrForbidden
 	}
-	if len(result.Suspension) > 0 {
+	if suspended {
 		return principal.Principal{}, ErrAgentsSuspended
 	}
 	scopes := result.Grant.Scopes
 	admin := slices.Contains(scopes, principal.ScopeAdminUsers)
-	if admin && !result.Users[0].Admin {
+	if admin && !*userAdmin {
 		// A grant cannot outlive its user's admin rights.
 		scopes = slices.DeleteFunc(slices.Clone(scopes), func(scope string) bool { return scope == principal.ScopeAdminUsers })
 		admin = false
@@ -462,25 +447,30 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 
 // Suspended reports the owner's emergency stop.
 func (s *Service) Suspended(ctx context.Context) (bool, error) {
-	n, e := s.repo.db.Collection("settings").CountDocuments(ctx, bson.M{"_id": "agents_suspended"})
-	return n > 0, e
+	var suspended bool
+	e := s.repo.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM settings WHERE id='agents_suspended')`).Scan(&suspended)
+	return suspended, e
 }
 
 // SetSuspended flips the emergency stop; grants themselves stay untouched, so resuming restores every connection.
 func (s *Service) SetSuspended(ctx context.Context, by string, suspended bool) error {
 	if !suspended {
-		_, e := s.repo.db.Collection("settings").DeleteOne(ctx, bson.M{"_id": "agents_suspended"})
+		_, e := s.repo.db.Exec(ctx, `DELETE FROM settings WHERE id='agents_suspended'`)
 		return e
 	}
-	_, e := s.repo.db.Collection("settings").UpdateOne(ctx, bson.M{"_id": "agents_suspended"}, bson.M{"$set": bson.M{"by": by, "at": time.Now().UTC()}}, options.UpdateOne().SetUpsert(true))
+	_, e := s.repo.db.Exec(ctx, `INSERT INTO settings (id,"by",at) VALUES ('agents_suspended',@by,@at) ON CONFLICT (id) DO UPDATE SET "by"=EXCLUDED."by",at=EXCLUDED.at`, pgx.NamedArgs{"by": by, "at": time.Now().UTC().Truncate(time.Millisecond)})
 	return e
 }
 
 // OwnedGrant reads one active connection of this user.
 func (s *Service) OwnedGrant(ctx context.Context, p principal.Principal, id string) (Grant, error) {
-	var g Grant
-	e := s.repo.db.Collection("oauth_grants").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID, "revoked": false, "expires_at": bson.M{"$gt": time.Now()}}).Decode(&g)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const ownedSQL = `SELECT * FROM oauth_grants WHERE id=@id AND user_id=@user AND revoked=false AND expires_at>@now`
+	rows, e := s.repo.db.Query(ctx, ownedSQL, pgx.NamedArgs{"id": id, "user": p.UserID, "now": time.Now().UTC().Truncate(time.Millisecond)})
+	if e != nil {
+		return Grant{}, e
+	}
+	g, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Grant])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = principal.ErrNotFound
 	}
 	return g, e
@@ -488,33 +478,35 @@ func (s *Service) OwnedGrant(ctx context.Context, p principal.Principal, id stri
 
 // AddScope widens one connection. Only the admin service's owner confirmation reaches it.
 func (s *Service) AddScope(ctx context.Context, p principal.Principal, id, scope string) error {
-	r, e := s.repo.db.Collection("oauth_grants").UpdateOne(ctx, bson.M{"_id": id, "user_id": p.UserID, "revoked": false}, bson.M{"$addToSet": bson.M{"scopes": scope}})
-	if e == nil && r.MatchedCount != 1 {
+	r, e := s.repo.db.Exec(ctx, `UPDATE oauth_grants SET scopes=CASE WHEN @scope=ANY(scopes) THEN scopes ELSE array_append(scopes,@scope) END WHERE id=@id AND user_id=@user AND revoked=false`, pgx.NamedArgs{"scope": scope, "id": id, "user": p.UserID})
+	if e == nil && r.RowsAffected() != 1 {
 		return principal.ErrNotFound
 	}
 	return e
 }
 func (s *Service) Revoke(ctx context.Context, c Client, raw string) error {
-	var tok token
-	e := s.repo.db.Collection("oauth_tokens").FindOne(ctx, bson.M{"$or": bson.A{bson.M{"_id": identity.Hash(raw)}, bson.M{"refresh_hash": identity.Hash(raw)}}}).Decode(&tok)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const revokeSQL = `SELECT * FROM oauth_tokens WHERE id=@hash OR refresh_hash=@hash LIMIT 1`
+	rows, e := s.repo.db.Query(ctx, revokeSQL, pgx.NamedArgs{"hash": identity.Hash(raw)})
+	if e != nil {
+		return e
+	}
+	tok, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[token])
+	if errors.Is(e, pgx.ErrNoRows) {
 		return nil
 	}
 	if e != nil {
 		return e
 	}
-	_, e = s.repo.db.Collection("oauth_grants").UpdateOne(ctx, bson.M{"_id": tok.GrantID, "client_id": c.ID}, bson.M{"$set": bson.M{"revoked": true}})
+	_, e = s.repo.db.Exec(ctx, `UPDATE oauth_grants SET revoked=true WHERE id=@id AND client_id=@client`, pgx.NamedArgs{"id": tok.GrantID, "client": c.ID})
 	return e
 }
 func (s *Service) Grants(ctx context.Context, p principal.Principal) ([]Grant, error) {
-	cur, e := s.repo.db.Collection("oauth_grants").Find(ctx, bson.M{"user_id": p.UserID, "revoked": false, "expires_at": bson.M{"$gt": time.Now()}}, options.Find().SetLimit(200).SetSort(bson.D{{Key: "created_at", Value: -1}}))
+	const grantsSQL = `SELECT * FROM oauth_grants WHERE user_id=@user AND revoked=false AND expires_at>@now ORDER BY created_at DESC LIMIT 200`
+	rows, e := s.repo.db.Query(ctx, grantsSQL, pgx.NamedArgs{"user": p.UserID, "now": time.Now().UTC().Truncate(time.Millisecond)})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Grant{}
-	e = cur.All(ctx, &out)
-	return out, e
+	return pgx.CollectRows(rows, pgx.RowToStructByName[Grant])
 }
 
 type AgentName struct {
@@ -527,15 +519,16 @@ func (s *Service) AgentNames(ctx context.Context, p principal.Principal) ([]Agen
 	if err := p.Require("ledger:read"); err != nil {
 		return nil, err
 	}
-	cur, err := s.repo.db.Collection("oauth_grants").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetProjection(bson.M{"client_id": 1, "client_name": 1, "created_at": 1}))
+	const namesSQL = `SELECT id,client_id,client_name,created_at FROM oauth_grants WHERE user_id=@user`
+	rows, err := s.repo.db.Query(ctx, namesSQL, pgx.NamedArgs{"user": p.UserID})
 	if err != nil {
 		return nil, fmt.Errorf("find activity agents: %w", err)
 	}
-	defer cur.Close(ctx)
+	defer rows.Close()
 	latest := map[string]Grant{}
-	for cur.Next(ctx) {
+	for rows.Next() {
 		var grant Grant
-		if err := cur.Decode(&grant); err != nil {
+		if err := rows.Scan(&grant.ID, &grant.ClientID, &grant.ClientName, &grant.CreatedAt); err != nil {
 			return nil, fmt.Errorf("decode activity agent: %w", err)
 		}
 		if grant.ClientID == "" || grant.ClientName == "" {
@@ -546,7 +539,7 @@ func (s *Service) AgentNames(ctx context.Context, p principal.Principal) ([]Agen
 			latest[grant.ClientID] = grant
 		}
 	}
-	if err := cur.Err(); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("read activity agents: %w", err)
 	}
 	out := make([]AgentName, 0, len(latest))
@@ -557,8 +550,8 @@ func (s *Service) AgentNames(ctx context.Context, p principal.Principal) ([]Agen
 	return out, nil
 }
 func (s *Service) RevokeGrant(ctx context.Context, p principal.Principal, id string) error {
-	r, e := s.repo.db.Collection("oauth_grants").UpdateOne(ctx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"revoked": true}})
-	if e == nil && r.MatchedCount != 1 {
+	r, e := s.repo.db.Exec(ctx, `UPDATE oauth_grants SET revoked=true WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": id, "user": p.UserID})
+	if e == nil && r.RowsAffected() != 1 {
 		return principal.ErrNotFound
 	}
 	return e

@@ -68,3 +68,78 @@ CREATE TABLE usage (
     views bigint NOT NULL DEFAULT 0,
     last_at text NOT NULL DEFAULT ''
 );
+
+CREATE TABLE users (
+    id text PRIMARY KEY,
+    email text NOT NULL DEFAULT '' UNIQUE,
+    name text NOT NULL DEFAULT '',
+    is_admin boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+    disabled boolean NOT NULL DEFAULT false
+);
+CREATE TABLE credentials (
+    id text PRIMARY KEY,
+    hash bytea NOT NULL DEFAULT '',
+    salt bytea NOT NULL DEFAULT ''
+);
+CREATE TABLE sessions (
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    csrf text NOT NULL DEFAULT '',
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX sessions_expiry ON sessions (expires_at);
+CREATE TABLE invites (
+    id text PRIMARY KEY,
+    email text NOT NULL DEFAULT '',
+    created_by text NOT NULL DEFAULT '',
+    expires_at timestamptz NOT NULL,
+    used_at timestamptz
+);
+CREATE INDEX invites_expiry ON invites (expires_at);
+CREATE TABLE settings (
+    id text PRIMARY KEY,
+    "by" text NOT NULL DEFAULT '',
+    at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z'
+);
+
+CREATE TABLE oauth_clients (
+    id text PRIMARY KEY,
+    name text NOT NULL DEFAULT '',
+    redirect_uris text[] NOT NULL DEFAULT '{}',
+    auth_method text NOT NULL DEFAULT '',
+    secret_hash text NOT NULL DEFAULT '',
+    fetched_until timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z'
+);
+CREATE TABLE oauth_codes (
+    id text PRIMARY KEY,
+    client_id text NOT NULL DEFAULT '',
+    user_id text NOT NULL DEFAULT '',
+    redirect_uri text NOT NULL DEFAULT '',
+    challenge text NOT NULL DEFAULT '',
+    resource text NOT NULL DEFAULT '',
+    scopes text[] NOT NULL DEFAULT '{}',
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX oauth_codes_expiry ON oauth_codes (expires_at);
+CREATE TABLE oauth_grants (
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    client_id text NOT NULL DEFAULT '',
+    client_name text NOT NULL DEFAULT '',
+    resource text NOT NULL DEFAULT '',
+    scopes text[] NOT NULL DEFAULT '{}',
+    revoked boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+    expires_at timestamptz NOT NULL
+);
+CREATE INDEX oauth_grants_user ON oauth_grants (user_id);
+CREATE TABLE oauth_tokens (
+    id text PRIMARY KEY,
+    refresh_hash text NOT NULL DEFAULT '' UNIQUE,
+    grant_id text NOT NULL DEFAULT '',
+    access_expires_at timestamptz NOT NULL,
+    expires_at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+    used boolean NOT NULL DEFAULT false
+);
+CREATE INDEX oauth_tokens_expiry ON oauth_tokens (expires_at);

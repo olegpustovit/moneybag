@@ -92,7 +92,7 @@ func testDatabase(t *testing.T, suffix string, monitor *event.CommandMonitor) (*
 func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHarness {
 	t.Helper()
 	db, ctx := testDatabase(t, suffix, nil)
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if err := ids.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	h.services.Previews = preview.New(h.endpoint, func(ctx context.Context, target string, width, height int) ([]byte, error) {
 		return (*h.capture.Load())(ctx, target, width, height)
 	})
-	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewMongoRepository(db), ids, "https://public.example.test"), repo, db.Client())
+	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db.Client())
 	compress, err := handlers.Compression()
 	if err != nil {
 		t.Fatal(err)
