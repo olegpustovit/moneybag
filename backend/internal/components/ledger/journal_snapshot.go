@@ -5,14 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
+	"encoding/json"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type combinedJournalKey struct{}
@@ -23,16 +22,16 @@ type combinedBudgetRange struct{ from, to string }
 // JournalMonthRow is a grouped expense amount for a date, account, currency and price.
 type JournalMonthRow struct {
 	ID struct {
-		Date      string  `bson:"date"`
-		Account   string  `bson:"account"`
-		Commodity string  `bson:"commodity"`
-		Price     *Amount `bson:"price"`
-	} `bson:"_id"`
-	Amount Decimal `bson:"amount"`
+		Date      string  `json:"date"`
+		Account   string  `json:"account"`
+		Commodity string  `json:"commodity"`
+		Price     *Amount `json:"price"`
+	} `json:"_id"`
+	Amount Decimal `json:"amount"`
 }
 
 type combinedJournal struct {
-	entries  []bson.Raw
+	entries  []json.RawMessage
 	balances [][]rawBalance
 	months   []JournalMonthRow
 	head     *Entry
@@ -74,7 +73,7 @@ func combinedDates(ctx context.Context) ([]string, bool) {
 }
 
 // CombinedMonthRows returns reusable grouped rows when this request has a matching shared journal window.
-func (r *MongoRepository) CombinedMonthRows(ctx context.Context, p principal.Principal, from, to string) ([]JournalMonthRow, bool, error) {
+func (r *PostgresRepository) CombinedMonthRows(ctx context.Context, p principal.Principal, from, to string) ([]JournalMonthRow, bool, error) {
 	if err := p.Require("ledger:read"); err != nil {
 		return nil, false, err
 	}
@@ -100,7 +99,7 @@ func (r *MongoRepository) CombinedMonthRows(ctx context.Context, p principal.Pri
 	return rows, true, nil
 }
 
-func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Principal, dates []string) (combinedJournal, error) {
+func (r *PostgresRepository) combinedJournal(ctx context.Context, p principal.Principal, dates []string) (combinedJournal, error) {
 	db, err := r.db(p)
 	if err != nil {
 		return combinedJournal{}, err
@@ -109,70 +108,52 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 	includeHead, _ := ctx.Value(combinedHeadKey{}).(bool)
 	key := fmt.Sprintf("combined-journal|%p|%d:%s|%s|%s|%s|%t", db, len(p.UserID), p.UserID, strings.Join(dates, ","), window.from, window.to, includeHead)
 	return reqcache.Do(ctx, key, func() (combinedJournal, error) {
-		projection := bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}
-		entryStages := bson.A{}
-		if includeHead {
-			entryStages = append(entryStages, bson.M{"$match": bson.M{"status": "posted"}})
-		}
-		entryStages = append(entryStages, bson.M{"$project": projection}, bson.M{"$limit": 250001}, bson.M{"$replaceWith": bson.M{"kind": "entry", "data": "$$ROOT"}})
-		facets := bson.D{{Key: "entries", Value: entryStages}}
-		arrays := bson.A{"$entries"}
-		if includeHead {
-			arrays = append(arrays, "$head")
-			// Match Entries' two-row decode and tag overlay, including drafts and malformed records.
-			facets = append(facets, bson.E{Key: "head", Value: bson.A{
-				bson.M{"$sort": bson.M{"seq": -1}}, bson.M{"$limit": 2},
-				bson.M{"$lookup": bson.M{"from": "entry_tags", "let": bson.M{"key": bson.M{"$concat": bson.A{p.UserID + ":", "$_id"}}}, "pipeline": bson.A{bson.M{"$match": bson.M{"user_id": p.UserID, "$expr": bson.M{"$eq": bson.A{"$_id", "$$key"}}}}}, "as": "tag_overlay"}},
-				bson.M{"$set": bson.M{"tags": bson.M{"$ifNull": bson.A{bson.M{"$arrayElemAt": bson.A{"$tag_overlay.tags", 0}}, "$tags"}}}}, bson.M{"$unset": "tag_overlay"},
-				bson.M{"$replaceWith": bson.M{"kind": "head", "data": "$$ROOT"}},
-			}})
-		}
-		for i, date := range dates {
-			name := "d" + strconv.Itoa(i)
-			arrays = append(arrays, "$"+name)
-			facets = append(facets, bson.E{Key: name, Value: bson.A{
-				bson.M{"$match": bson.M{"status": "posted", "date": bson.M{"$lte": date}}}, bson.M{"$unwind": "$postings"},
-				bson.M{"$group": bson.M{"_id": bson.M{"account": "$postings.account", "commodity": "$postings.amount.c"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
-				bson.M{"$sort": bson.M{"_id.account": 1, "_id.commodity": 1}}, bson.M{"$limit": 5001},
-				bson.M{"$replaceWith": bson.M{"kind": "balance", "index": i, "data": "$$ROOT"}},
-			}})
-		}
-		if window.from != "" {
-			arrays = append(arrays, "$months")
-			facets = append(facets, bson.E{Key: "months", Value: bson.A{
-				bson.M{"$match": bson.M{"status": "posted", "date": bson.M{"$gte": window.from, "$lte": window.to}}},
-				bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:(?!estimated)"}}},
-				bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
-				bson.M{"$limit": 5001}, bson.M{"$replaceWith": bson.M{"kind": "month", "data": "$$ROOT"}},
-			}})
-		}
-		match := bson.M{"user_id": p.UserID}
-		if !includeHead {
-			match["status"] = "posted"
-		}
-		pipeline := bson.A{bson.M{"$match": match}, bson.M{"$facet": facets}, bson.M{"$project": bson.M{"_id": 0, "events": bson.M{"$concatArrays": arrays}}}, bson.M{"$unwind": "$events"}, bson.M{"$replaceWith": "$events"}}
-		cur, err := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(250000))
+		const combinedSQL = `WITH source AS MATERIALIZED (
+ SELECT * FROM journal WHERE user_id=@user AND (@head OR status='posted')
+ ), entries AS (
+ SELECT 'entry'::text AS kind,0 AS index,to_jsonb(j) AS data FROM source j WHERE status='posted' ORDER BY seq LIMIT 250001
+ ), heads AS (
+ SELECT 'head'::text AS kind,0 AS index,to_jsonb(j)||jsonb_build_object('tags',COALESCE(t.tags,j.tags)) AS data
+ FROM (SELECT * FROM source WHERE @head ORDER BY seq DESC LIMIT 2) j ` + entryTagJoin + `
+ ), balances AS (
+ SELECT (d.i-1)::int AS index,p->>'account' AS account,p->'amount'->>'c' AS commodity,SUM(COALESCE(p->'amount'->>'v','0')::numeric) AS amount
+ FROM source j CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+ JOIN unnest(@dates::text[]) WITH ORDINALITY d(date,i) ON j.date<=d.date WHERE j.status='posted'
+ GROUP BY d.i,p->>'account',p->'amount'->>'c'
+ ), ranked_balances AS (
+ SELECT *,row_number() OVER (PARTITION BY index ORDER BY account,commodity) AS n FROM balances
+ ), month_groups AS (
+ SELECT j.date,p->>'account' AS account,p->'amount'->>'c' AS commodity,p->'price'->>'c' AS price_commodity,
+ (p->'price'->>'v')::numeric AS price_value,SUM(COALESCE(p->'amount'->>'v','0')::numeric) AS amount
+ FROM source j CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+ WHERE @from<>'' AND j.status='posted' AND j.date>=@from AND j.date<=@to AND starts_with(p->>'account','expenses:') AND NOT starts_with(p->>'account','expenses:estimated')
+ GROUP BY j.date,p->>'account',p->'amount'->>'c',p->'price'->>'c',(p->'price'->>'v')::numeric LIMIT 5001
+ ) SELECT kind,index,data FROM (SELECT kind,index,data FROM entries UNION ALL SELECT kind,index,data FROM heads
+ UNION ALL SELECT 'balance',index,jsonb_build_object('_id',jsonb_build_object('account',account,'commodity',commodity),'amount',amount::text) FROM ranked_balances WHERE n<=5001
+ UNION ALL SELECT 'month',0,jsonb_build_object('_id',jsonb_build_object('date',date,'account',account,'commodity',commodity,'price',CASE WHEN price_value IS NULL AND price_commodity IS NULL THEN NULL ELSE jsonb_build_object('v',price_value::text,'c',price_commodity) END),'amount',amount::text) FROM month_groups) frames ORDER BY kind,index,CASE WHEN kind='entry' THEN (data->>'seq')::bigint END ASC,CASE WHEN kind='head' THEN (data->>'seq')::bigint END DESC`
+		cur, err := db.Query(ctx, combinedSQL, pgx.NamedArgs{"user": p.UserID, "head": includeHead, "dates": dates, "from": window.from, "to": window.to})
 		if err != nil {
 			return combinedJournal{}, err
 		}
-		defer cur.Close(ctx)
+		defer cur.Close()
 		out := combinedJournal{balances: make([][]rawBalance, len(dates))}
 		size := 0
-		for cur.Next(ctx) {
+		for cur.Next() {
 			var frame struct {
-				Kind  string   `bson:"kind"`
-				Index int      `bson:"index"`
-				Data  bson.Raw `bson:"data"`
+				Kind  string
+				Index int
+				Data  json.RawMessage
 			}
-			if err := cur.Decode(&frame); err != nil {
+			if err := cur.Scan(&frame.Kind, &frame.Index, &frame.Data); err != nil {
 				return combinedJournal{}, err
 			}
 			switch frame.Kind {
 			case "head":
 				var head Entry
-				if err := bson.Unmarshal(frame.Data, &head); err != nil {
+				if err := json.Unmarshal(frame.Data, &head); err != nil {
 					return combinedJournal{}, err
 				}
+				head.UserID = p.UserID
 				if out.head == nil {
 					out.head = &head
 				}
@@ -182,10 +163,10 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 				if size > 32<<20 || len(out.entries) >= 250000 {
 					return combinedJournal{}, errors.New("combined journal exceeds cache limit")
 				}
-				out.entries = append(out.entries, append(bson.Raw(nil), frame.Data...))
+				out.entries = append(out.entries, append(json.RawMessage(nil), frame.Data...))
 			case "month":
 				var row JournalMonthRow
-				if err := bson.Unmarshal(frame.Data, &row); err != nil {
+				if err := json.Unmarshal(frame.Data, &row); err != nil {
 					return combinedJournal{}, err
 				}
 				out.months = append(out.months, row)
@@ -194,7 +175,7 @@ func (r *MongoRepository) combinedJournal(ctx context.Context, p principal.Princ
 					return combinedJournal{}, errors.New("invalid balance series index")
 				}
 				var row rawBalance
-				if err := bson.Unmarshal(frame.Data, &row); err != nil {
+				if err := json.Unmarshal(frame.Data, &row); err != nil {
 					return combinedJournal{}, err
 				}
 				out.balances[frame.Index] = append(out.balances[frame.Index], row)

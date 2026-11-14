@@ -142,7 +142,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	if err != nil || reader.calls.Load() != 3 {
 		t.Fatalf("parameter override must use a separate snapshot: %v, builds=%d", err, reader.calls.Load())
 	}
-	bookRepo := ledger.NewMongoRepository(db)
+	bookRepo := ledger.NewPostgresRepository(pgtest.New(t))
 	if err := bookRepo.Init(ctx, p); err != nil {
 		t.Fatal(err)
 	}

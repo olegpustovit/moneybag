@@ -255,7 +255,7 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 	if limit < 1 || limit > 200 {
 		return Page{}, fmt.Errorf("limit must be 1..200")
 	}
-	const listSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND (@cursor<=0 OR seq<@cursor)
+	const listSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND (@cursor::bigint<=0 OR seq<@cursor)
  AND (@tool='' OR tool=@tool) AND (@target='' OR target_id=@target) AND (@actor='' OR actor_id=@actor)
  AND (@from::timestamptz IS NULL OR at>=@from) AND (@to::timestamptz IS NULL OR at<=@to) ORDER BY seq DESC LIMIT @limit`
 	rows, err := db.Query(ctx, listSQL, pgx.NamedArgs{"user": p.UserID, "cursor": in.Cursor, "tool": in.Tool, "target": in.Target, "actor": in.Actor, "from": from, "to": to, "limit": limit + 1})

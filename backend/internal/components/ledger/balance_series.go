@@ -4,15 +4,13 @@ import (
 	"context"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // BalanceSeries computes the same type-grouped, valued balances for several dates in one journal scan.
@@ -80,36 +78,35 @@ func (s *Service) balanceSeriesRows(ctx context.Context, p principal.Principal, 
 	}
 	key := fmt.Sprintf("balance-series|%p|%d:%s|%s", db, len(p.UserID), p.UserID, strings.Join(dates, ","))
 	return reqcache.Do(ctx, key, func() ([][]rawBalance, error) {
-		// shortcut: facets are capped at 100 MiB; stream per-date aggregates if grouped output exceeds that limit.
-		facets := bson.D{}
-		for i, date := range dates {
-			facets = append(facets, bson.E{Key: strconv.Itoa(i), Value: bson.A{
-				bson.M{"$match": bson.M{"date": bson.M{"$lte": date}}},
-				bson.M{"$group": bson.M{"_id": bson.M{"account": "$postings.account", "commodity": "$postings.amount.c"}, "amount": bson.M{"$sum": "$postings.amount.v"}}},
-				bson.M{"$sort": bson.M{"_id.account": 1, "_id.commodity": 1}}, bson.M{"$limit": 5001},
-			}})
-		}
-		pipeline := bson.A{
-			bson.M{"$match": bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$lte": dates[len(dates)-1]}}},
-			bson.M{"$unwind": "$postings"}, bson.M{"$project": bson.M{"date": 1, "postings.account": 1, "postings.amount": 1}},
-			bson.M{"$facet": facets}, bson.M{"$project": bson.M{"facets": bson.M{"$objectToArray": "$$ROOT"}}},
-			bson.M{"$unwind": "$facets"}, bson.M{"$unwind": "$facets.v"},
-			bson.M{"$project": bson.M{"index": bson.M{"$toInt": "$facets.k"}, "_id": "$facets.v._id", "amount": "$facets.v.amount"}},
-		}
-		cur, err := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(5001))
+		const seriesSQL = `WITH grouped AS (
+ SELECT (d.i-1)::int AS index,p->>'account' AS account,p->'amount'->>'c' AS commodity,SUM(COALESCE(p->'amount'->>'v','0')::numeric) AS amount
+ FROM journal j CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+ JOIN unnest(@dates::text[]) WITH ORDINALITY d(date,i) ON j.date<=d.date
+ WHERE j.user_id=@user AND j.status='posted' AND j.date<=@last GROUP BY d.i,p->>'account',p->'amount'->>'c'
+ ), ranked AS (SELECT *,row_number() OVER (PARTITION BY index ORDER BY account,commodity) AS n FROM grouped)
+ SELECT index,account,commodity,amount FROM ranked WHERE n<=5001 ORDER BY index,account,commodity`
+		cur, err := db.Query(ctx, seriesSQL, pgx.NamedArgs{"dates": dates, "last": dates[len(dates)-1], "user": p.UserID})
 		if err != nil {
 			return nil, err
 		}
-		defer cur.Close(ctx)
+		defer cur.Close()
 		var rows []struct {
-			Index int `bson:"index"`
-			ID    struct {
-				Account   string `bson:"account"`
-				Commodity string `bson:"commodity"`
-			} `bson:"_id"`
-			Amount Decimal `bson:"amount"`
+			Index  int
+			ID     struct{ Account, Commodity string }
+			Amount Decimal
 		}
-		if err := cur.All(ctx, &rows); err != nil {
+		for cur.Next() {
+			var row struct {
+				Index  int
+				ID     struct{ Account, Commodity string }
+				Amount Decimal
+			}
+			if err := cur.Scan(&row.Index, &row.ID.Account, &row.ID.Commodity, &row.Amount); err != nil {
+				return nil, err
+			}
+			rows = append(rows, row)
+		}
+		if err := cur.Err(); err != nil {
 			return nil, err
 		}
 		perDate := make([][]rawBalance, len(dates))
@@ -117,7 +114,9 @@ func (s *Service) balanceSeriesRows(ctx context.Context, p principal.Principal, 
 			if row.Index < 0 || row.Index >= len(dates) {
 				return nil, fmt.Errorf("invalid balance series index")
 			}
-			perDate[row.Index] = append(perDate[row.Index], rawBalance{ID: row.ID, Amount: row.Amount})
+			value := rawBalance{Amount: row.Amount}
+			value.ID.Account, value.ID.Commodity = row.ID.Account, row.ID.Commodity
+			perDate[row.Index] = append(perDate[row.Index], value)
 		}
 		return perDate, nil
 	})

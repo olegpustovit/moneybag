@@ -5,15 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
 	"sort"
 	"strings"
@@ -21,25 +20,25 @@ import (
 )
 
 type Assertion struct {
-	ID      string         `json:"id" bson:"_id"`
-	UserID  string         `json:"-" bson:"user_id"`
-	Account string         `json:"account" bson:"account"`
-	Date    string         `json:"date" bson:"date"`
-	Amount  ledger.Amount  `json:"amount" bson:"amount"`
-	Source  string         `json:"source" bson:"source"`
-	OK      bool           `json:"ok" bson:"ok"`
-	Diff    ledger.Decimal `json:"diff" bson:"diff"`
+	ID      string         `json:"id" bson:"_id" db:"id"`
+	UserID  string         `json:"-" bson:"user_id" db:"user_id"`
+	Account string         `json:"account" bson:"account" db:"account"`
+	Date    string         `json:"date" bson:"date" db:"date"`
+	Amount  ledger.Amount  `json:"amount" bson:"amount" db:"amount"`
+	Source  string         `json:"source" bson:"source" db:"source"`
+	OK      bool           `json:"ok" bson:"ok" db:"ok"`
+	Diff    ledger.Decimal `json:"diff" bson:"diff" db:"diff"`
 }
 type Discrepancy struct {
-	ID           string        `json:"id" bson:"_id"`
-	UserID       string        `json:"-" bson:"user_id"`
-	AssertionID  string        `json:"assertion_id" bson:"assertion_id"`
-	Account      string        `json:"account" bson:"account"`
-	Diff         ledger.Amount `json:"diff" bson:"diff"`
-	Status       string        `json:"status" bson:"status"`
-	Resolution   string        `json:"resolution,omitempty" bson:"resolution,omitempty"`
-	Reason       string        `json:"reason,omitempty" bson:"reason,omitempty"`
-	AdjustmentID string        `json:"adjustment_id,omitempty" bson:"adjustment_id,omitempty"`
+	ID           string        `json:"id" bson:"_id" db:"id"`
+	UserID       string        `json:"-" bson:"user_id" db:"user_id"`
+	AssertionID  string        `json:"assertion_id" bson:"assertion_id" db:"assertion_id"`
+	Account      string        `json:"account" bson:"account" db:"account"`
+	Diff         ledger.Amount `json:"diff" bson:"diff" db:"diff"`
+	Status       string        `json:"status" bson:"status" db:"status"`
+	Resolution   string        `json:"resolution,omitempty" bson:"resolution,omitempty" db:"resolution"`
+	Reason       string        `json:"reason,omitempty" bson:"reason,omitempty" db:"reason"`
+	AdjustmentID string        `json:"adjustment_id,omitempty" bson:"adjustment_id,omitempty" db:"adjustment_id"`
 }
 type AssertInput struct {
 	Account string        `json:"account"`
@@ -72,15 +71,15 @@ type Candidate struct {
 	Entries  []ledger.Entry `json:"entries"`
 	Explains string         `json:"explains"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	ledger *ledger.Service
 	audit  *audit.Service
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, l *ledger.Service, a *audit.Service) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, l *ledger.Service, a *audit.Service) *Service {
 	return &Service{r, l, a}
 }
 func (s *Service) balance(ctx context.Context, p principal.Principal, account, date, commodity string) (ledger.Decimal, error) {
@@ -125,20 +124,20 @@ func (s *Service) Assert(ctx context.Context, p principal.Principal, in AssertIn
 	key := p.UserID + ":" + in.Account + ":" + in.Date + ":" + in.Amount.Commodity
 	assertion := Assertion{ID: key, UserID: p.UserID, Account: in.Account, Date: in.Date, Amount: in.Amount, Source: in.Source, OK: diff.Rat().Sign() == 0, Diff: diff}
 	var old Assertion
-	e = s.repo.db.Collection("balance_assertions").FindOne(ctx, bson.M{"_id": key, "user_id": p.UserID}).Decode(&old)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	old, e = s.Assertion(ctx, p, key)
+	if e != nil && !postgres.IsNotFound(e) {
 		return AssertResult{}, e
 	}
 	_, e = s.audit.Write(ctx, p, "balance_assert", audit.Target{Collection: "balance_assertions", ID: key}, in.Source, old, assertion, func(tx context.Context) error {
-		if _, e := s.repo.db.Collection("balance_assertions").ReplaceOne(tx, bson.M{"_id": key, "user_id": p.UserID}, assertion, options.Replace().SetUpsert(true)); e != nil {
+		if _, e := s.repo.db.Exec(tx, `INSERT INTO balance_assertions(id,user_id,account,date,amount,source,ok,diff) VALUES (@id,@user,@account,@date,@amount,@source,@ok,@diff::numeric) ON CONFLICT(id) DO UPDATE SET account=EXCLUDED.account,date=EXCLUDED.date,amount=EXCLUDED.amount,source=EXCLUDED.source,ok=EXCLUDED.ok,diff=EXCLUDED.diff,archived=false WHERE balance_assertions.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"id": key, "user": p.UserID, "account": assertion.Account, "date": assertion.Date, "amount": assertion.Amount, "source": assertion.Source, "ok": assertion.OK, "diff": assertion.Diff.String()}); e != nil {
 			return e
 		}
 		if assertion.OK {
-			_, e := s.repo.db.Collection("discrepancies").UpdateMany(tx, bson.M{"user_id": p.UserID, "assertion_id": key, "status": "open"}, bson.M{"$set": bson.M{"status": "resolved", "resolution": "balance now matches"}})
+			_, e := s.repo.db.Exec(tx, `UPDATE discrepancies SET status='resolved',resolution='balance now matches' WHERE user_id=@user AND assertion_id=@id AND status='open'`, pgx.NamedArgs{"user": p.UserID, "id": key})
 			return e
 		}
 		d := Discrepancy{ID: key, UserID: p.UserID, AssertionID: key, Account: in.Account, Diff: ledger.Amount{Value: diff, Commodity: in.Amount.Commodity}, Status: "open"}
-		_, e := s.repo.db.Collection("discrepancies").ReplaceOne(tx, bson.M{"_id": key, "user_id": p.UserID}, d, options.Replace().SetUpsert(true))
+		_, e := s.repo.db.Exec(tx, `INSERT INTO discrepancies(id,user_id,assertion_id,account,diff,status) VALUES (@id,@user,@assertion,@account,@diff,@status) ON CONFLICT(id) DO UPDATE SET assertion_id=EXCLUDED.assertion_id,account=EXCLUDED.account,diff=EXCLUDED.diff,status=EXCLUDED.status,resolution='',reason='',adjustment_id='',archived=false WHERE discrepancies.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"id": d.ID, "user": p.UserID, "assertion": d.AssertionID, "account": d.Account, "diff": d.Diff, "status": d.Status})
 		return e
 	})
 	return AssertResult{assertion, assertion.OK, diff}, e
@@ -147,29 +146,21 @@ func (s *Service) Status(ctx context.Context, p principal.Principal, account str
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	f := bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}
-	if account != "" {
-		f["account"] = account
-	}
 	byAccount := map[string]*AccountStatus{}
 	count := 0
-	// Read-only: backdated entries and undos show up after the nightly Verify or an explicit reconcile_verify.
-	cur, e := s.repo.db.Collection("balance_assertions").Aggregate(ctx, bson.A{
-		bson.M{"$match": f},
-		bson.M{"$sort": bson.D{{Key: "ok", Value: -1}, {Key: "date", Value: -1}}},
-		bson.M{"$limit": 5001},
-		bson.M{"$group": bson.M{"_id": "$account", "last_ok": bson.M{"$first": bson.M{"$cond": bson.A{"$ok", "$date", ""}}}, "count": bson.M{"$sum": 1}}},
-	}, options.Aggregate().SetBatchSize(5001))
+	args := pgx.NamedArgs{"user": p.UserID, "account": account}
+	// Read-only: backdated entries appear after Verify or an explicit reconcile_verify.
+	cur, e := s.repo.db.Query(ctx, `WITH bounded AS (SELECT account,ok,date FROM balance_assertions WHERE user_id=@user AND NOT archived AND (@account='' OR account=@account) ORDER BY ok DESC,date DESC LIMIT 5001)
+ SELECT account,COALESCE(MAX(date) FILTER (WHERE ok),'') AS last_ok,count(*) AS count FROM bounded GROUP BY account`, args)
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	var assertions []struct {
-		Account string `bson:"_id"`
-		LastOK  string `bson:"last_ok"`
-		Count   int    `bson:"count"`
-	}
-	if e = cur.All(ctx, &assertions); e != nil {
+	assertions, e := pgx.CollectRows(cur, pgx.RowToStructByName[struct {
+		Account string
+		LastOK  string `db:"last_ok"`
+		Count   int
+	}])
+	if e != nil {
 		return nil, e
 	}
 	for _, a := range assertions {
@@ -179,14 +170,12 @@ func (s *Service) Status(ctx context.Context, p principal.Principal, account str
 	if count > 5000 {
 		return nil, fmt.Errorf("too many assertions; select one account")
 	}
-	f["status"] = "open"
-	cur, e = s.repo.db.Collection("discrepancies").Find(ctx, f, options.Find().SetLimit(5001).SetBatchSize(5001))
+	cur, e = s.repo.db.Query(ctx, `SELECT id,user_id,assertion_id,account,diff,status,resolution,reason,adjustment_id FROM discrepancies WHERE user_id=@user AND NOT archived AND status='open' AND (@account='' OR account=@account) LIMIT 5001`, args)
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	var ds []Discrepancy
-	if e = cur.All(ctx, &ds); e != nil {
+	ds, e := pgx.CollectRows(cur, pgx.RowToStructByName[Discrepancy])
+	if e != nil {
 		return nil, e
 	}
 	if len(ds) > 5000 {
@@ -213,7 +202,9 @@ func (s *Service) OpenCount(ctx context.Context, p principal.Principal) (int64, 
 	if err := p.Require("ledger:read"); err != nil {
 		return 0, err
 	}
-	return s.repo.db.Collection("discrepancies").CountDocuments(ctx, bson.M{"user_id": p.UserID, "status": "open", "archived": bson.M{"$ne": true}})
+	var n int64
+	err := s.repo.db.QueryRow(ctx, `SELECT count(*) FROM discrepancies WHERE user_id=@user AND status='open' AND NOT archived`, pgx.NamedArgs{"user": p.UserID}).Scan(&n)
+	return n, err
 }
 
 func (s *Service) discrepancy(ctx context.Context, p principal.Principal, id string) (Discrepancy, Assertion, error) {
@@ -221,15 +212,19 @@ func (s *Service) discrepancy(ctx context.Context, p principal.Principal, id str
 		return Discrepancy{}, Assertion{}, e
 	}
 	var d Discrepancy
-	e := s.repo.db.Collection("discrepancies").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID}).Decode(&d)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.db.Query(ctx, `SELECT id,user_id,assertion_id,account,diff,status,resolution,reason,adjustment_id FROM discrepancies WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": id, "user": p.UserID})
+	if e != nil {
+		return d, Assertion{}, e
+	}
+	d, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[Discrepancy])
+	if postgres.IsNotFound(e) {
 		return d, Assertion{}, principal.ErrNotFound
 	}
 	if e != nil {
 		return d, Assertion{}, e
 	}
 	var a Assertion
-	e = s.repo.db.Collection("balance_assertions").FindOne(ctx, bson.M{"_id": d.AssertionID, "user_id": p.UserID}).Decode(&a)
+	a, e = s.Assertion(ctx, p, d.AssertionID)
 	return d, a, e
 }
 func (s *Service) Resolve(ctx context.Context, p principal.Principal, in ResolveInput) (ResolveResult, error) {
@@ -305,7 +300,7 @@ func (s *Service) Resolve(ctx context.Context, p principal.Principal, in Resolve
 				}
 				if d.AdjustmentID == "" {
 					d.AdjustmentID = ulid.Make().String()
-					if _, e = s.repo.db.Collection("discrepancies").UpdateOne(tx, bson.M{"_id": d.ID, "user_id": p.UserID}, bson.M{"$set": bson.M{"adjustment_id": d.AdjustmentID}}); e != nil {
+					if _, e = s.repo.db.Exec(tx, `UPDATE discrepancies SET adjustment_id=@adjustment WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"adjustment": d.AdjustmentID, "id": d.ID, "user": p.UserID}); e != nil {
 						return e
 					}
 				}
@@ -335,12 +330,12 @@ func (s *Service) Resolve(ctx context.Context, p principal.Principal, in Resolve
 				if diff.Rat().Sign() != 0 {
 					return fmt.Errorf("balance still differs after adjustment")
 				}
-				if _, e = s.repo.db.Collection("balance_assertions").UpdateOne(ctx, bson.M{"_id": a.ID, "user_id": p.UserID}, bson.M{"$set": bson.M{"ok": true, "diff": diff}}); e != nil {
+				if _, e = s.repo.db.Exec(ctx, `UPDATE balance_assertions SET ok=true,diff=@diff::numeric WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"diff": diff.String(), "id": a.ID, "user": p.UserID}); e != nil {
 					return e
 				}
 			}
-			r, e := s.repo.db.Collection("discrepancies").ReplaceOne(ctx, bson.M{"_id": d.ID, "user_id": p.UserID, "status": "open"}, d)
-			if e == nil && r.MatchedCount != 1 {
+			r, e := s.repo.db.Exec(ctx, `UPDATE discrepancies SET assertion_id=@assertion,account=@account,diff=@diff,status=@status,resolution=@resolution,reason=@reason,adjustment_id=@adjustment,archived=false WHERE id=@id AND user_id=@user AND status='open'`, pgx.NamedArgs{"assertion": d.AssertionID, "account": d.Account, "diff": d.Diff, "status": d.Status, "resolution": d.Resolution, "reason": d.Reason, "adjustment": d.AdjustmentID, "id": d.ID, "user": p.UserID})
+			if e == nil && r.RowsAffected() != 1 {
 				return principal.ErrConflict
 			}
 			return e
@@ -433,36 +428,31 @@ func (s *Service) verify(ctx context.Context, p principal.Principal, account str
 	if e := p.Require("ledger:write"); e != nil {
 		return e
 	}
-	f := bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}
-	if account != "" {
-		f["account"] = account
-	}
-	cur, e := s.repo.db.Collection("balance_assertions").Aggregate(ctx, bson.A{
-		bson.M{"$match": f},
-		bson.M{"$lookup": bson.M{
-			"from": "journal", "localField": "account", "foreignField": "postings.account", "let": bson.M{"account": "$account", "date": bson.M{"$cond": bson.A{bson.M{"$eq": bson.A{"$date", ""}}, time.Now().Format("2006-01-02"), "$date"}}},
-			"pipeline": bson.A{
-				bson.M{"$match": bson.M{"user_id": p.UserID, "status": "posted", "$expr": bson.M{"$lte": bson.A{"$date", "$$date"}}}},
-				bson.M{"$unwind": "$postings"},
-				bson.M{"$match": bson.M{"$expr": bson.M{"$eq": bson.A{"$postings.account", "$$account"}}}},
-				bson.M{"$group": bson.M{"_id": "$postings.amount.c", "amount": bson.M{"$sum": "$postings.amount.v"}}},
-				bson.M{"$limit": 5001},
-			}, "as": "balances",
-		}},
-	}, options.Aggregate().SetBatchSize(5001))
+	cur, e := s.repo.db.Query(ctx, `SELECT a.id,a.user_id,a.account,a.date,a.amount,a.source,a.ok,a.diff::text,
+ COALESCE((SELECT jsonb_agg(jsonb_build_object('commodity',b.commodity,'amount',b.amount)) FROM (
+ SELECT p->'amount'->>'c' AS commodity,SUM((p->'amount'->>'v')::numeric)::text AS amount
+ FROM journal j CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+ WHERE j.user_id=@user AND j.status='posted' AND j.date<=CASE WHEN a.date='' THEN @today ELSE a.date END AND p->>'account'=a.account
+ GROUP BY p->'amount'->>'c' LIMIT 5001) b),'[]'::jsonb)
+ FROM balance_assertions a WHERE a.user_id=@user AND NOT a.archived AND (@account='' OR a.account=@account)`, pgx.NamedArgs{"user": p.UserID, "account": account, "today": time.Now().Format("2006-01-02")})
 	if e != nil {
 		return e
 	}
-	defer cur.Close(ctx)
-	for cur.Next(ctx) {
+	defer cur.Close()
+	for cur.Next() {
 		var row struct {
-			Assertion `bson:",inline"`
-			Balances  []struct {
-				Commodity string         `bson:"_id"`
-				Amount    ledger.Decimal `bson:"amount"`
-			} `bson:"balances"`
+			Assertion
+			Balances []struct {
+				Commodity string         `json:"commodity"`
+				Amount    ledger.Decimal `json:"amount"`
+			}
 		}
-		if e = cur.Decode(&row); e != nil {
+		var raw []byte
+		stored := &row.Assertion
+		if e = cur.Scan(&stored.ID, &stored.UserID, &stored.Account, &stored.Date, &stored.Amount, &stored.Source, &stored.OK, &stored.Diff, &raw); e != nil {
+			return e
+		}
+		if e = json.Unmarshal(raw, &row.Balances); e != nil {
 			return e
 		}
 		a := row.Assertion

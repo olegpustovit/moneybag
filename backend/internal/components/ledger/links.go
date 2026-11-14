@@ -3,9 +3,8 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // LinkedEntries follows corrections without changing immutable journal documents.
@@ -22,15 +21,18 @@ func (s *Service) LinkedEntries(ctx context.Context, p principal.Principal, id s
 	seen := map[string]bool{id: true}
 	frontier := []string{id}
 	for len(frontier) > 0 {
-		cur, e := db.Collection("journal").Find(ctx, bson.M{"user_id": p.UserID, "status": "posted", "links": bson.M{"$elemMatch": bson.M{"rel": bson.M{"$in": bson.A{"reverses", "reclassifies"}}, "id": bson.M{"$in": frontier}}}}, options.Find().SetLimit(1001))
+		const linksSQL = `SELECT ` + entryColumns + ` FROM journal j WHERE user_id=@user AND status='posted'
+ AND EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(NULLIF(links,'null'::jsonb),'[]'::jsonb)) link WHERE link->>'rel' IN ('reverses','reclassifies') AND link->>'id'=ANY(@frontier::text[])) LIMIT 1001`
+		cur, e := db.Query(ctx, linksSQL, pgx.NamedArgs{"user": p.UserID, "frontier": frontier})
 		if e != nil {
 			return nil, e
 		}
 		next := []string{}
-		for cur.Next(ctx) {
-			var entry Entry
-			if e = cur.Decode(&entry); e != nil {
-				cur.Close(ctx)
+		for cur.Next() {
+			entry, err := pgx.RowToStructByName[Entry](cur)
+			if err != nil {
+				e = err
+				cur.Close()
 				return nil, e
 			}
 			if seen[entry.ID] {
@@ -40,12 +42,12 @@ func (s *Service) LinkedEntries(ctx context.Context, p principal.Principal, id s
 			out = append(out, entry)
 			next = append(next, entry.ID)
 			if len(out) > 1000 {
-				cur.Close(ctx)
+				cur.Close()
 				return nil, fmt.Errorf("correction history exceeds 1000 entries")
 			}
 		}
 		e = cur.Err()
-		cur.Close(ctx)
+		cur.Close()
 		if e != nil {
 			return nil, e
 		}

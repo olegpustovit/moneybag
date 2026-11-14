@@ -2,26 +2,29 @@ package ledger
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"regexp"
 	"slices"
 	"strings"
 )
 
-type MongoRepository struct{ DB *mongo.Database }
+type PostgresRepository struct{ DB *pgxpool.Pool }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func (r *MongoRepository) db(p principal.Principal) (*mongo.Database, error) {
-	return mongodb.Shared(r.DB, p)
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func (r *PostgresRepository) db(p principal.Principal) (*pgxpool.Pool, error) {
+	if err := p.Valid(); err != nil {
+		return nil, err
+	}
+	return r.DB, nil
 }
-func (r *MongoRepository) Account(ctx context.Context, p principal.Principal, id string) (Account, error) {
+func (r *PostgresRepository) Account(ctx context.Context, p principal.Principal, id string) (Account, error) {
 	db, e := r.db(p)
 	if e != nil {
 		return Account{}, e
@@ -36,161 +39,112 @@ func (r *MongoRepository) Account(ctx context.Context, p principal.Principal, id
 		}
 		return all[i], nil
 	}
-	var a Account
-	e = db.Collection("accounts").FindOne(ctx, bson.M{"user_id": p.UserID, "id": id}).Decode(&a)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := db.Query(ctx, `SELECT * FROM accounts WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": id})
+	if e != nil {
+		return Account{}, e
+	}
+	a, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Account])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = principal.ErrNotFound
 	}
 	return a, e
 }
-func (r *MongoRepository) Entry(ctx context.Context, p principal.Principal, id string) (Entry, error) {
+func (r *PostgresRepository) Entry(ctx context.Context, p principal.Principal, id string) (Entry, error) {
 	db, e := r.db(p)
 	if e != nil {
 		return Entry{}, e
 	}
-	var a Entry
-	e = db.Collection("journal").FindOne(ctx, bson.M{"user_id": p.UserID, "_id": id}).Decode(&a)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := db.Query(ctx, `SELECT j.user_id,j.id,j.seq,j.date,j.kind,j.payee,j.postings,CASE WHEN t.id IS NULL THEN j.tags ELSE t.tags END AS tags,j.links,j.status,j.actor,j.created_at FROM journal j `+entryTagJoin+` WHERE j.user_id=@user AND j.id=@id`, pgx.NamedArgs{"user": p.UserID, "id": id})
+	if e != nil {
+		return Entry{}, e
+	}
+	entry, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Entry])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = principal.ErrNotFound
 	}
-	if e == nil {
-		var meta struct {
-			Tags []string `bson:"tags"`
-		}
-		err := db.Collection("entry_tags").FindOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}).Decode(&meta)
-		if err == nil {
-			a.Tags = meta.Tags
-		} else if !errors.Is(err, mongo.ErrNoDocuments) {
-			return Entry{}, err
-		}
-	}
-	return a, e
+	return entry, e
 }
-func (r *MongoRepository) insert(ctx context.Context, p principal.Principal, e *Entry) error {
+
+const entryColumns = `j.user_id,j.id,j.seq,j.date,j.kind,j.payee,j.postings,j.tags,j.links,j.status,j.actor,j.created_at`
+const overlaidEntryColumns = `j.user_id,j.id,j.seq,j.date,j.kind,j.payee,j.postings,COALESCE(t.tags,j.tags) AS tags,j.links,j.status,j.actor,j.created_at`
+const entryTagJoin = `LEFT JOIN entry_tags t ON t.id=j.user_id||':'||j.id AND t.user_id=j.user_id`
+const insertEntrySQL = `INSERT INTO journal (user_id,id,seq,date,kind,payee,postings,tags,links,status,actor,created_at)
+ VALUES (@user,@id,@seq,@date,@kind,@payee,COALESCE(@postings::jsonb,'null'::jsonb),@tags,COALESCE(@links::jsonb,'null'::jsonb),@status,@actor,@created)`
+
+func (r *PostgresRepository) insert(ctx context.Context, p principal.Principal, e *Entry) error {
 	db, err := r.db(p)
 	if err != nil {
 		return err
 	}
-	e.Seq, err = mongodb.Next(ctx, db, p.UserID+":journal")
+	e.Seq, err = postgres.Next(ctx, db, p.UserID+":journal")
 	if err != nil {
 		return err
 	}
-	if _, err = db.Collection("journal").InsertOne(ctx, e); err != nil {
+	if _, err = db.Exec(ctx, insertEntrySQL, pgx.NamedArgs{"user": e.UserID, "id": e.ID, "seq": e.Seq, "date": e.Date, "kind": e.Kind, "payee": e.Payee, "postings": e.Postings, "tags": e.Tags, "links": e.Links, "status": e.Status, "actor": e.Actor, "created": e.CreatedAt}); err != nil {
 		return err
 	}
-	_, err = db.Collection("balances").UpdateMany(ctx, bson.M{"user_id": p.UserID}, bson.M{"$set": bson.M{"dirty": true}})
+	_, err = db.Exec(ctx, `UPDATE balances SET dirty=true WHERE user_id=@user`, pgx.NamedArgs{"user": p.UserID})
 	return err
 }
-func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in EntriesInput) (EntriesPage, error) {
+func (r *PostgresRepository) Entries(ctx context.Context, p principal.Principal, in EntriesInput) (EntriesPage, error) {
 	db, e := r.db(p)
 	if e != nil {
 		return EntriesPage{}, e
 	}
-	f := bson.M{"user_id": p.UserID}
-	dates := bson.M{}
-	if in.From != "" {
-		dates["$gte"] = in.From
-	}
-	if in.To != "" {
-		dates["$lte"] = in.To
-	}
-	if len(dates) > 0 {
-		f["date"] = dates
-	}
-	if in.Cursor > 0 && in.Sort == "" {
-		f["seq"] = bson.M{"$lt": in.Cursor}
-	}
-	if in.Cursor > 0 && (in.Sort == "date" || in.Sort == "-date") {
-		op := "$gt"
-		if in.Sort == "-date" {
-			op = "$lt"
-		}
-		f["$or"] = bson.A{bson.M{"date": bson.M{op: in.CursorDate}}, bson.M{"date": in.CursorDate, "seq": bson.M{op: in.Cursor}}}
-	}
-	for k, v := range map[string]string{"postings.account": in.Account, "kind": in.Kind, "status": in.Status} {
-		if v != "" {
-			f[k] = v
-		}
-	}
-	if len(in.Accounts) > 0 {
-		f["postings.account"] = bson.M{"$in": in.Accounts}
-	}
+	excluded := []string{}
 	if in.Effective {
 		reversed, e := r.reversed(ctx, p)
 		if e != nil {
 			return EntriesPage{}, e
 		}
-		ids := make([]string, 0, len(reversed))
 		for id := range reversed {
-			ids = append(ids, id)
+			excluded = append(excluded, id)
 		}
-		f["_id"] = bson.M{"$nin": ids}
-		if in.Kind == "" {
-			f["kind"] = bson.M{"$ne": "reversal"}
-		}
-	}
-	if in.MatchIDs != nil {
-		op := "$in"
-		if in.ExcludeIDs {
-			op = "$nin"
-		}
-		f["$and"] = bson.A{bson.M{"_id": bson.M{op: in.MatchIDs}}}
-	}
-
-	if in.Text != "" {
-		f["payee"] = bson.M{"$regex": regexp.QuoteMeta(in.Text), "$options": "i"}
 	}
 	limit := in.Limit
 	if limit == 0 {
 		limit = 100
 	}
-	overlay := entryTagOverlay(p)
-	sort := bson.D{{Key: "seq", Value: -1}}
-	if in.Sort == "date" || in.Sort == "-date" {
-		direction := 1
-		if in.Sort == "-date" {
-			direction = -1
-		}
-		sort = bson.D{{Key: "date", Value: direction}, {Key: "seq", Value: direction}}
+	var cursorAmount *Decimal
+	if in.CursorAmount != "" && in.CursorAmount != "null" {
+		value, _ := ParseDecimal(in.CursorAmount)
+		cursorAmount = &value
 	}
-	pipeline := bson.A{bson.M{"$match": f}}
-	amountSort := in.Sort == "amount" || in.Sort == "-amount"
-	if amountSort {
-		postings := any("$postings")
-		if in.Account != "" {
-			postings = bson.M{"$filter": bson.M{"input": "$postings", "as": "posting", "cond": bson.M{"$eq": bson.A{"$$posting.account", in.Account}}}}
-		} else if len(in.Accounts) > 0 {
-			postings = bson.M{"$filter": bson.M{"input": "$postings", "as": "posting", "cond": bson.M{"$in": bson.A{"$$posting.account", in.Accounts}}}}
-		}
-		pipeline = append(pipeline, bson.M{"$set": bson.M{"_sort_posting": bson.M{"$arrayElemAt": bson.A{postings, 0}}}}, bson.M{"$set": bson.M{"_sort_amount": bson.M{"$ifNull": bson.A{"$_sort_posting.amount.v", nil}}}})
-		direction, op := 1, "$gt"
-		if in.Sort == "-amount" {
-			direction, op = -1, "$lt"
-		}
-		sort = bson.D{{Key: "_sort_amount", Value: direction}, {Key: "seq", Value: direction}}
-		if in.Cursor > 0 {
-			var amount any
-			if in.CursorAmount != "null" {
-				value, _ := ParseDecimal(in.CursorAmount)
-				amount = value.Decimal128
-			}
-			pipeline = append(pipeline, bson.M{"$match": bson.M{"$expr": bson.M{"$or": bson.A{bson.M{op: bson.A{"$_sort_amount", amount}}, bson.M{"$and": bson.A{bson.M{"$eq": bson.A{"$_sort_amount", amount}}, bson.M{op: bson.A{"$seq", in.Cursor}}}}}}}})
-		}
+	const entriesSQL = `WITH filtered AS (
+ SELECT j.*,COALESCE(t.tags,j.tags) AS current_tags,
+ CASE WHEN @sort IN ('amount','-amount') THEN (SELECT (p->'amount'->>'v')::numeric FROM jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+  WHERE (@account='' AND cardinality(@accounts::text[])=0) OR p->>'account'=@account OR p->>'account'=ANY(@accounts::text[]) LIMIT 1) END AS sort_amount
+ FROM journal j ` + entryTagJoin + ` WHERE j.user_id=@user AND (@from='' OR j.date>=@from) AND (@to='' OR j.date<=@to)
+ AND (@kind='' OR j.kind=@kind) AND (@status='' OR j.status=@status)
+ AND (@account='' OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p WHERE p->>'account'=@account))
+ AND (cardinality(@accounts::text[])=0 OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p WHERE p->>'account'=ANY(@accounts::text[])))
+ AND (NOT @effective OR (NOT (j.id=ANY(@excluded::text[])) AND (@kind<>'' OR j.kind IS DISTINCT FROM 'reversal')))
+ AND (@matches::text[] IS NULL OR ((j.id=ANY(@matches::text[]))<>@exclude_matches))
+ AND (@text='' OR j.payee COLLATE "pg_c_utf8" ~* @text)
+ AND (@tag='' OR @tag=ANY(COALESCE(t.tags,j.tags)))
+ ) SELECT j.user_id,j.id,j.seq,j.date,j.kind,j.payee,j.postings,j.current_tags AS tags,j.links,j.status,j.actor,j.created_at FROM filtered j
+ WHERE @cursor::bigint<=0 OR
+ (@sort='' AND seq<@cursor) OR
+ (@sort='date' AND (date,seq)>(@cursor_date,@cursor)) OR
+ (@sort='-date' AND (date,seq)<(@cursor_date,@cursor)) OR
+ (@sort='amount' AND ((@cursor_amount::numeric IS NULL AND (sort_amount IS NOT NULL OR (sort_amount IS NULL AND seq>@cursor)))
+ OR (@cursor_amount::numeric IS NOT NULL AND (sort_amount>@cursor_amount OR (sort_amount=@cursor_amount AND seq>@cursor))))) OR
+ (@sort='-amount' AND ((@cursor_amount::numeric IS NULL AND sort_amount IS NULL AND seq<@cursor)
+ OR (@cursor_amount::numeric IS NOT NULL AND (sort_amount IS NULL OR sort_amount<@cursor_amount OR (sort_amount=@cursor_amount AND seq<@cursor)))))
+ ORDER BY CASE WHEN @sort='date' THEN date END ASC, CASE WHEN @sort='-date' THEN date END DESC,
+ CASE WHEN @sort='amount' THEN sort_amount END ASC NULLS FIRST, CASE WHEN @sort='-amount' THEN sort_amount END DESC NULLS LAST,
+ CASE WHEN @sort IN ('date','amount') THEN seq END ASC, CASE WHEN @sort NOT IN ('date','amount') THEN seq END DESC LIMIT @limit`
+	accounts := in.Accounts
+	if accounts == nil {
+		accounts = []string{}
 	}
-	page := bson.A{bson.M{"$sort": sort}, bson.M{"$limit": int64(limit + 1)}}
-	if in.Tag != "" {
-		// The tag filter needs the overlay first; otherwise page first so only one page is joined.
-		pipeline = append(append(append(pipeline, overlay...), bson.M{"$match": bson.M{"tags": in.Tag}}), page...)
-	} else {
-		pipeline = append(append(pipeline, page...), overlay...)
-	}
-	cur, e := db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetAllowDiskUse(amountSort))
+	rows, e := db.Query(ctx, entriesSQL, pgx.NamedArgs{"user": p.UserID, "from": in.From, "to": in.To, "kind": in.Kind, "status": in.Status, "account": in.Account, "accounts": accounts, "effective": in.Effective, "excluded": excluded, "matches": in.MatchIDs, "exclude_matches": in.ExcludeIDs, "text": regexp.QuoteMeta(in.Text), "tag": in.Tag, "cursor": in.Cursor, "sort": in.Sort, "cursor_date": in.CursorDate, "cursor_amount": cursorAmount, "limit": limit + 1})
 	if e != nil {
 		return EntriesPage{}, e
 	}
-	defer cur.Close(ctx)
-	out := EntriesPage{Items: []Entry{}}
-	e = cur.All(ctx, &out.Items)
+	entries, e := pgx.CollectRows(rows, pgx.RowToStructByName[Entry])
+	out := EntriesPage{Items: entries}
+	amountSort := in.Sort == "amount" || in.Sort == "-amount"
 	if len(out.Items) > limit {
 		out.Items = out.Items[:limit]
 		out.NextCursor = out.Items[limit-1].Seq
@@ -211,7 +165,7 @@ func (r *MongoRepository) Entries(ctx context.Context, p principal.Principal, in
 }
 
 // reversed returns original entries cancelled by an odd reversal chain.
-func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (map[string]bool, error) {
+func (r *PostgresRepository) reversed(ctx context.Context, p principal.Principal) (map[string]bool, error) {
 	return reqcache.Do(ctx, "reversed|"+p.UserID, func() (map[string]bool, error) {
 		if dates, ok := combinedDates(ctx); ok {
 			combined, err := r.combinedJournal(ctx, p, dates)
@@ -221,18 +175,24 @@ func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (
 					if i%1000 == 0 && ctx.Err() != nil {
 						return nil, ctx.Err()
 					}
-					kind, ok := doc.Lookup("kind").StringValueOK()
-					if !ok || kind != "reversal" {
-						continue
-					}
 					var item struct {
-						ID    string `bson:"_id"`
-						Links []Link `bson:"links"`
+						ID    string          `json:"id"`
+						Kind  string          `json:"kind"`
+						Links json.RawMessage `json:"links"`
 					}
-					if err := bson.Unmarshal(doc, &item); err != nil {
+					if err := json.Unmarshal(doc, &item); err != nil {
 						return nil, err
 					}
-					revs = append(revs, Entry{ID: item.ID, Links: item.Links})
+					if item.Kind != "reversal" {
+						continue
+					}
+					var links []Link
+					if len(item.Links) > 0 {
+						if err := json.Unmarshal(item.Links, &links); err != nil {
+							return nil, err
+						}
+					}
+					revs = append(revs, Entry{ID: item.ID, Links: links})
 				}
 				if result, unique := reversalSet(revs); unique {
 					return result, nil
@@ -245,13 +205,20 @@ func (r *MongoRepository) reversed(ctx context.Context, p principal.Principal) (
 		if err != nil {
 			return nil, err
 		}
-		cur, err := db.Collection("journal").Find(ctx, bson.M{"user_id": p.UserID, "kind": "reversal", "status": "posted"}, options.Find().SetProjection(bson.M{"links": 1}))
+		rows, err := db.Query(ctx, `SELECT id,links FROM journal WHERE user_id=@user AND kind='reversal' AND status='posted'`, pgx.NamedArgs{"user": p.UserID})
 		if err != nil {
 			return nil, err
 		}
-		defer cur.Close(ctx)
+		defer rows.Close()
 		var revs []Entry
-		if err := cur.All(ctx, &revs); err != nil {
+		for rows.Next() {
+			var rev Entry
+			if err := rows.Scan(&rev.ID, &rev.Links); err != nil {
+				return nil, err
+			}
+			revs = append(revs, rev)
+		}
+		if err := rows.Err(); err != nil {
 			return nil, err
 		}
 		result, _ := reversalSet(revs)
@@ -297,11 +264,11 @@ func WithSharedPostedStream(ctx context.Context) context.Context {
 }
 
 // PostedStream reads posted journal entries without paging or joining tags.
-func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principal, from, to string, fn func(Entry) error) error {
+func (r *PostgresRepository) PostedStream(ctx context.Context, p principal.Principal, from, to string, fn func(Entry) error) error {
 	if dates, ok := combinedDates(ctx); ok {
 		combined, err := r.combinedJournal(ctx, p, dates)
 		if err == nil {
-			return streamPostedRaw(ctx, combined.entries, from, to, fn)
+			return streamPostedRaw(ctx, combined.entries, p.UserID, from, to, fn)
 		}
 		if ctx.Err() != nil {
 			return err
@@ -313,26 +280,30 @@ func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principa
 			return err
 		}
 		key := fmt.Sprintf("posted-raw|%p|%d:%s", db, len(p.UserID), p.UserID)
-		raw, err := reqcache.Do(ctx, key, func() ([]bson.Raw, error) {
+		raw, err := reqcache.Do(ctx, key, func() ([]json.RawMessage, error) {
 			cur, err := r.postedCursor(ctx, p, "", "")
 			if err != nil {
 				return nil, err
 			}
-			defer cur.Close(ctx)
-			var rows []bson.Raw
+			defer cur.Close()
+			var rows []json.RawMessage
 			size := 0
-			for cur.Next(ctx) {
-				size += len(cur.Current)
+			for cur.Next() {
+				var doc json.RawMessage
+				if err := cur.Scan(&doc); err != nil {
+					return nil, err
+				}
+				size += len(doc)
 				// shortcut: cache at most 32 MiB or 250,000 entries; fall back to streaming for larger journals.
 				if size > 32<<20 || len(rows) >= 250000 {
 					return nil, errors.New("shared journal exceeds cache limit")
 				}
-				rows = append(rows, append(bson.Raw(nil), cur.Current...))
+				rows = append(rows, append(json.RawMessage(nil), doc...))
 			}
 			return rows, cur.Err()
 		})
 		if err == nil {
-			return streamPostedRaw(ctx, raw, from, to, fn)
+			return streamPostedRaw(ctx, raw, p.UserID, from, to, fn)
 		}
 		if ctx.Err() != nil {
 			return err
@@ -342,12 +313,17 @@ func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principa
 	if err != nil {
 		return err
 	}
-	defer cur.Close(ctx)
-	for cur.Next(ctx) {
-		var entry Entry
-		if err := cur.Decode(&entry); err != nil {
+	defer cur.Close()
+	for cur.Next() {
+		var doc json.RawMessage
+		if err := cur.Scan(&doc); err != nil {
 			return err
 		}
+		var entry Entry
+		if err := json.Unmarshal(doc, &entry); err != nil {
+			return err
+		}
+		entry.UserID = p.UserID
 		if err := fn(entry); err != nil {
 			return err
 		}
@@ -355,21 +331,28 @@ func (r *MongoRepository) PostedStream(ctx context.Context, p principal.Principa
 	return cur.Err()
 }
 
-func streamPostedRaw(ctx context.Context, raw []bson.Raw, from, to string, fn func(Entry) error) error {
+func streamPostedRaw(ctx context.Context, raw []json.RawMessage, user, from, to string, fn func(Entry) error) error {
 	for _, doc := range raw {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if from != "" || to != "" {
-			date, ok := doc.Lookup("date").StringValueOK()
-			if !ok || from != "" && date < from || to != "" && date > to {
+			var header struct {
+				Date string `json:"date"`
+			}
+			if err := json.Unmarshal(doc, &header); err != nil {
+				return err
+			}
+			date := header.Date
+			if from != "" && date < from || to != "" && date > to {
 				continue
 			}
 		}
 		var entry Entry
-		if err := bson.Unmarshal(doc, &entry); err != nil {
+		if err := json.Unmarshal(doc, &entry); err != nil {
 			return err
 		}
+		entry.UserID = user
 		if err := fn(entry); err != nil {
 			return err
 		}
@@ -377,53 +360,40 @@ func streamPostedRaw(ctx context.Context, raw []bson.Raw, from, to string, fn fu
 	return nil
 }
 
-func (r *MongoRepository) postedCursor(ctx context.Context, p principal.Principal, from, to string) (*mongo.Cursor, error) {
+func (r *PostgresRepository) postedCursor(ctx context.Context, p principal.Principal, from, to string) (pgx.Rows, error) {
 	db, err := r.db(p)
 	if err != nil {
 		return nil, err
 	}
-	filter := bson.M{"user_id": p.UserID, "status": "posted"}
-	dates := bson.M{}
-	if from != "" {
-		dates["$gte"] = from
-	}
-	if to != "" {
-		dates["$lte"] = to
-	}
-	if len(dates) > 0 {
-		filter["date"] = dates
-	}
-	pipeline := bson.A{bson.M{"$match": filter}, bson.M{"$project": bson.M{"user_id": 1, "seq": 1, "date": 1, "kind": 1, "payee": 1, "postings": 1, "tags": 1, "links": 1, "status": 1, "actor": 1, "created_at": 1}}}
-	return db.Collection("journal").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(250000))
+	const postedSQL = `SELECT to_jsonb(j) FROM journal j WHERE user_id=@user AND status='posted' AND (@from='' OR date>=@from) AND (@to='' OR date<=@to) ORDER BY seq`
+	return db.Query(ctx, postedSQL, pgx.NamedArgs{"user": p.UserID, "from": from, "to": to})
 }
 
-func (r *MongoRepository) tagOverlays(ctx context.Context, p principal.Principal) (map[string][]string, error) {
+func (r *PostgresRepository) tagOverlays(ctx context.Context, p principal.Principal) (map[string][]string, error) {
 	return reqcache.Do(ctx, "entry-tags|"+p.UserID, func() (map[string][]string, error) {
 		db, err := r.db(p)
 		if err != nil {
 			return nil, err
 		}
-		cur, err := db.Collection("entry_tags").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetProjection(bson.M{"entry_id": 1, "tags": 1}).SetBatchSize(250000))
+		rows, err := db.Query(ctx, `SELECT entry_id,tags FROM entry_tags WHERE user_id=@user`, pgx.NamedArgs{"user": p.UserID})
 		if err != nil {
 			return nil, err
 		}
-		defer cur.Close(ctx)
+		defer rows.Close()
 		tags := map[string][]string{}
-		for cur.Next(ctx) {
-			var item struct {
-				ID   string   `bson:"entry_id"`
-				Tags []string `bson:"tags"`
-			}
-			if err := cur.Decode(&item); err != nil {
+		for rows.Next() {
+			var id string
+			var value []string
+			if err := rows.Scan(&id, &value); err != nil {
 				return nil, err
 			}
-			tags[item.ID] = item.Tags
+			tags[id] = value
 		}
-		return tags, cur.Err()
+		return tags, rows.Err()
 	})
 }
 
-func (r *MongoRepository) Accounts(ctx context.Context, p principal.Principal, in AccountsInput) (AccountsPage, error) {
+func (r *PostgresRepository) Accounts(ctx context.Context, p principal.Principal, in AccountsInput) (AccountsPage, error) {
 	db, e := r.db(p)
 	if e != nil {
 		return AccountsPage{}, e
@@ -446,59 +416,18 @@ func (r *MongoRepository) Accounts(ctx context.Context, p principal.Principal, i
 		}
 		return out, e
 	}
-	f := bson.M{"user_id": p.UserID}
-	if !in.IncludeClosed {
-		f["closed_at"] = bson.M{"$exists": false}
-	}
-	if in.Type != "" {
-		f["type"] = in.Type
-	}
-	if in.Pot != "" {
-		f["pot"] = in.Pot
-	}
-	if in.Cursor != "" {
-		f["id"] = bson.M{"$gt": in.Cursor}
-	}
-	cur, e := db.Collection("accounts").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}).SetLimit(int64(limit+1)))
+	const accountsSQL = `SELECT * FROM accounts WHERE user_id=@user AND (@closed OR closed_at IS NULL)
+ AND (@type='' OR type=@type) AND (@pot='' OR pot=@pot) AND (@cursor='' OR id>@cursor) ORDER BY id LIMIT @limit`
+	rows, e := db.Query(ctx, accountsSQL, pgx.NamedArgs{"user": p.UserID, "closed": in.IncludeClosed, "type": in.Type, "pot": in.Pot, "cursor": in.Cursor, "limit": limit + 1})
 	if e != nil {
 		return AccountsPage{}, e
 	}
-	defer cur.Close(ctx)
-	out := AccountsPage{Items: []Account{}}
-	e = cur.All(ctx, &out.Items)
+	accounts, e := pgx.CollectRows(rows, pgx.RowToStructByName[Account])
+	out := AccountsPage{Items: accounts}
 	if len(out.Items) > limit {
 		out.Items = out.Items[:limit]
 		out.NextCursor = out.Items[limit-1].ID
 	}
 	return out, e
 }
-func (r *MongoRepository) Init(ctx context.Context, p principal.Principal) error {
-	db, e := r.db(p)
-	if e != nil {
-		return e
-	}
-	for name, models := range map[string][]mongo.IndexModel{
-		"accounts":           {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"journal":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "seq", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "date", Value: 1}, {Key: "postings.account", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "postings.account", Value: 1}, {Key: "date", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "tags", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "kind", Value: 1}, {Key: "status", Value: 1}}}},
-		"entry_tags":         {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "entry_id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"rows":               {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "table_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"tables":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"views":              {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"dashboards":         {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"budgets":            {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"scenarios":          {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "id", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"discrepancies":      {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "status", Value: 1}}}},
-		"balance_assertions": {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "date", Value: -1}}}},
-		"import_batches":     {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "created_at", Value: -1}}}},
-		"events":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "seq", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "target.id", Value: 1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "tool", Value: 1}, {Key: "seq", Value: -1}}}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "actor.id", Value: 1}, {Key: "seq", Value: -1}}}},
-		"import_rows":        {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "account", Value: 1}, {Key: "dedupe_key", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "batch_id", Value: 1}, {Key: "seq", Value: 1}}}},
-		"prices":             {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "pair", Value: 1}, {Key: "at", Value: 1}}, Options: options.Index().SetUnique(true)}, {Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "at", Value: 1}}}},
-		"rate_sync":          {{Keys: bson.D{{Key: "user_id", Value: 1}}}},
-		"dashboard_versions": {{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "dashboard_id", Value: 1}, {Key: "version", Value: 1}}, Options: options.Index().SetUnique(true)}},
-	} {
-		if _, e = db.Collection(name).Indexes().CreateMany(ctx, models); e != nil {
-			return e
-		}
-	}
-	return nil
-}
+func (r *PostgresRepository) Init(ctx context.Context, p principal.Principal) error { return p.Valid() }

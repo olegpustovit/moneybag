@@ -72,7 +72,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	other := p
 	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 	for _, owner := range []principal.Principal{p, other} {
-		_, err = db.Collection("accounts").InsertOne(ctx, ledger.Account{Key: owner.UserID + ":assets:test", UserID: owner.UserID, ID: "assets:test", Type: "asset", Name: "Test", Commodities: []string{"EUR"}})
+		_, err = insertAccount(ctx, pgtest.New(t), ledger.Account{Key: owner.UserID + ":assets:test", UserID: owner.UserID, ID: "assets:test", Type: "asset", Name: "Test", Commodities: []string{"EUR"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -80,7 +80,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	entry := func(owner principal.Principal, id, date string, seq int64) ledger.Entry {
 		return ledger.Entry{ID: id, UserID: owner.UserID, Seq: seq, Date: date, Status: "posted", Kind: "entry", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}}
 	}
-	if _, err = db.Collection("journal").InsertMany(ctx, []any{entry(p, "a", "2026-01-01", 1), entry(p, "b", "2026-02-01", 2), entry(other, "c", "2026-01-01", 1)}); err != nil {
+	if _, err = insertJournal(ctx, pgtest.New(t), []ledger.Entry{entry(p, "a", "2026-01-01", 1), entry(p, "b", "2026-02-01", 2), entry(other, "c", "2026-01-01", 1)}...); err != nil {
 		t.Fatal(err)
 	}
 	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
@@ -93,7 +93,12 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources := &dashboard.Sources{Ledger: ledger.NewService(ledger.NewMongoRepository(db), nil), Valuer: testValuer{}, Snapshots: cache}
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "SELECT to_jsonb(j)") || strings.Contains(sql, "WITH source AS MATERIALIZED") || strings.Contains(sql, "SUM(") {
+			journalReads.Add(1)
+		}
+	}))
+	sources := &dashboard.Sources{Ledger: ledger.NewService(ledger.NewPostgresRepository(pool), nil), Valuer: testValuer{}, Snapshots: cache}
 	engine := dashboard.Engine{Expr: expr, Reader: sources}
 	data := map[string]dashboard.Query{"rows": {From: "postings", Agg: map[string]string{"count": "count()"}}}
 	run := func(owner principal.Principal, params map[string]any) (float64, error) {
@@ -140,7 +145,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("source cache crossed owner boundaries")
 	}
 	if err = a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("journal").InsertOne(tx, entry(p, "d", "2026-03-01", 3))
+		_, e := insertJournal(tx, pgtest.New(t), entry(p, "d", "2026-03-01", 3))
 		return e
 	}); err != nil {
 		t.Fatal(err)

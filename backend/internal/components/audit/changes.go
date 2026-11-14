@@ -101,7 +101,7 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 	query := strings.ToLower(in.Q)
 	out := ChangesPage{Groups: []ChangeGroup{}}
 	for page := 0; page < 5; page++ {
-		const changesSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND (@cursor<=0 OR seq<@cursor)
+		const changesSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND (@cursor::bigint<=0 OR seq<@cursor)
  AND (@from::timestamptz IS NULL OR at>=@from) AND (@to::timestamptz IS NULL OR at<=@to) ORDER BY seq DESC LIMIT 500`
 		rows, err := db.Query(ctx, changesSQL, pgx.NamedArgs{"user": p.UserID, "cursor": cursor, "from": from, "to": to})
 		if err != nil {

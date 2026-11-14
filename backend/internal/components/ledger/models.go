@@ -142,24 +142,24 @@ func (d Decimal) Negate() Decimal {
 }
 
 type Amount struct {
-	Value     Decimal `json:"v" bson:"v"`
-	Commodity string  `json:"c" bson:"c"`
+	Value     Decimal `json:"v" bson:"v" db:"v"`
+	Commodity string  `json:"c" bson:"c" db:"c"`
 }
 type Account struct {
-	UserID      string            `json:"-" bson:"user_id"`
-	Key         string            `json:"-" bson:"_id"`
-	ID          string            `json:"id" bson:"id"`
-	Type        string            `json:"type" bson:"type"`
-	Name        string            `json:"name" bson:"name"`
-	Pot         string            `json:"pot,omitempty" bson:"pot,omitempty"`
-	Commodities []string          `json:"commodities" bson:"commodities"`
-	Location    string            `json:"location,omitempty" bson:"location,omitempty"`
-	Class       string            `json:"class,omitempty" bson:"class,omitempty"`
-	Groups      map[string]string `json:"groups,omitempty" bson:"groups,omitempty"`
-	ClosedAt    *time.Time        `json:"closed_at,omitempty" bson:"closed_at,omitempty"`
-	DisplayName string            `json:"display_name,omitempty" bson:"display_name,omitempty" jsonschema:"human name shown everywhere; name keeps working when this is empty"`
-	Note        string            `json:"note,omitempty" bson:"note,omitempty" jsonschema:"working notes, shown in Details rather than beside the name"`
-	Estimated   *bool             `json:"estimated,omitempty" bson:"estimated,omitempty" jsonschema:"true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix"`
+	UserID      string            `json:"-" bson:"user_id" db:"user_id"`
+	Key         string            `json:"-" bson:"_id" db:"storage_key"`
+	ID          string            `json:"id" bson:"id" db:"id"`
+	Type        string            `json:"type" bson:"type" db:"type"`
+	Name        string            `json:"name" bson:"name" db:"name"`
+	Pot         string            `json:"pot,omitempty" bson:"pot,omitempty" db:"pot"`
+	Commodities []string          `json:"commodities" bson:"commodities" db:"commodities"`
+	Location    string            `json:"location,omitempty" bson:"location,omitempty" db:"location"`
+	Class       string            `json:"class,omitempty" bson:"class,omitempty" db:"class"`
+	Groups      map[string]string `json:"groups,omitempty" bson:"groups,omitempty" db:"groups"`
+	ClosedAt    *time.Time        `json:"closed_at,omitempty" bson:"closed_at,omitempty" db:"closed_at"`
+	DisplayName string            `json:"display_name,omitempty" bson:"display_name,omitempty" db:"display_name" jsonschema:"human name shown everywhere; name keeps working when this is empty"`
+	Note        string            `json:"note,omitempty" bson:"note,omitempty" db:"note" jsonschema:"working notes, shown in Details rather than beside the name"`
+	Estimated   *bool             `json:"estimated,omitempty" bson:"estimated,omitempty" db:"estimated" jsonschema:"true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix"`
 }
 
 // IsEstimated is the stored flag, or for accounts older than the flag, the expenses:estimated id prefix.
@@ -179,32 +179,32 @@ func (a Account) Label() string {
 }
 
 type Posting struct {
-	Account string  `json:"account" bson:"account"`
-	Amount  Amount  `json:"amount" bson:"amount"`
-	Cost    *Amount `json:"cost,omitempty" bson:"cost,omitempty"`
-	Price   *Amount `json:"price,omitempty" bson:"price,omitempty"`
-	Memo    string  `json:"memo,omitempty" bson:"memo,omitempty"`
+	Account string  `json:"account" bson:"account" db:"account"`
+	Amount  Amount  `json:"amount" bson:"amount" db:"amount"`
+	Cost    *Amount `json:"cost,omitempty" bson:"cost,omitempty" db:"cost"`
+	Price   *Amount `json:"price,omitempty" bson:"price,omitempty" db:"price"`
+	Memo    string  `json:"memo,omitempty" bson:"memo,omitempty" db:"memo"`
 }
 type Link struct {
-	Rel string `json:"rel" bson:"rel"`
-	ID  string `json:"id" bson:"id"`
+	Rel string `json:"rel" bson:"rel" db:"rel"`
+	ID  string `json:"id" bson:"id" db:"id"`
 }
 type Entry struct {
-	UserID    string          `json:"-" bson:"user_id"`
-	ID        string          `json:"id" bson:"_id"`
-	Seq       int64           `json:"seq" bson:"seq"`
-	Date      string          `json:"date" bson:"date"`
-	Kind      string          `json:"kind" bson:"kind"`
-	Payee     string          `json:"payee" bson:"payee"`
-	Postings  []Posting       `json:"postings" bson:"postings"`
-	Tags      []string        `json:"tags" bson:"tags"`
-	Links     []Link          `json:"links" bson:"links"`
-	Status    string          `json:"status" bson:"status"`
-	Actor     principal.Actor `json:"actor" bson:"actor"`
-	CreatedAt time.Time       `json:"created_at" bson:"created_at"`
+	UserID    string          `json:"-" bson:"user_id" db:"user_id"`
+	ID        string          `json:"id" bson:"_id" db:"id"`
+	Seq       int64           `json:"seq" bson:"seq" db:"seq"`
+	Date      string          `json:"date" bson:"date" db:"date"`
+	Kind      string          `json:"kind" bson:"kind" db:"kind"`
+	Payee     string          `json:"payee" bson:"payee" db:"payee"`
+	Postings  []Posting       `json:"postings" bson:"postings" db:"postings"`
+	Tags      []string        `json:"tags" bson:"tags" db:"tags"`
+	Links     []Link          `json:"links" bson:"links" db:"links"`
+	Status    string          `json:"status" bson:"status" db:"status"`
+	Actor     principal.Actor `json:"actor" bson:"actor" db:"actor"`
+	CreatedAt time.Time       `json:"created_at" bson:"created_at" db:"created_at"`
 }
 type EntryInput struct {
-	ID       string    `json:"id,omitempty" bson:"-"`
+	ID       string    `json:"id,omitempty" bson:"-" db:"-"`
 	Date     string    `json:"date,omitempty"`
 	Payee    string    `json:"payee,omitempty"`
 	Postings []Posting `json:"postings,omitempty"`

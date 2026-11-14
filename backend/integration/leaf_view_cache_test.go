@@ -52,15 +52,15 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	defer func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) }()
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
 	other := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Scopes: []string{"ledger:read"}}
-	repo := ledger.NewMongoRepository(db)
+	repo := ledger.NewPostgresRepository(pgtest.New(t))
 	if err = repo.Init(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection("accounts").InsertOne(ctx, ledger.Account{Key: p.UserID + ":assets:test", UserID: p.UserID, ID: "assets:test", Type: "asset", Name: "Test", Commodities: []string{"EUR"}})
+	_, err = insertAccount(ctx, pgtest.New(t), ledger.Account{Key: p.UserID + ":assets:test", UserID: p.UserID, ID: "assets:test", Type: "asset", Name: "Test", Commodities: []string{"EUR"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "one", Seq: 1, Date: "2026-01-01", Status: "posted", Payee: "Example", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}})
+	_, err = insertJournal(ctx, pgtest.New(t), ledger.Entry{UserID: p.UserID, ID: "one", Seq: 1, Date: "2026-01-01", Status: "posted", Payee: "Example", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}

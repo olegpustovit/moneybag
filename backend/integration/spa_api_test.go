@@ -490,7 +490,7 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	if _, err = db.Collection("import_batches").InsertMany(ctx, batches); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Collection("discrepancies").InsertMany(ctx, []any{bson.M{"_id": "navigation-open", "user_id": p.UserID, "status": "open"}, bson.M{"_id": "navigation-archived", "user_id": p.UserID, "status": "open", "archived": true}, bson.M{"_id": "navigation-resolved", "user_id": p.UserID, "status": "resolved"}, bson.M{"_id": "navigation-other", "user_id": "other-user", "status": "open"}}); err != nil {
+	if _, err = pgdb.Exec(ctx, `INSERT INTO discrepancies(id,user_id,status,archived) VALUES ('navigation-open',@user,'open',false),('navigation-archived',@user,'open',true),('navigation-resolved',@user,'resolved',false),('navigation-other','other-user','open',false)`, pgx.NamedArgs{"user": p.UserID}); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]int64{"/api/imports/count": beforeImports + 104, "/api/reconcile/count": beforeDiscrepancies + 1} {
@@ -499,7 +499,10 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatalf("%s: %d %v, want %d", path, status, body, want)
 		}
 	}
-	for _, collection := range []string{"import_batches", "discrepancies"} {
+	if _, err = pgdb.Exec(ctx, `DELETE FROM discrepancies WHERE id LIKE 'navigation-%'`); err != nil {
+		t.Fatal(err)
+	}
+	for _, collection := range []string{"import_batches"} {
 		if _, err = db.Collection(collection).DeleteMany(ctx, bson.M{"_id": bson.M{"$regex": "^navigation-"}}); err != nil {
 			t.Fatal(err)
 		}

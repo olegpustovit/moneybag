@@ -56,13 +56,13 @@ type Handler struct {
 	cfg            Config
 	services       mcpserver.Services
 	oauth          *oauth.Service
-	ledgerRepo     *ledger.MongoRepository
+	ledgerRepo     *ledger.PostgresRepository
 	client         *mongo.Client
 	templates      *template.Template
 	full, readonly *mcp.Server
 }
 
-func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.MongoRepository, client *mongo.Client) *Handler {
+func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.PostgresRepository, client *mongo.Client) *Handler {
 	h := &Handler{cfg: cfg, services: s, oauth: oa, ledgerRepo: repo, client: client, templates: template.Must(parseTemplates())}
 	h.full = mcpserver.New(s, mcpserver.Options{Version: cfg.Version, Toolsets: cfg.Toolsets})
 	h.readonly = mcpserver.New(s, mcpserver.Options{Version: cfg.Version, ReadOnly: true, Toolsets: cfg.Toolsets})

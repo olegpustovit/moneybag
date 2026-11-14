@@ -2,10 +2,9 @@ package ledger
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"sync"
 )
 
@@ -27,7 +26,7 @@ func WithAccountCache(ctx context.Context) context.Context {
 }
 
 // CachedAccounts returns every account of the user (closed included) when ctx carries an account cache; ok is false otherwise.
-func CachedAccounts(ctx context.Context, db *mongo.Database, p principal.Principal) (all []Account, ok bool, e error) {
+func CachedAccounts(ctx context.Context, db *pgxpool.Pool, p principal.Principal) (all []Account, ok bool, e error) {
 	c, ok := ctx.Value(accountCacheKey{}).(*accountCache)
 	if !ok {
 		return nil, false, nil
@@ -37,10 +36,10 @@ func CachedAccounts(ctx context.Context, db *mongo.Database, p principal.Princip
 	if all, ok := c.users[p.UserID]; ok {
 		return all, true, nil
 	}
-	cur, e := db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+	rows, e := db.Query(ctx, `SELECT * FROM accounts WHERE user_id=@user ORDER BY id`, pgx.NamedArgs{"user": p.UserID})
 	all = []Account{}
 	if e == nil {
-		e = cur.All(ctx, &all)
+		all, e = pgx.CollectRows(rows, pgx.RowToStructByName[Account])
 	}
 	if e != nil {
 		return nil, true, e

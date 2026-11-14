@@ -3,9 +3,9 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"math/big"
 	"sort"
 	"strings"
@@ -35,10 +35,10 @@ type BalancesResult struct {
 
 type rawBalance struct {
 	ID struct {
-		Account   string `bson:"account"`
-		Commodity string `bson:"commodity"`
-	} `bson:"_id"`
-	Amount Decimal `bson:"amount"`
+		Account   string `json:"account"`
+		Commodity string `json:"commodity"`
+	} `json:"_id"`
+	Amount Decimal `json:"amount"`
 }
 
 func (s *Service) Balances(ctx context.Context, p principal.Principal, in BalancesInput, valuer Valuer) (BalancesResult, error) {
@@ -64,15 +64,15 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 	if e != nil {
 		return BalancesResult{}, e
 	}
-	match := bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$lte": in.At}}
-	if len(in.Accounts) > 0 {
-		match["postings.account"] = bson.M{"$in": in.Accounts}
+	const balancesSQL = `SELECT p->>'account',p->'amount'->>'c',SUM(COALESCE(p->'amount'->>'v','0')::numeric)
+ FROM journal j CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+ WHERE j.user_id=@user AND j.status='posted' AND j.date<=@at
+ AND (cardinality(@accounts::text[])=0 OR p->>'account'=ANY(@accounts::text[]))
+ GROUP BY p->>'account',p->'amount'->>'c' ORDER BY p->>'account',p->'amount'->>'c' LIMIT 5001`
+	selected := in.Accounts
+	if selected == nil {
+		selected = []string{}
 	}
-	postMatch := bson.M{}
-	if len(in.Accounts) > 0 {
-		postMatch["postings.account"] = bson.M{"$in": in.Accounts}
-	}
-	pipeline := bson.A{bson.M{"$match": match}, bson.M{"$unwind": "$postings"}, bson.M{"$match": postMatch}, bson.M{"$group": bson.M{"_id": bson.M{"account": "$postings.account", "commodity": "$postings.amount.c"}, "amount": bson.M{"$sum": "$postings.amount.v"}}}, bson.M{"$sort": bson.M{"_id.account": 1, "_id.commodity": 1}}, bson.M{"$limit": 5001}}
 	var key strings.Builder
 	fmt.Fprintf(&key, "balances|%p|%d:%s|%s", db, len(p.UserID), p.UserID, in.At)
 	for _, account := range in.Accounts {
@@ -94,14 +94,20 @@ func (s *Service) Balances(ctx context.Context, p principal.Principal, in Balanc
 	}
 	if !usedSeries {
 		raw, e = reqcache.Do(ctx, key.String(), func() ([]rawBalance, error) {
-			cur, err := db.Collection("journal").Aggregate(ctx, pipeline)
+			rows, err := db.Query(ctx, balancesSQL, pgx.NamedArgs{"user": p.UserID, "at": in.At, "accounts": selected})
 			if err != nil {
 				return nil, err
 			}
-			defer cur.Close(ctx)
-			var rows []rawBalance
-			err = cur.All(ctx, &rows)
-			return rows, err
+			defer rows.Close()
+			var out []rawBalance
+			for rows.Next() {
+				var row rawBalance
+				if err := rows.Scan(&row.ID.Account, &row.ID.Commodity, &row.Amount); err != nil {
+					return nil, err
+				}
+				out = append(out, row)
+			}
+			return out, rows.Err()
 		})
 		if e != nil {
 			return BalancesResult{}, e

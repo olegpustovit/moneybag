@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -52,21 +53,21 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	}
 	p := identity.Principal(u)
 	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
-	repo := ledger.NewMongoRepository(db)
+	repo := ledger.NewPostgresRepository(pgtest.New(t))
 	if e = repo.Init(ctx, p); e != nil {
 		t.Fatal(e)
 	}
 	book := ledger.NewService(repo, a)
 	expr, _ := expressions.New()
 	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
-	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
+	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test"}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = db.Collection("budgets").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": "revision-test"}, bson.M{"$unset": bson.M{"revision": ""}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `UPDATE budgets SET revision=0 WHERE user_id=@user AND id='revision-test'`, pgx.NamedArgs{"user": p.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	zeroBudget, newBudget := 0, -1

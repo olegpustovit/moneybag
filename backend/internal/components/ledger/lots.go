@@ -6,9 +6,9 @@ import (
 	"math/big"
 	"sort"
 
+	"encoding/json"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 // Lot groups holdings with the same explicit per-unit acquisition cost.
@@ -77,27 +77,34 @@ func (s *Service) lots(ctx context.Context, p principal.Principal, in BalancesIn
 	if err != nil {
 		return nil, err
 	}
-	filter := bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$lte": in.At}}
-	if len(in.Accounts) > 0 {
-		filter["postings.account"] = bson.M{"$in": in.Accounts}
+	const lotsSQL = `SELECT to_jsonb(j) FROM journal j WHERE user_id=@user AND status='posted' AND date<=@at
+ AND (cardinality(@accounts::text[])=0 OR EXISTS(SELECT 1 FROM jsonb_array_elements(COALESCE(NULLIF(postings,'null'::jsonb),'[]'::jsonb)) p WHERE p->>'account'=ANY(@accounts::text[]))) ORDER BY seq LIMIT 10001`
+	selected := in.Accounts
+	if selected == nil {
+		selected = []string{}
 	}
-	cur, err := db.Collection("journal").Find(ctx, filter, options.Find().SetLimit(10001).SetSort(bson.D{{Key: "seq", Value: 1}}))
+	cur, err := db.Query(ctx, lotsSQL, pgx.NamedArgs{"user": p.UserID, "at": in.At, "accounts": selected})
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+	defer cur.Close()
 	entries := []Entry{}
 	bytes := 0
 	accounts := map[string]bool{}
-	for cur.Next(ctx) {
-		bytes += len(cur.Current)
+	for cur.Next() {
+		var doc json.RawMessage
+		if err := cur.Scan(&doc); err != nil {
+			return nil, err
+		}
+		bytes += len(doc)
 		if len(entries) >= 10000 || bytes > 16*1024*1024 {
 			return nil, fmt.Errorf("cost lot report exceeds 10000 entries or 16 MiB; select accounts")
 		}
 		var entry Entry
-		if err = cur.Decode(&entry); err != nil {
+		if err = json.Unmarshal(doc, &entry); err != nil {
 			return nil, err
 		}
+		entry.UserID = p.UserID
 		posts := []Posting{}
 		for _, post := range entry.Postings {
 			if _, ok := accounts[post.Account]; !ok {

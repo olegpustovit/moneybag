@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
@@ -69,15 +70,15 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
-	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
+	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
 	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
 	for _, p := range []principal.Principal{pa, pb} {
 		if e = models.Initialize(ctx, p); e != nil {
 			t.Fatal("default model", e)
 		}
 	}
-	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
-	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
+	classes := classify.NewService(classify.NewPostgresRepository(pgtest.New(t)), book, a, expr)
+	rec := reconcile.NewService(reconcile.NewPostgresRepository(pgtest.New(t)), book, a)
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
@@ -241,7 +242,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("tag overlay missing", tagged, e)
 	}
 	var original ledger.Entry
-	if e = db.Collection("journal").FindOne(ctx, bson.M{"_id": tagged.Items[0].ID, "user_id": pa.UserID}).Decode(&original); e != nil {
+	if e = pgtest.New(t).QueryRow(ctx, `SELECT tags FROM journal WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": tagged.Items[0].ID, "user": pa.UserID}).Scan(&original.Tags); e != nil {
 		t.Fatal(e)
 	}
 	if len(original.Tags) != 0 {

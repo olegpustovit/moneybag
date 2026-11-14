@@ -103,7 +103,7 @@ func run() error {
 		return fmt.Errorf("initialize OAuth: %w", e)
 	}
 	a := audit.NewService(audit.NewPostgresRepository(pool))
-	bookRepo := ledger.NewMongoRepository(db)
+	bookRepo := ledger.NewPostgresRepository(pool)
 	if e = ids.EachUser(ctx, func(p principal.Principal) error { return bookRepo.Init(ctx, p) }); e != nil {
 		return fmt.Errorf("initialize ledger indexes: %w", e)
 	}
@@ -114,7 +114,7 @@ func run() error {
 	}
 	book.Expr = expr
 	prices := rates.NewService(rates.NewPostgresRepository(pool), a)
-	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
+	budgets := budget.NewService(budget.NewPostgresRepository(pool), a, prices)
 	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
@@ -127,8 +127,8 @@ func run() error {
 	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	sources.Views, sources.Expr = dash, expr
-	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
-	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
+	classes := classify.NewService(classify.NewPostgresRepository(pool), book, a, expr)
+	rec := reconcile.NewService(reconcile.NewPostgresRepository(pool), book, a)
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
 	imp.SetSecretKey(cfg.SecretKey)
 	shares := sharing.NewService(sharing.NewPostgresRepository(pool), ids, dash, sources, expr, a)

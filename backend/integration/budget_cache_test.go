@@ -3,8 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"os"
+	"github.com/jackc/pgx/v5"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -14,52 +13,31 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestBudgetLinesRequestCache(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	var reads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" && e.Command.Lookup("find").StringValue() == "budgets" {
-			reads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_budget_cache")
-	if err := db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) }()
+	var reads atomic.Int64
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "FROM budgets") {
+			reads.Add(1)
+		}
+	}))
+	var err error
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
 	other := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Scopes: []string{"ledger:read"}}
-	_, err = db.Collection("budgets").InsertMany(ctx, []any{
-		bson.M{"_id": "owner:food", "user_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "id": "food", "accounts": bson.A{"expenses:food"}, "group_ref": bson.M{"dimension": "kind", "value": "food"}},
-		bson.M{"_id": "other:food", "user_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "id": "food", "accounts": bson.A{"expenses:other"}},
-	})
+	_, err = pool.Exec(ctx, `INSERT INTO budgets(storage_key,user_id,id,accounts,group_ref) VALUES
+ ('owner:food',@user,'food',ARRAY['expenses:food'],'{"dimension":"kind","value":"food"}'),
+ ('other:food',@other,'food',ARRAY['expenses:other'],NULL)`, pgx.NamedArgs{"user": p.UserID, "other": other.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = db.Collection("accounts").InsertOne(ctx, bson.M{"_id": "owner:food", "user_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV", "id": "expenses:market", "type": "expense", "groups": bson.M{"kind": "food"}})
+	_, err = pool.Exec(ctx, `INSERT INTO accounts(storage_key,user_id,id,type,groups) VALUES ('owner:food',@user,'expenses:market','expense','{"kind":"food"}')`, pgx.NamedArgs{"user": p.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := budget.NewService(budget.NewMongoRepository(db), nil, nil)
+	service := budget.NewService(budget.NewPostgresRepository(pool), nil, nil)
 	ctx = reqcache.With(ctx)
 	var wg sync.WaitGroup
 	errs := make(chan error, 8)

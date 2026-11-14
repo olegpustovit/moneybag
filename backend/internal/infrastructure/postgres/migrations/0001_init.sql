@@ -218,3 +218,105 @@ CREATE TABLE audit_outcomes (
     after bytea,
     at timestamptz NOT NULL
 );
+
+CREATE TABLE accounts (
+    user_id text NOT NULL DEFAULT '',
+    storage_key text PRIMARY KEY,
+    id text NOT NULL DEFAULT '',
+    type text NOT NULL DEFAULT '',
+    name text NOT NULL DEFAULT '',
+    pot text NOT NULL DEFAULT '',
+    commodities text[],
+    location text NOT NULL DEFAULT '',
+    class text NOT NULL DEFAULT '',
+    groups jsonb,
+    closed_at timestamptz,
+    display_name text NOT NULL DEFAULT '',
+    note text NOT NULL DEFAULT '',
+    estimated boolean,
+    UNIQUE (user_id,id)
+);
+CREATE TABLE journal (
+    user_id text NOT NULL DEFAULT '',
+    id text PRIMARY KEY,
+    seq bigint NOT NULL DEFAULT 0,
+    date text NOT NULL DEFAULT '',
+    kind text NOT NULL DEFAULT '',
+    payee text NOT NULL DEFAULT '',
+    postings jsonb NOT NULL DEFAULT '[]',
+    tags text[],
+    links jsonb NOT NULL DEFAULT '[]',
+    status text NOT NULL DEFAULT '',
+    actor jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z',
+    UNIQUE (user_id,seq)
+);
+CREATE INDEX journal_user_date_seq ON journal (user_id,date,seq);
+CREATE INDEX journal_user_kind_status ON journal (user_id,kind,status);
+CREATE TABLE entry_tags (
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    entry_id text NOT NULL DEFAULT '',
+    tags text[],
+    UNIQUE (user_id,entry_id)
+);
+CREATE TABLE balances (
+    pk bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    dirty boolean NOT NULL DEFAULT false
+);
+
+CREATE TABLE budgets (
+    storage_key text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    id text NOT NULL DEFAULT '',
+    name text NOT NULL DEFAULT '',
+    revision integer NOT NULL DEFAULT 0,
+    "limit" numeric NOT NULL DEFAULT 0,
+    limit_lexeme text,
+    accounts text[],
+    group_ref jsonb,
+    "order" integer NOT NULL DEFAULT 0,
+    archived boolean NOT NULL DEFAULT false,
+    UNIQUE (user_id,id)
+);
+CREATE INDEX budgets_user_order ON budgets (user_id,"order",id);
+CREATE TABLE rules (
+    storage_key text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    id text NOT NULL DEFAULT '',
+    priority integer NOT NULL DEFAULT 0,
+    match text NOT NULL DEFAULT '',
+    "set" jsonb NOT NULL DEFAULT '{}',
+    note text NOT NULL DEFAULT '',
+    enabled boolean NOT NULL DEFAULT false,
+    version integer NOT NULL DEFAULT 0,
+    UNIQUE (user_id,id)
+);
+CREATE INDEX rules_user_priority ON rules (user_id,priority,id);
+
+CREATE TABLE balance_assertions (
+ id text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ account text NOT NULL DEFAULT '',
+ date text NOT NULL DEFAULT '',
+ amount jsonb NOT NULL DEFAULT '{"v":"0","c":""}',
+ source text NOT NULL DEFAULT '',
+ ok boolean NOT NULL DEFAULT false,
+ diff numeric NOT NULL DEFAULT 0,
+ archived boolean NOT NULL DEFAULT false
+);
+CREATE INDEX assertions_user_account ON balance_assertions (user_id,account);
+CREATE TABLE discrepancies (
+ id text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ assertion_id text NOT NULL DEFAULT '',
+ account text NOT NULL DEFAULT '',
+ diff jsonb NOT NULL DEFAULT '{"v":"0","c":""}',
+ status text NOT NULL DEFAULT '',
+ resolution text NOT NULL DEFAULT '',
+ reason text NOT NULL DEFAULT '',
+ adjustment_id text NOT NULL DEFAULT '',
+ archived boolean NOT NULL DEFAULT false
+);
+CREATE INDEX discrepancies_user_status_account ON discrepancies (user_id,status,account);

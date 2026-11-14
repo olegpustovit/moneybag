@@ -75,7 +75,7 @@ func testTelemetryEval(t *testing.T, ctx context.Context, admin principal.Princi
 		t.Fatal(e)
 	}
 	owner := identity.Principal(user)
-	if e = ledger.NewMongoRepository(db).Init(ctx, owner); e != nil {
+	if e = ledger.NewPostgresRepository(pgtest.New(t)).Init(ctx, owner); e != nil {
 		t.Fatal(e)
 	}
 	evalLedger(t, ctx, owner, s)
@@ -566,7 +566,7 @@ func testEvalTasks(t *testing.T, ctx context.Context, admin principal.Principal,
 		t.Fatal(e)
 	}
 	owner := identity.Principal(user)
-	if e = ledger.NewMongoRepository(db).Init(ctx, owner); e != nil {
+	if e = ledger.NewPostgresRepository(pgtest.New(t)).Init(ctx, owner); e != nil {
 		t.Fatal(e)
 	}
 	evalLedger(t, ctx, owner, s)

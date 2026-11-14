@@ -4,9 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
-	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -15,52 +14,31 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestReconcileStatusAggregation(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	var reads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" {
-			reads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_reconcile")
-	if err := db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
+	var reads atomic.Int64
+	pool := tracedPool(t, sqlQueryCounter{reads: &reads})
+	var err error
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
-	docs := []any{
-		bson.M{"user_id": p.UserID, "account": "a", "date": "2026-01-01", "ok": true},
-		bson.M{"user_id": p.UserID, "account": "a", "date": "2026-02-01", "ok": false},
-		bson.M{"user_id": p.UserID, "account": "b", "date": "2026-03-01", "ok": false},
-		bson.M{"user_id": p.UserID, "account": "b", "date": "2026-04-01", "ok": true, "archived": true},
-		bson.M{"user_id": "other", "account": "c", "date": "2026-05-01", "ok": true},
+	docs := []reconcile.Assertion{
+		{ID: "a1", UserID: p.UserID, Account: "a", Date: "2026-01-01", OK: true},
+		{ID: "a2", UserID: p.UserID, Account: "a", Date: "2026-02-01", OK: false},
+		{ID: "b1", UserID: p.UserID, Account: "b", Date: "2026-03-01", OK: false},
+		{ID: "b2", UserID: p.UserID, Account: "b", Date: "2026-04-01", OK: true},
+		{ID: "c1", UserID: "other", Account: "c", Date: "2026-05-01", OK: true},
 	}
-	if _, err := db.Collection("balance_assertions").InsertMany(ctx, docs); err != nil {
+	if _, err = insertAssertions(ctx, pool, docs...); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection("discrepancies").InsertOne(ctx, bson.M{"_id": "d", "user_id": p.UserID, "assertion_id": "x", "account": "c", "status": "open", "diff": bson.M{"v": bson.Decimal128{}, "c": "EUR"}}); err != nil {
+	if _, err = pool.Exec(ctx, `UPDATE balance_assertions SET archived=true WHERE id='b2'`); err != nil {
 		t.Fatal(err)
 	}
-	s := reconcile.NewService(reconcile.NewMongoRepository(db), nil, nil)
+	if _, err = pool.Exec(ctx, `INSERT INTO discrepancies(id,user_id,assertion_id,account,status,diff) VALUES ('d',@user,'x','c','open','{"v":"0","c":"EUR"}')`, pgx.NamedArgs{"user": p.UserID}); err != nil {
+		t.Fatal(err)
+	}
+	s := reconcile.NewService(reconcile.NewPostgresRepository(pool), nil, nil)
 	reads.Store(0)
 	got, err := s.Status(ctx, p, "")
 	if err != nil {
@@ -81,11 +59,11 @@ func TestReconcileStatusAggregation(t *testing.T) {
 	if err != nil || len(got) != 1 || got[0].LastOK != "2026-01-01" {
 		t.Fatalf("account filter: %v, %v", got, err)
 	}
-	many := make([]any, 150)
+	many := make([]reconcile.Assertion, 150)
 	for i := range many {
-		many[i] = bson.M{"user_id": p.UserID, "account": fmt.Sprintf("extra-%03d", i), "date": "2026-01-01", "ok": true}
+		many[i] = reconcile.Assertion{ID: fmt.Sprintf("extra-%03d", i), UserID: p.UserID, Account: fmt.Sprintf("extra-%03d", i), Date: "2026-01-01", OK: true}
 	}
-	if _, err := db.Collection("balance_assertions").InsertMany(ctx, many); err != nil {
+	if _, err := insertAssertions(ctx, pool, many...); err != nil {
 		t.Fatal(err)
 	}
 	reads.Store(0)
@@ -96,31 +74,12 @@ func TestReconcileStatusAggregation(t *testing.T) {
 }
 
 func TestReconcileStatusBatchedVerification(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	var reads atomic.Int64
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(&event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" {
-			reads.Add(1)
-		}
-	}}))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_reconcile_batch")
-	if err := db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
+	var reads atomic.Int64
+	pool := tracedPool(t, sqlQueryCounter{reads: &reads})
+	var err error
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write"}}
-	assertions := make([]any, 151)
+	assertions := make([]reconcile.Assertion, 151)
 	for i := range assertions {
 		account := fmt.Sprintf("account-%03d", i)
 		amount := ledger.MustDecimal("0")
@@ -133,25 +92,25 @@ func TestReconcileStatusBatchedVerification(t *testing.T) {
 		}
 		assertions[i] = reconcile.Assertion{ID: account, UserID: p.UserID, Account: account, Date: date, Amount: ledger.Amount{Value: amount, Commodity: "EUR"}, Source: "test", OK: true, Diff: ledger.MustDecimal("0")}
 	}
-	if _, err := db.Collection("balance_assertions").InsertMany(ctx, assertions); err != nil {
+	if _, err := insertAssertions(ctx, pool, assertions...); err != nil {
 		t.Fatal(err)
 	}
-	posting := func(account, amount, currency string) bson.M {
-		return bson.M{"account": account, "amount": ledger.Amount{Value: ledger.MustDecimal(amount), Commodity: currency}}
+	posting := func(account, amount, currency string) ledger.Posting {
+		return ledger.Posting{Account: account, Amount: ledger.Amount{Value: ledger.MustDecimal(amount), Commodity: currency}}
 	}
-	journal := []any{
-		bson.M{"user_id": p.UserID, "date": "2026-01-01", "status": "posted", "postings": bson.A{posting("account-000", "3.5", "EUR"), posting("account-000", "8", "USD"), posting("other", "99", "EUR")}},
-		bson.M{"user_id": p.UserID, "date": "2026-03-01", "status": "posted", "postings": bson.A{posting("account-000", "9", "EUR")}},
-		bson.M{"user_id": p.UserID, "date": "2026-01-01", "status": "draft", "postings": bson.A{posting("account-000", "9", "EUR")}},
-		bson.M{"user_id": "other", "date": "2026-01-01", "status": "posted", "postings": bson.A{posting("account-000", "9", "EUR")}},
+	journal := []ledger.Entry{
+		{ID: "j1", UserID: p.UserID, Seq: 1, Date: "2026-01-01", Status: "posted", Postings: []ledger.Posting{posting("account-000", "3.5", "EUR"), posting("account-000", "8", "USD"), posting("other", "99", "EUR")}},
+		{ID: "j2", UserID: p.UserID, Seq: 2, Date: "2026-03-01", Status: "posted", Postings: []ledger.Posting{posting("account-000", "9", "EUR")}},
+		{ID: "j3", UserID: p.UserID, Seq: 3, Date: "2026-01-01", Status: "draft", Postings: []ledger.Posting{posting("account-000", "9", "EUR")}},
+		{ID: "j4", UserID: "other", Seq: 1, Date: "2026-01-01", Status: "posted", Postings: []ledger.Posting{posting("account-000", "9", "EUR")}},
 	}
-	if _, err := db.Collection("journal").InsertMany(ctx, journal); err != nil {
+	if _, err = insertJournal(ctx, pool, journal...); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection("discrepancies").InsertOne(ctx, reconcile.Discrepancy{ID: "orphan", UserID: p.UserID, AssertionID: "missing", Account: "orphan", Diff: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}, Status: "open"}); err != nil {
+	if _, err = pool.Exec(ctx, `INSERT INTO discrepancies(id,user_id,assertion_id,account,diff,status) VALUES ('orphan',@user,'missing','orphan','{"v":"1","c":"EUR"}','open')`, pgx.NamedArgs{"user": p.UserID}); err != nil {
 		t.Fatal(err)
 	}
-	s := reconcile.NewService(reconcile.NewMongoRepository(db), ledger.NewService(ledger.NewMongoRepository(db), nil), nil)
+	s := reconcile.NewService(reconcile.NewPostgresRepository(pool), ledger.NewService(ledger.NewPostgresRepository(pgtest.New(t)), nil), nil)
 	reads.Store(0)
 	got, err := s.Status(ctx, p, "")
 	if err != nil || len(got) != 152 || reads.Load() != 2 {
@@ -177,36 +136,36 @@ func TestReconcileStatusBatchedVerification(t *testing.T) {
 		t.Fatalf("filtered status: %+v, %d reads, %v", filtered, reads.Load(), err)
 	}
 
-	if _, err = db.Collection("accounts").InsertOne(ctx, bson.M{"_id": p.UserID + ":bank", "user_id": p.UserID, "id": "bank", "commodities": bson.A{"EUR"}}); err != nil {
+	if _, err = insertAccount(ctx, pool, ledger.Account{Key: p.UserID + ":bank", UserID: p.UserID, ID: "bank", Commodities: []string{"EUR"}}); err != nil {
 		t.Fatal(err)
 	}
-	s = reconcile.NewService(reconcile.NewMongoRepository(db), ledger.NewService(ledger.NewMongoRepository(db), nil), audit.NewService(audit.NewPostgresRepository(pgtest.New(t))))
+	s = reconcile.NewService(reconcile.NewPostgresRepository(pool), ledger.NewService(ledger.NewPostgresRepository(pgtest.New(t)), nil), audit.NewService(audit.NewPostgresRepository(pgtest.New(t))))
 	for _, date := range []string{"2026-01-01", "2026-02-01"} {
 		if _, err = s.Assert(ctx, p, reconcile.AssertInput{Account: "bank", Date: date, Amount: ledger.Amount{Value: ledger.MustDecimal("0"), Commodity: "EUR"}, Source: "test"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	entry := bson.M{"_id": "backdated", "user_id": p.UserID, "date": "2026-01-15", "status": "posted", "postings": bson.A{posting("bank", "3.5", "EUR")}}
-	if _, err = db.Collection("journal").InsertOne(ctx, entry); err != nil {
+	entry := ledger.Entry{ID: "backdated", Seq: 4, UserID: p.UserID, Date: "2026-01-15", Status: "posted", Postings: []ledger.Posting{posting("bank", "3.5", "EUR")}}
+	if _, err = insertJournal(ctx, pool, entry); err != nil {
 		t.Fatal(err)
 	}
 	changed, err := s.Recheck(ctx, p, "bank")
 	if err != nil || len(changed) != 1 || changed[0].LastOK != "2026-01-01" || len(changed[0].Discrepancies) != 1 || changed[0].Discrepancies[0].Diff.Value.String() != "-3.5" {
 		t.Fatalf("changed status: %+v, %v", changed, err)
 	}
-	if _, err = db.Collection("journal").DeleteOne(ctx, bson.M{"_id": "backdated"}); err != nil {
+	if _, err = pool.Exec(ctx, `DELETE FROM journal WHERE id='backdated'`); err != nil {
 		t.Fatal(err)
 	}
 	changed, err = s.Recheck(ctx, p, "bank")
 	if err != nil || len(changed) != 1 || changed[0].LastOK != "2026-02-01" || len(changed[0].Discrepancies) != 0 {
 		t.Fatalf("restored status: %+v, %v", changed, err)
 	}
-	extra := make([]any, 4850)
+	extra := make([]reconcile.Assertion, 4850)
 	for i := range extra {
 		account := fmt.Sprintf("extra-%04d", i)
 		extra[i] = reconcile.Assertion{ID: account, UserID: p.UserID, Account: account, Date: "2026-02-01", Amount: ledger.Amount{Value: ledger.MustDecimal("0"), Commodity: "EUR"}, Source: "test", OK: true, Diff: ledger.MustDecimal("0")}
 	}
-	if _, err = db.Collection("balance_assertions").InsertMany(ctx, extra); err != nil {
+	if _, err = insertAssertions(ctx, pool, extra...); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = s.Status(ctx, p, ""); err == nil || !strings.Contains(err.Error(), "too many assertions") {

@@ -96,7 +96,7 @@ func TestPrewarmAfterPostedEntriesAndCancellation(t *testing.T) {
 	}
 	t.Cleanup(traced.Close)
 	a := audit.NewService(audit.NewPostgresRepository(traced))
-	repo := ledger.NewMongoRepository(db)
+	repo := ledger.NewPostgresRepository(pgtest.New(t))
 	if err = repo.Init(ctx, p); err != nil {
 		t.Fatal(err)
 	}

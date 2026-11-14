@@ -26,7 +26,7 @@ func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p p
 	t.Helper()
 	const issuer = "http://localhost:6459"
 	oa := oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), s.Identity, issuer)
-	web := handlers.New(handlers.Config{PublicURL: issuer, Version: "integration"}, s, oa, ledger.NewMongoRepository(db), db.Client())
+	web := handlers.New(handlers.Config{PublicURL: issuer, Version: "integration"}, s, oa, ledger.NewPostgresRepository(pgtest.New(t)), db.Client())
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)
