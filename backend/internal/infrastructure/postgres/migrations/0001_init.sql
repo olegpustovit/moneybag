@@ -156,3 +156,29 @@ CREATE TABLE admin_confirmations (
     used_at timestamptz
 );
 CREATE INDEX admin_confirmations_expiry ON admin_confirmations (expires_at);
+
+CREATE TABLE shares (
+    id text PRIMARY KEY,
+    dashboard_id text NOT NULL DEFAULT '',
+    owner_user text NOT NULL DEFAULT '',
+    grantee_user text NOT NULL DEFAULT '',
+    role text NOT NULL DEFAULT '',
+    mode text NOT NULL DEFAULT '',
+    sources text[],
+    row_filter text NOT NULL DEFAULT '',
+    refresh text NOT NULL DEFAULT '',
+    expires_at timestamptz,
+    revoked_at timestamptz,
+    created_at timestamptz NOT NULL,
+    last_refresh timestamptz NOT NULL
+);
+CREATE TABLE dashboard_snapshots (
+    id text PRIMARY KEY,
+    grant_hash text NOT NULL DEFAULT '',
+    owner_user text NOT NULL DEFAULT '',
+    dashboard_id text NOT NULL DEFAULT '',
+    version integer NOT NULL DEFAULT 0,
+    title text NOT NULL DEFAULT '',
+    rendered jsonb NOT NULL DEFAULT '{}',
+    at timestamptz NOT NULL
+);

@@ -131,7 +131,7 @@ func run() error {
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
 	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
 	imp.SetSecretKey(cfg.SecretKey)
-	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
+	shares := sharing.NewService(sharing.NewPostgresRepository(pool), ids, dash, sources, expr, a)
 	services := mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Logger: log}
 	services.Classify = classes
 	services.Semantic, services.PublicURL = meaning, cfg.PublicURL

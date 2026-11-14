@@ -71,3 +71,11 @@ The owner requested no GitHub CI on 2026-11-14. The earlier branch pushes had tr
 - Confirmation persistence now uses PostgreSQL. Issuing, owner-only lookup, expiry and atomic single-use consumption retain existing behavior. `UPDATE ... RETURNING` deliberately returns NULL for the previous used_at field, matching Mongo FindOneAndUpdate's pre-update response, while the stored row is consumed.
 - R2: used_at `$exists:false` -> `IS NULL`; expiry `$gt` -> `>@now`. Requested actor stays jsonb; timestamps are UTC milliseconds.
 - Local app build, admin vet/unit compile and the complete core/product/HTTP/MCP/telemetry regression pass (9.697 s), without changing their assertions.
+
+## Sharing port
+
+- Grants, active/revoked/expired resolution, owner/recipient lists, snapshot persistence, refresh/unpublish deletion and refresh-due scanning now use PostgreSQL. The obsolete recursive BSON-to-map normalizer is deleted; jsonb decoding already produces native JSON maps/arrays.
+- Frozen legacy `rendered.html` remains inside the rendered jsonb object and is read explicitly for the old HTML fallback. The copy tool must preserve that raw legacy key, not lose it by decoding only the current Rendered struct.
+- R2: revoked_at `$exists:false` -> `IS NULL`; active expiry `$or` -> `expires_at IS NULL OR expires_at>@now`; all owner/grantee guards retained. No new multi-statement transaction.
+- Concrete schema exception required by the core workflow: sources is a **nullable** text array. A source-free dashboard legitimately produces nil sources; coercing it to an empty array changes both public JSON and PermissionHash, invalidating its snapshot. Both nil and empty values must survive the copy. The first component check caught this NOT NULL failure; the schema was corrected without changing assertions.
+- Local app build, sharing vet/unit compile and core plus restricted-share/legacy-HTML regression pass (11.556 s), with unchanged behavioral assertions.

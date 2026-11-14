@@ -125,7 +125,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	}
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	dash.UseSnapshots(cache)
-	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, reader, expr, a)
+	shares := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, reader, expr, a)
 	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
 	h := &readHarness{ctx: ctx, db: db, audit: a, owner: owner, http: &http.Client{Transport: &http.Transport{DisableCompression: true}}}
 	h.services = mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Tables: tab, Dashboard: dash, Expr: expr, Sources: reader, Sharing: shares, Reconcile: rec, Imports: imports.NewService(imports.NewMongoRepository(db), book, nil, rec, a), Logger: slog.Default()}
@@ -519,7 +519,7 @@ func TestSharedGrantsEnforceRestrictedReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.db.Collection("dashboard_snapshots").UpdateOne(ctx, bson.M{"_id": frozen.ShareID}, bson.M{"$set": bson.M{"rendered": bson.M{"html": "<p>frozen output</p>", "values": bson.M{}}}}); err != nil {
+	if _, err = pgtest.New(t).Exec(ctx, `UPDATE dashboard_snapshots SET rendered='{"html":"<p>frozen output</p>","values":{}}'::jsonb WHERE id=$1`, frozen.ShareID); err != nil {
 		t.Fatal(err)
 	}
 	if r := h.get(t, "/api/shared/"+frozen.ShareID, viewerCookie, "", true); r.status != 200 || r.body["legacy_html"] != "<p>frozen output</p>" {

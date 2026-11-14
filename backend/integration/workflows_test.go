@@ -85,7 +85,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	check := &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
 	dash.Lint = check.SpecLint
-	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
+	shares := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, sources, expr, a)
 	engine := &dashboard.Engine{Expr: expr, Reader: sources}
 	// The initialized model has zero spending, so every scenario's runway is null.
 	if r, e := engine.Evaluate(ctx, pa, "data.sc.map(s, s.runway == null)", map[string]dashboard.Query{"sc": {From: "scenarios"}}, nil); e != nil || fmt.Sprint(r.Value) != "[true]" {
@@ -335,7 +335,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 
 	blocked := &blockedShareReader{reader: sources, entered: make(chan struct{}), release: make(chan struct{})}
-	blockedService := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, blocked, expr, a)
+	blockedService := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, blocked, expr, a)
 	result := make(chan error, 1)
 	go func() { _, err := blockedService.View(ctx, pb, live.ShareID); result <- err }()
 	<-blocked.entered
