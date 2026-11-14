@@ -3,6 +3,8 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
 
@@ -15,6 +17,7 @@ import (
 )
 
 func testValidatedTables(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *mongo.Database) {
+	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("validated table batches", func(t *testing.T) {
 		client := mcpSession(t, ctx, p, s, false)
@@ -47,7 +50,8 @@ func testValidatedTables(t *testing.T, ctx context.Context, p principal.Principa
 		ops := []tables.BatchOp{{DB: "batch-a", Upsert: &tables.RowUpsert{RowID: "one", Cells: map[string]any{"label": "a", "amount": "1.20"}}}, {DB: "batch-b", Upsert: &tables.RowUpsert{RowID: "two", Cells: map[string]any{"label": "b"}}}}
 		countEvents := func() int64 {
 			t.Helper()
-			count, err := db.Collection("events").CountDocuments(ctx, bson.M{"user_id": p.UserID})
+			var count int64
+			err := pgdb.QueryRow(ctx, `SELECT count(*) FROM events WHERE user_id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&count)
 			if err != nil {
 				t.Fatal(err)
 			}

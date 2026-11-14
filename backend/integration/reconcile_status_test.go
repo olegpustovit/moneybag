@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"strings"
@@ -179,7 +180,7 @@ func TestReconcileStatusBatchedVerification(t *testing.T) {
 	if _, err = db.Collection("accounts").InsertOne(ctx, bson.M{"_id": p.UserID + ":bank", "user_id": p.UserID, "id": "bank", "commodities": bson.A{"EUR"}}); err != nil {
 		t.Fatal(err)
 	}
-	s = reconcile.NewService(reconcile.NewMongoRepository(db), ledger.NewService(ledger.NewMongoRepository(db), nil), audit.NewService(audit.NewMongoRepository(db)))
+	s = reconcile.NewService(reconcile.NewMongoRepository(db), ledger.NewService(ledger.NewMongoRepository(db), nil), audit.NewService(audit.NewPostgresRepository(pgtest.New(t))))
 	for _, date := range []string{"2026-01-01", "2026-02-01"} {
 		if _, err = s.Assert(ctx, p, reconcile.AssertInput{Account: "bank", Date: date, Amount: ledger.Amount{Value: ledger.MustDecimal("0"), Commodity: "EUR"}, Source: "test"}); err != nil {
 			t.Fatal(err)

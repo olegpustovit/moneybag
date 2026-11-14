@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"strings"
@@ -37,7 +38,7 @@ func TestRevisionTracksPartialWritesAndIsolation(t *testing.T) {
 	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}
 	other := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW"}
-	s := audit.NewService(audit.NewMongoRepository(db))
+	s := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	states := []bool{}
 	s.OnChange = func(id string, finished bool) {
 		if id != p.UserID {

@@ -6,18 +6,16 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Revisions counts a user's writes: Data all of them, Rates those that only touched rates.
 type Revisions struct {
-	Data  int64 `bson:"n"`
-	Rates int64 `bson:"rates"`
+	Data  int64 `db:"n"`
+	Rates int64 `db:"rates"`
 }
 
 // Ledger counts writes other than rate-only ones; while it holds, a render differs only in valuation.
@@ -43,8 +41,8 @@ func (s *Service) Revisions(ctx context.Context, p principal.Principal) (Revisio
 	}
 	return reqcache.Do(ctx, "revision|"+p.UserID, func() (Revisions, error) {
 		var counter Revisions
-		err := s.repo.DB.Collection("counters").FindOne(ctx, bson.M{"_id": "rev:" + p.UserID}).Decode(&counter)
-		if errors.Is(err, mongo.ErrNoDocuments) {
+		err := s.repo.DB.QueryRow(ctx, `SELECT n,rates FROM counters WHERE id=@id`, pgx.NamedArgs{"id": "rev:" + p.UserID}).Scan(&counter.Data, &counter.Rates)
+		if errors.Is(err, pgx.ErrNoRows) {
 			return Revisions{}, nil
 		}
 		if err != nil {
@@ -56,7 +54,7 @@ func (s *Service) Revisions(ctx context.Context, p principal.Principal) (Revisio
 
 // Mutation invalidates even failed writes, which may have changed part of a standalone workflow.
 func (s *Service) Mutation(ctx context.Context, p principal.Principal, fn func(context.Context) error) (result error) {
-	if _, err := mongodb.Shared(s.repo.DB, p); err != nil {
+	if err := p.Valid(); err != nil {
 		return err
 	}
 	if s.OnChange != nil {
@@ -65,11 +63,13 @@ func (s *Service) Mutation(ctx context.Context, p principal.Principal, fn func(c
 	defer func() {
 		finish, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		inc := bson.M{"n": int64(1)}
+		var rates int64
 		if ctx.Value(rateOnlyKey{}) != nil {
-			inc["rates"] = int64(1)
+			rates = 1
 		}
-		_, err := s.repo.DB.Collection("counters").UpdateOne(finish, bson.M{"_id": "rev:" + p.UserID}, bson.M{"$inc": inc, "$setOnInsert": bson.M{"user_id": p.UserID}}, options.UpdateOne().SetUpsert(true))
+		const revisionSQL = `INSERT INTO counters (id,user_id,n,rates) VALUES (@id,@user,1,@rates)
+ ON CONFLICT (id) DO UPDATE SET n=counters.n+1,rates=counters.rates+EXCLUDED.rates`
+		_, err := s.repo.DB.Exec(finish, revisionSQL, pgx.NamedArgs{"id": "rev:" + p.UserID, "user": p.UserID, "rates": rates})
 		if s.OnChange != nil {
 			s.OnChange(p.UserID, true)
 		}

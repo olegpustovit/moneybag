@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"strings"
@@ -82,7 +83,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	if _, err = db.Collection("journal").InsertMany(ctx, []any{entry(p, "a", "2026-01-01", 1), entry(p, "b", "2026-02-01", 2), entry(other, "c", "2026-01-01", 1)}); err != nil {
 		t.Fatal(err)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
 		t.Fatal(err)

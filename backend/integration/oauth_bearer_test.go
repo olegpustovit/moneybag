@@ -20,7 +20,7 @@ func TestBearerOneRead(t *testing.T) {
 	ctx := context.Background()
 	var reads atomic.Int64
 	config := db.Config().Copy()
-	config.ConnConfig.Tracer = quoteQueryCounter{&reads}
+	config.ConnConfig.Tracer = sqlQueryCounter{reads: &reads}
 	traced, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatal(err)

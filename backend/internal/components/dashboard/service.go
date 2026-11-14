@@ -8,7 +8,7 @@ import (
 	jsonpatch "github.com/evanphx/json-patch/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 	"github.com/tiendc/go-deepcopy"
@@ -99,7 +99,7 @@ func (s *Service) ValidateSpec(ctx context.Context, p principal.Principal, spec 
 }
 
 func (s *Service) Get(ctx context.Context, p principal.Principal, id, ref string) (GetResult, error) {
-	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+	if s.snapshots == nil || postgres.InWorkflow(ctx) {
 		return s.get(ctx, p, id, ref)
 	}
 	if err := p.Require("ledger:read"); err != nil {
@@ -520,7 +520,7 @@ func applyPatch(spec *Spec, patch jsonpatch.Patch) error {
 	return nil
 }
 func (s *Service) Preview(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {
-	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+	if s.snapshots == nil || postgres.InWorkflow(ctx) {
 		return s.preview(ctx, p, id, version, params)
 	}
 	if err := p.Require("ledger:read"); err != nil {
@@ -543,7 +543,7 @@ func (s *Service) Preview(ctx context.Context, p principal.Principal, id, versio
 
 // rendered returns the shared snapshot, or a new render when there is none; callers must not modify it.
 func (s *Service) rendered(ctx context.Context, p principal.Principal, id, version string, params map[string]any) (Rendered, error) {
-	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+	if s.snapshots == nil || postgres.InWorkflow(ctx) {
 		return s.preview(ctx, p, id, version, params)
 	}
 	key := struct {

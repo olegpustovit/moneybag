@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"strings"
@@ -54,7 +55,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write", "dash:write", "model:write"}}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
 		t.Fatal(err)

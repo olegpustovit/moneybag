@@ -38,24 +38,3 @@ func Next(ctx context.Context, db *mongo.Database, name string) (int64, error) {
 	err := db.Collection("counters").FindOneAndUpdate(ctx, bson.M{"_id": name}, bson.M{"$inc": bson.M{"n": 1}, "$setOnInsert": bson.M{"user_id": owner, "name": key}}, options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)).Decode(&out)
 	return out.N, err
 }
-
-type workflowKey struct{}
-
-var workflowLock = make(chan struct{}, 1)
-
-// InWorkflow reports whether ctx is inside a serialized write workflow.
-func InWorkflow(ctx context.Context) bool { return ctx.Value(workflowKey{}) != nil }
-
-// shortcut: standalone writes are serialized in one API process; coordinate writers before adding API replicas.
-func Workflow(ctx context.Context, fn func(context.Context) error) error {
-	if ctx.Value(workflowKey{}) != nil {
-		return fn(ctx)
-	}
-	select {
-	case workflowLock <- struct{}{}:
-		defer func() { <-workflowLock }()
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	return fn(context.WithValue(ctx, workflowKey{}, true))
-}

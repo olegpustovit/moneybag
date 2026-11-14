@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"reflect"
@@ -182,7 +183,7 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if err != nil || len(otherCombined) != 2 || otherCombined[0].Total != 999 || reads.Load() != 2 {
 		t.Fatal("combined monthly results crossed user boundaries")
 	}
-	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewMongoRepository(db)))
+	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewPostgresRepository(pgtest.New(t))))
 	if err != nil {
 		t.Fatal(err)
 	}

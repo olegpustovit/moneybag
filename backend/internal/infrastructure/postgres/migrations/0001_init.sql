@@ -182,3 +182,39 @@ CREATE TABLE dashboard_snapshots (
     rendered jsonb NOT NULL DEFAULT '{}',
     at timestamptz NOT NULL
 );
+
+CREATE TABLE events (
+    user_id text NOT NULL DEFAULT '',
+    id text PRIMARY KEY,
+    seq bigint NOT NULL DEFAULT 0,
+    at timestamptz NOT NULL,
+    actor jsonb NOT NULL DEFAULT '{}',
+    actor_id text NOT NULL DEFAULT '',
+    tool text NOT NULL DEFAULT '',
+    target jsonb NOT NULL DEFAULT '{}',
+    target_id text NOT NULL DEFAULT '',
+    -- Hashes bind these original JSON bytes, including their key order.
+    before bytea,
+    after bytea,
+    reason text NOT NULL DEFAULT '',
+    grant_id text NOT NULL DEFAULT '',
+    grant_hash text NOT NULL DEFAULT '',
+    summary text NOT NULL DEFAULT '',
+    batch_id text NOT NULL DEFAULT '',
+    routine boolean NOT NULL DEFAULT false,
+    prev_hash text NOT NULL DEFAULT '',
+    hash text NOT NULL DEFAULT '',
+    UNIQUE (user_id,seq)
+);
+CREATE INDEX events_user_target ON events (user_id,target_id);
+CREATE INDEX events_user_tool_seq ON events (user_id,tool,seq DESC);
+CREATE INDEX events_user_actor_seq ON events (user_id,actor_id,seq DESC);
+CREATE TABLE audit_outcomes (
+    hash text NOT NULL DEFAULT '',
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT '',
+    before bytea,
+    after bytea,
+    at timestamptz NOT NULL
+);

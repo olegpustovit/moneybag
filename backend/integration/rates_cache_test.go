@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -20,7 +21,7 @@ func TestQuoteCacheLoadsRequestedPairsOnce(t *testing.T) {
 	ctx := context.Background()
 	var reads atomic.Int64
 	config := db.Config().Copy()
-	config.ConnConfig.Tracer = quoteQueryCounter{&reads}
+	config.ConnConfig.Tracer = sqlQueryCounter{reads: &reads}
 	traced, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatal(err)
@@ -88,10 +89,22 @@ func TestQuoteCacheLoadsRequestedPairsOnce(t *testing.T) {
 	}
 }
 
-type quoteQueryCounter struct{ reads *atomic.Int64 }
+type sqlQueryCounter struct{ reads, writes *atomic.Int64 }
 
-func (c quoteQueryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
-	c.reads.Add(1)
+func (c sqlQueryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	fields := strings.Fields(data.SQL)
+	if len(fields) > 0 {
+		switch strings.ToUpper(fields[0]) {
+		case "SELECT", "WITH", "EXPLAIN":
+			if c.reads != nil {
+				c.reads.Add(1)
+			}
+		case "INSERT", "UPDATE", "DELETE":
+			if c.writes != nil {
+				c.writes.Add(1)
+			}
+		}
+	}
 	return ctx
 }
-func (c quoteQueryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+func (c sqlQueryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}

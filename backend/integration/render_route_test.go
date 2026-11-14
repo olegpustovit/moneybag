@@ -3,6 +3,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"net/http"
 	"strings"
@@ -59,6 +61,14 @@ func (h *readHarness) docCounts(t *testing.T) map[string]int64 {
 		if out[name], err = h.db.Collection(name).CountDocuments(h.ctx, map[string]any{}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	pool := pgtest.New(t)
+	for _, name := range []string{"counters", "prices", "rate_sync", "feedback", "saved_views", "usage", "users", "credentials", "sessions", "invites", "settings", "oauth_clients", "oauth_codes", "oauth_grants", "oauth_tokens", "admin_confirmations", "shares", "dashboard_snapshots", "events", "audit_outcomes"} {
+		var count int64
+		if err := pool.QueryRow(h.ctx, "SELECT count(*) FROM "+pgx.Identifier{name}.Sanitize()).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		out["postgres."+name] = count
 	}
 	return out
 }

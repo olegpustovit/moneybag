@@ -51,7 +51,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 		t.Fatal(e)
 	}
 	p := identity.Principal(u)
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	repo := ledger.NewMongoRepository(db)
 	if e = repo.Init(ctx, p); e != nil {
 		t.Fatal(e)

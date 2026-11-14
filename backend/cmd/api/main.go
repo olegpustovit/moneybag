@@ -102,7 +102,7 @@ func run() error {
 	if e = auth.Init(ctx); e != nil {
 		return fmt.Errorf("initialize OAuth: %w", e)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pool))
 	bookRepo := ledger.NewMongoRepository(db)
 	if e = ids.EachUser(ctx, func(p principal.Principal) error { return bookRepo.Init(ctx, p) }); e != nil {
 		return fmt.Errorf("initialize ledger indexes: %w", e)

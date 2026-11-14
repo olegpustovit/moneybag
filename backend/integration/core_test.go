@@ -87,7 +87,7 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if strings.Contains(string(encoded), raw) || strings.Contains(string(encoded), session.CSRF) {
 		t.Fatal("session secret leaked")
 	}
-	auditSvc := audit.NewService(audit.NewMongoRepository(db))
+	auditSvc := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	repo := ledger.NewMongoRepository(db)
 	if e = repo.Init(ctx, pa); e != nil {
 		t.Fatal(e)

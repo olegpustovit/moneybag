@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"strings"
@@ -36,7 +37,7 @@ func TestDashboardPatchPreviewWritesNothing(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "dash:write"}}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	expr, err := expressions.New()
 	if err != nil {
 		t.Fatal(err)

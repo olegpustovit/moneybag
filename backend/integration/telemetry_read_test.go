@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"log/slog"
@@ -105,7 +107,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	if err = repo.Init(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
 		t.Fatal(err)
@@ -782,7 +784,15 @@ func TestTelemetryQueryPlans(t *testing.T) {
 	if _, err := db.Collection("journal").InsertMany(ctx, journal); err != nil {
 		t.Fatal(err)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	pgdb := pgtest.New(t)
+	config := pgdb.Config().Copy()
+	config.ConnConfig.Tracer = sqlQueryCounter{reads: &reads, writes: &writes}
+	traced, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	a := audit.NewService(audit.NewPostgresRepository(traced))
 	for i := range 210 {
 		tool := "tool_a"
 		if i%3 == 0 {
@@ -810,11 +820,11 @@ func TestTelemetryQueryPlans(t *testing.T) {
 	if len(before) == 0 || len(after) == 0 {
 		t.Fatal("Result lost the payloads")
 	}
-	var stored bson.M
-	if err = db.Collection("audit_outcomes").FindOne(ctx, bson.M{"_id": page.Events[0].ID}).Decode(&stored); err != nil {
+	var storedBefore []byte
+	if err = pgdb.QueryRow(ctx, `SELECT before FROM audit_outcomes WHERE id=@id`, pgx.NamedArgs{"id": page.Events[0].ID}).Scan(&storedBefore); err != nil {
 		t.Fatal(err)
 	}
-	if _, dup := stored["before"]; dup {
+	if storedBefore != nil {
 		t.Fatal("outcome still stores before")
 	}
 	if err = a.Verify(ctx, p); err != nil {
@@ -823,7 +833,7 @@ func TestTelemetryQueryPlans(t *testing.T) {
 	// An outcome written before this change keeps its payloads and hash, and still verifies.
 	legacy := audit.Outcome{ID: page.Events[0].ID, UserID: p.UserID, Status: "completed", Before: page.Events[0].Before, After: page.Events[0].After, At: page.Events[0].Outcome.At}
 	legacy.Hash = audit.OutcomeDigest(page.Events[0].Hash, legacy)
-	if _, err = db.Collection("audit_outcomes").ReplaceOne(ctx, bson.M{"_id": legacy.ID}, legacy); err != nil {
+	if _, err = pgdb.Exec(ctx, `UPDATE audit_outcomes SET hash=@hash,user_id=@user,status=@status,before=@before,after=@after,at=@at WHERE id=@id`, pgx.NamedArgs{"hash": legacy.Hash, "user": legacy.UserID, "status": legacy.Status, "before": []byte(legacy.Before), "after": []byte(legacy.After), "at": legacy.At, "id": legacy.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Verify(ctx, p); err != nil {
@@ -831,6 +841,40 @@ func TestTelemetryQueryPlans(t *testing.T) {
 	}
 	if page, err = a.List(ctx, p, audit.ListInput{Limit: 1}); err != nil || page.Events[0].Outcome.Before != nil {
 		t.Fatal("legacy outcome duplicates its event", err)
+	}
+
+	// Give PostgreSQL representative cross-owner cardinality before inspecting its real plans.
+	if _, err = pgdb.Exec(ctx, `INSERT INTO events(id,user_id,seq,at) SELECT 'noise-'||n,'01ARZ3NDEKTSV4RRFFQ69G5FAW',n,now() FROM generate_series(1,10000) n`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pgdb.Exec(ctx, `ANALYZE events`); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query, index string
+		count        int
+	}{
+		{`SELECT id FROM events WHERE user_id=@user AND tool='tool_b' ORDER BY seq DESC`, "events_user_tool_seq", 70},
+		{`SELECT id FROM events WHERE user_id=@user AND actor_id='actor-1' ORDER BY seq DESC`, "events_user_actor_seq", 42},
+	} {
+		var raw []byte
+		if err = pgdb.QueryRow(ctx, "EXPLAIN (ANALYZE,FORMAT JSON) "+tc.query, pgx.NamedArgs{"user": p.UserID}).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		var result []struct {
+			Plan struct {
+				Node    string  `json:"Node Type"`
+				Index   string  `json:"Index Name"`
+				Rows    float64 `json:"Actual Rows"`
+				Removed float64 `json:"Rows Removed by Filter"`
+			}
+		}
+		if err = json.Unmarshal(raw, &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 1 || result[0].Plan.Node != "Index Scan" || result[0].Plan.Index != tc.index || result[0].Plan.Rows != float64(tc.count) || result[0].Plan.Rows+result[0].Plan.Removed > float64(tc.count) {
+			t.Fatalf("%s plan: %s", tc.index, raw)
+		}
 	}
 
 	type plan struct {
@@ -841,8 +885,6 @@ func TestTelemetryQueryPlans(t *testing.T) {
 		examined int64
 	}
 	for _, c := range []plan{
-		{"events", bson.M{"user_id": p.UserID, "tool": "tool_b"}, bson.D{{Key: "seq", Value: -1}}, "user_id_1_tool_1_seq_-1", 70},
-		{"events", bson.M{"user_id": p.UserID, "actor.id": "actor-1"}, bson.D{{Key: "seq", Value: -1}}, "user_id_1_actor.id_1_seq_-1", 42},
 		{"journal", bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$lte": "2026-12-31"}, "postings.account": bson.M{"$in": bson.A{"assets:a07"}}}, nil, "user_id_1_postings.account_1_date_1", entries / 40},
 	} {
 		command := bson.D{{Key: "find", Value: c.find}, {Key: "filter", Value: c.filter}}

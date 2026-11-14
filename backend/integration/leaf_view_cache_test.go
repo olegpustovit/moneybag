@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/url"
 	"os"
 	"strings"
@@ -94,7 +95,7 @@ func TestNestedLeafViewMemoization(t *testing.T) {
 	if got := viewReads.Load(); got != 4 {
 		t.Fatalf("view definitions read %d times, want 4", got)
 	}
-	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewMongoRepository(db)))
+	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewPostgresRepository(pgtest.New(t))))
 	if err != nil {
 		t.Fatal(err)
 	}

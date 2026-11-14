@@ -51,7 +51,7 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 		t.Fatal(e)
 	}
 	p := identity.Principal(u)
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 
 	var goldDown atomic.Bool
@@ -156,7 +156,7 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	if s := state("swissquote"); s.Status != "skipped" {
 		t.Fatal("fallback not skipped", s)
 	}
-	revisions := audit.NewService(audit.NewMongoRepository(db))
+	revisions := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	before, e := revisions.Revision(ctx, p)
 	if e != nil {
 		t.Fatal(e)
@@ -207,16 +207,16 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	}
 	timer := time.NewTimer(time.Until(future) + 100*time.Millisecond)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-timer.C:
+	// A host clock correction can make a monotonic timer fire before the wall-clock quote date.
+	for time.Now().Before(future.Add(100 * time.Millisecond)) {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-timer.C:
+			timer.Reset(time.Until(future) + 100*time.Millisecond)
+		}
 	}
 	afterRate, e := sources.Rows(ctx, p, "rates:EUR/USD")
-	if e == nil && afterRate[0]["value"] != float64(2) {
-		direct, de := prices.Get(ctx, p, []string{"EUR/USD"}, "")
-		t.Logf("scheduled quote diagnostic: now=%s future=%s direct=%+v directError=%v", time.Now().UTC(), future, direct, de)
-	}
 	if e != nil || afterRate[0]["value"] != float64(2) {
 		t.Fatalf("rate after scheduled quote: %v, %v", afterRate, e)
 	}

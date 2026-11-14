@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"log/slog"
 	"net/url"
@@ -84,7 +87,15 @@ func TestPrewarmAfterPostedEntriesAndCancellation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write"}}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	pgdb := pgtest.New(t)
+	config := pgdb.Config().Copy()
+	config.ConnConfig.Tracer = warmSQLCounter{&reads}
+	traced, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	a := audit.NewService(audit.NewPostgresRepository(traced))
 	repo := ledger.NewMongoRepository(db)
 	if err = repo.Init(ctx, p); err != nil {
 		t.Fatal(err)
@@ -168,3 +179,13 @@ func TestPrewarmAfterPostedEntriesAndCancellation(t *testing.T) {
 		}
 	}
 }
+
+type warmSQLCounter struct{ reads *atomic.Int64 }
+
+func (c warmSQLCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if strings.HasPrefix(strings.TrimSpace(data.SQL), "SELECT") {
+		c.reads.Add(1)
+	}
+	return ctx
+}
+func (c warmSQLCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
