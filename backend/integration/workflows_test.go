@@ -79,7 +79,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 	classes := classify.NewService(classify.NewPostgresRepository(pgtest.New(t)), book, a, expr)
 	rec := reconcile.NewService(reconcile.NewPostgresRepository(pgtest.New(t)), book, a)
-	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
+	imp := imports.NewService(imports.NewPostgresRepository(pgtest.New(t)), book, classes, rec, a)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
@@ -125,6 +125,10 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil {
 		t.Fatal("stage", e)
 	}
+	var storedFile []byte
+	if e = pgtest.New(t).QueryRow(ctx, `SELECT content FROM import_files WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": start.BatchID, "user": pa.UserID}).Scan(&storedFile); e != nil || string(storedFile) != csv {
+		t.Fatalf("statement bytes changed: %d bytes, %v", len(storedFile), e)
+	}
 	preview, e := imp.Preview(ctx, pa, start.BatchID, 0)
 	if e != nil || len(preview.Proposed) != 2 {
 		t.Fatal("preview", preview, e)
@@ -154,7 +158,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal(e)
 	}
 	// A batch staged before the display-payee fix must also remain resumable.
-	if _, e = db.Collection("import_rows").UpdateOne(ctx, bson.M{"_id": preview.Proposed[0].ID, "user_id": pa.UserID}, bson.M{"$set": bson.M{"proposed.payee": longDescription}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `UPDATE import_rows SET proposed=jsonb_set(proposed,'{payee}',to_jsonb(@payee::text)) WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"payee": longDescription, "id": preview.Proposed[0].ID, "user": pa.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	posted, e := imp.Commit(ctx, pa, start.BatchID, true)
@@ -573,7 +577,6 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || len(q.Rows) != 2 {
 		t.Fatal("restore created row", q, e)
 	}
-	rawCount := db.Collection("import_rows")
 	reversals, e := imp.Undo(ctx, pa, start.BatchID, "Synthetic import correction")
 	if e != nil || len(reversals) != 2 {
 		t.Fatal("import undo", reversals, e)
@@ -591,7 +594,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || afterRedo.Count != 0 {
 		t.Fatal("reversal chain changed effective categories", afterRedo, e)
 	}
-	n, e := rawCount.CountDocuments(ctx, bson.M{"user_id": pa.UserID, "batch_id": start.BatchID})
+	var n int64
+	e = pgtest.New(t).QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE user_id=@user AND batch_id=@batch`, pgx.NamedArgs{"user": pa.UserID, "batch": start.BatchID}).Scan(&n)
 	if e != nil || n != 2 {
 		t.Fatal("import raw provenance lost", n, e)
 	}

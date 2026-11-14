@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
@@ -23,7 +22,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -482,12 +480,10 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	if err != nil {
 		t.Fatal(err)
 	}
-	batches := make([]any, 0, 105)
-	for i := 0; i < 102; i++ {
-		batches = append(batches, bson.M{"_id": fmt.Sprintf("navigation-count-%d", i), "user_id": p.UserID, "status": "ready"})
+	if _, err = pgdb.Exec(ctx, `INSERT INTO import_batches(id,user_id,status) SELECT 'navigation-count-'||i,@user,'ready' FROM generate_series(0,101) i`, pgx.NamedArgs{"user": p.UserID}); err != nil {
+		t.Fatal(err)
 	}
-	batches = append(batches, bson.M{"_id": "navigation-staging", "user_id": p.UserID, "status": "staging"}, bson.M{"_id": "navigation-committing", "user_id": p.UserID, "status": "committing"}, bson.M{"_id": "navigation-committed", "user_id": p.UserID, "status": "committed"}, bson.M{"_id": "navigation-other", "user_id": "other-user", "status": "ready"})
-	if _, err = db.Collection("import_batches").InsertMany(ctx, batches); err != nil {
+	if _, err = pgdb.Exec(ctx, `INSERT INTO import_batches(id,user_id,status) VALUES ('navigation-staging',@user,'staging'),('navigation-committing',@user,'committing'),('navigation-committed',@user,'committed'),('navigation-other','other-user','ready')`, pgx.NamedArgs{"user": p.UserID}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = pgdb.Exec(ctx, `INSERT INTO discrepancies(id,user_id,status,archived) VALUES ('navigation-open',@user,'open',false),('navigation-archived',@user,'open',true),('navigation-resolved',@user,'resolved',false),('navigation-other','other-user','open',false)`, pgx.NamedArgs{"user": p.UserID}); err != nil {
@@ -502,10 +498,8 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	if _, err = pgdb.Exec(ctx, `DELETE FROM discrepancies WHERE id LIKE 'navigation-%'`); err != nil {
 		t.Fatal(err)
 	}
-	for _, collection := range []string{"import_batches"} {
-		if _, err = db.Collection(collection).DeleteMany(ctx, bson.M{"_id": bson.M{"$regex": "^navigation-"}}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err = pgdb.Exec(ctx, `DELETE FROM import_batches WHERE id LIKE 'navigation-%'`); err != nil {
+		t.Fatal(err)
 	}
 	for _, path := range []string{"/api/session", "/api/imports", "/api/imports/count", "/api/reconcile/count", "/api/settings", "/api/activity/agents", "/api/expr/catalog"} {
 		status, _, headers := request("GET", path, nil, false, false, true)

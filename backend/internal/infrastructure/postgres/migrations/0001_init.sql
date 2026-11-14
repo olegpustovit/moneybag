@@ -374,3 +374,50 @@ CREATE TABLE row_keys (
  FOREIGN KEY(user_id,table_id,row_id) REFERENCES rows(user_id,table_id,id) ON DELETE CASCADE
 );
 CREATE INDEX row_keys_row ON row_keys(user_id,table_id,row_id);
+CREATE TABLE import_batches (
+ id text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ account text NOT NULL DEFAULT '',
+ format text NOT NULL DEFAULT '',
+ file_sha256 text NOT NULL DEFAULT '',
+ status text NOT NULL DEFAULT '',
+ candidates jsonb NOT NULL DEFAULT '[]',
+ "from" text NOT NULL DEFAULT '',
+ "to" text NOT NULL DEFAULT '',
+ closing_balance jsonb,
+ created_at timestamptz NOT NULL DEFAULT '0001-01-01T00:00:00Z'
+);
+CREATE INDEX import_batches_user_created ON import_batches(user_id,created_at DESC);
+CREATE TABLE import_rows (
+ id text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ batch_id text NOT NULL DEFAULT '',
+ account text NOT NULL DEFAULT '',
+ dedupe_key text NOT NULL DEFAULT '',
+ raw jsonb,
+ proposed jsonb NOT NULL DEFAULT '{}',
+ kind text NOT NULL DEFAULT '',
+ entry_id text NOT NULL DEFAULT '',
+ reversal_id text NOT NULL DEFAULT '',
+ proposed_id text NOT NULL DEFAULT '',
+ skip boolean NOT NULL DEFAULT false,
+ UNIQUE(user_id,account,dedupe_key)
+);
+CREATE INDEX import_rows_user_batch ON import_rows(user_id,batch_id);
+CREATE TABLE import_files (
+ id text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ content bytea,
+ sha256 text NOT NULL DEFAULT ''
+);
+CREATE TABLE feeds (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ url text NOT NULL DEFAULT '',
+ account text NOT NULL DEFAULT '',
+ format text NOT NULL DEFAULT '',
+ date_format text NOT NULL DEFAULT '',
+ token_encrypted text NOT NULL DEFAULT ''
+);
+CREATE INDEX feeds_user ON feeds(user_id);
