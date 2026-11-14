@@ -135,7 +135,7 @@ func run() error {
 	services := mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Logger: log}
 	services.Classify = classes
 	services.Semantic, services.PublicURL = meaning, cfg.PublicURL
-	services.Feedback = feedback.NewService(feedback.NewMongoRepository(db), a)
+	services.Feedback = feedback.NewService(feedback.NewPostgresRepository(pool), a)
 	services.Admin = admin.NewService(admin.NewMongoRepository(db), ids, auth, a, cfg.PublicURL)
 	if e = services.Admin.Init(ctx); e != nil {
 		return fmt.Errorf("initialize admin: %w", e)

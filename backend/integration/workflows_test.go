@@ -599,7 +599,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("resolved assertion was stale", state, e)
 	}
 	testSingleSource(t, ctx, pa, book, budgets, sources)
-	flags := feedback.NewService(feedback.NewMongoRepository(db), a)
+	flags := feedback.NewService(feedback.NewPostgresRepository(pgtest.New(t)), a)
 	people := admin.NewService(admin.NewMongoRepository(db), ids, oauth.NewService(oauth.NewMongoRepository(db), ids, "http://localhost:6459"), a, "http://localhost:6459")
 	hist.Semantic, hist.Feedback, hist.Admin = meaning, flags, people
 	imp.SetSecretKey(make([]byte, 32))

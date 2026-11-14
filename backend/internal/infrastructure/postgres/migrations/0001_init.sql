@@ -35,3 +35,36 @@ CREATE TABLE rate_sync (
     newest_value text NOT NULL DEFAULT ''
 );
 CREATE INDEX rate_sync_user ON rate_sync (user_id);
+
+CREATE TABLE feedback (
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    target jsonb NOT NULL DEFAULT '{}',
+    note text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT '',
+    resolution text NOT NULL DEFAULT '',
+    answer text NOT NULL DEFAULT '',
+    created_by jsonb NOT NULL DEFAULT '{}',
+    created_at timestamptz NOT NULL,
+    resolved_by jsonb NOT NULL DEFAULT '{}',
+    resolved_at timestamptz
+);
+
+CREATE TABLE saved_views (
+    storage_key text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    id text NOT NULL DEFAULT '',
+    name text NOT NULL DEFAULT '',
+    page text NOT NULL DEFAULT '',
+    state jsonb
+);
+
+CREATE TABLE usage (
+    id text PRIMARY KEY,
+    user_id text NOT NULL DEFAULT '',
+    date text NOT NULL DEFAULT '',
+    path text NOT NULL DEFAULT '',
+    dashboard text NOT NULL DEFAULT '',
+    views bigint NOT NULL DEFAULT 0,
+    last_at text NOT NULL DEFAULT ''
+);

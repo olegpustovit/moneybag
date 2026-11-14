@@ -42,3 +42,10 @@ Unrelated pre-existing edits to `agentpack.toml` and `pack.lock` are preserved a
 - During the staged branch port, API startup opens/migrates PostgreSQL for ported components, while unported components still use their original MongoDB holders. There is no alternate driver implementation or datastore feature flag. This intermediate branch requires both connections and must not deploy. Final wiring will remove Mongo completely, put DATABASE_URL validation in loadConfig, and switch the health ping.
 - Existing integration fixture setup now gives rates its own disposable PG database while other components remain unported; the cache test uses a pgx query tracer instead of Mongo's command monitor. No assertion values changed.
 - The off-VM nightly timer's actual archive was restored successfully on PostgreSQL 18. It currently covers the empty pre-cutover database; populated-data verification is still required at cutover.
+
+## Feedback port
+
+- Flags, resolve/reopen, saved views and usage now use PostgreSQL only. Nested targets/actors remain jsonb. Saved views retain both the original Mongo `_id` as `storage_key` and their public logical `id`; using the same column for both would lose data.
+- Usage retains its original per-owner/day/path/dashboard key, atomic increment, maximum timestamp, grouping, sort and 200-row cap. Saved-view upserts and deletes keep owner guards; an inconsistent conflicting storage key cannot transfer another owner's view.
+- R2: this component has no `$ne`, `$exists`, `$in`, `$nin`, `$or` or null filters. Optional resolved timestamps and saved state remain nullable; missing non-pointer fields get zero defaults.
+- Passing checks: whole-app build and feedback vet; existing view/bootstrap regressions (2.409 s); `TestSharedDatabaseLedgerIdentityOAuth` including its full product/MCP/telemetry workflows (11.615 s) with unchanged assertion values; PostgreSQL tests for saved-state round-trip, update/delete isolation, non-null empty lists, concurrent usage increments and owner isolation.

@@ -6,36 +6,35 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"slices"
 	"strings"
 	"time"
 )
 
 type Target struct {
-	Dashboard string         `json:"dashboard,omitempty" bson:"dashboard,omitempty"`
-	Component string         `json:"component,omitempty" bson:"component,omitempty"`
-	Metric    string         `json:"metric,omitempty" bson:"metric,omitempty"`
-	Value     string         `json:"value,omitempty" bson:"value,omitempty"`
-	Params    map[string]any `json:"params,omitempty" bson:"params,omitempty"`
+	Dashboard string         `json:"dashboard,omitempty" db:"dashboard"`
+	Component string         `json:"component,omitempty" db:"component"`
+	Metric    string         `json:"metric,omitempty" db:"metric"`
+	Value     string         `json:"value,omitempty" db:"value"`
+	Params    map[string]any `json:"params,omitempty" db:"params"`
 }
 type Flag struct {
-	ID         string          `json:"id" bson:"_id"`
-	UserID     string          `json:"-" bson:"user_id"`
-	Target     Target          `json:"target" bson:"target"`
-	Note       string          `json:"note" bson:"note"`
-	Status     string          `json:"status" bson:"status"`
-	Resolution string          `json:"resolution,omitempty" bson:"resolution,omitempty"`
-	Answer     string          `json:"answer,omitempty" bson:"answer,omitempty"`
-	CreatedBy  principal.Actor `json:"created_by" bson:"created_by"`
-	CreatedAt  time.Time       `json:"created_at" bson:"created_at"`
-	ResolvedBy principal.Actor `json:"resolved_by,omitzero" bson:"resolved_by,omitempty"`
-	ResolvedAt *time.Time      `json:"resolved_at,omitempty" bson:"resolved_at,omitempty"`
+	ID         string          `json:"id" db:"id"`
+	UserID     string          `json:"-" db:"user_id"`
+	Target     Target          `json:"target" db:"target"`
+	Note       string          `json:"note" db:"note"`
+	Status     string          `json:"status" db:"status"`
+	Resolution string          `json:"resolution,omitempty" db:"resolution"`
+	Answer     string          `json:"answer,omitempty" db:"answer"`
+	CreatedBy  principal.Actor `json:"created_by" db:"created_by"`
+	CreatedAt  time.Time       `json:"created_at" db:"created_at"`
+	ResolvedBy principal.Actor `json:"resolved_by,omitzero" db:"resolved_by"`
+	ResolvedAt *time.Time      `json:"resolved_at,omitempty" db:"resolved_at"`
 }
 type FlagInput struct {
 	Target Target `json:"target"`
@@ -51,14 +50,14 @@ type ListInput struct {
 	Limit  int    `json:"limit,omitempty" jsonschema:"1..200, default 50"`
 }
 type UsageBeacon struct {
-	Path      string `json:"path"`
-	Dashboard string `json:"dashboard,omitempty"`
+	Path      string `json:"path" db:"path"`
+	Dashboard string `json:"dashboard,omitempty" db:"dashboard"`
 }
 type UsageRow struct {
-	Path      string `json:"path"`
-	Dashboard string `json:"dashboard,omitempty"`
-	Views     int64  `json:"views"`
-	LastAt    string `json:"last_at"`
+	Path      string `json:"path" db:"path"`
+	Dashboard string `json:"dashboard,omitempty" db:"dashboard"`
+	Views     int64  `json:"views" db:"views"`
+	LastAt    string `json:"last_at" db:"last_at"`
 }
 type UsageInput struct {
 	From string `json:"from,omitempty" jsonschema:"YYYY-MM-DD, default 30 days ago"`
@@ -72,21 +71,21 @@ type UsageReport struct {
 
 // SavedView is one person's remembered page state; never shared.
 type SavedView struct {
-	Key    string          `json:"-" bson:"_id"`
-	UserID string          `json:"-" bson:"user_id"`
-	ID     string          `json:"id" bson:"id"`
-	Name   string          `json:"name" bson:"name"`
-	Page   string          `json:"page" bson:"page"`
-	State  json.RawMessage `json:"state,omitempty" bson:"state,omitempty"`
+	Key    string          `json:"-" db:"storage_key"`
+	UserID string          `json:"-" db:"user_id"`
+	ID     string          `json:"id" db:"id"`
+	Name   string          `json:"name" db:"name"`
+	Page   string          `json:"page" db:"page"`
+	State  json.RawMessage `json:"state,omitempty" db:"state"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo  *MongoRepository
+	repo  *PostgresRepository
 	audit *audit.Service
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository   { return &MongoRepository{db} }
-func NewService(r *MongoRepository, a *audit.Service) *Service { return &Service{r, a} }
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository  { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, a *audit.Service) *Service { return &Service{r, a} }
 
 func (s *Service) Flag(ctx context.Context, p principal.Principal, in FlagInput) (Flag, error) {
 	if e := p.Require("ledger:read"); e != nil {
@@ -101,7 +100,9 @@ func (s *Service) Flag(ctx context.Context, p principal.Principal, in FlagInput)
 	}
 	flag := Flag{ID: ulid.Make().String(), UserID: p.UserID, Target: in.Target, Note: in.Note, Status: "open", CreatedBy: p.Actor, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
 	_, e = s.audit.Write(audit.WithSummary(ctx, "Flagged a number for an agent to check"), p, "feedback_flag", audit.Target{Collection: "feedback", ID: flag.ID}, "", nil, flag, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("feedback").InsertOne(tx, flag)
+		const insertSQL = `INSERT INTO feedback (id,user_id,target,note,status,resolution,answer,created_by,created_at,resolved_by,resolved_at)
+ VALUES (@id,@user,@target,@note,@status,@resolution,@answer,@created_by,@created_at,@resolved_by,@resolved_at)`
+		_, e := s.repo.db.Exec(tx, insertSQL, pgx.NamedArgs{"id": flag.ID, "user": flag.UserID, "target": flag.Target, "note": flag.Note, "status": flag.Status, "resolution": flag.Resolution, "answer": flag.Answer, "created_by": flag.CreatedBy, "created_at": flag.CreatedAt, "resolved_by": flag.ResolvedBy, "resolved_at": flag.ResolvedAt})
 		return e
 	})
 	return flag, e
@@ -117,35 +118,42 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 	if in.Limit < 1 || in.Limit > 200 {
 		return nil, fmt.Errorf("limit must be 1..200")
 	}
-	f := bson.M{"user_id": p.UserID}
+	status := ""
 	switch in.Status {
 	case "", "open":
-		f["status"] = "open"
+		status = "open"
 	case "resolved":
-		f["status"] = "resolved"
+		status = "resolved"
 	case "all":
 	default:
 		return nil, fmt.Errorf("status must be open, resolved or all")
 	}
-	cur, e := s.repo.db.Collection("feedback").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "_id", Value: -1}}).SetLimit(int64(in.Limit)))
+	const listSQL = `SELECT * FROM feedback WHERE user_id=@user AND (@status='' OR status=@status) ORDER BY id DESC LIMIT @limit`
+	rows, e := s.repo.db.Query(ctx, listSQL, pgx.NamedArgs{"user": p.UserID, "status": status, "limit": in.Limit})
 	if e != nil {
 		return nil, e
 	}
-	out := []Flag{}
-	return out, cur.All(ctx, &out)
+	return pgx.CollectRows(rows, pgx.RowToStructByName[Flag])
 }
 
 func (s *Service) OpenCount(ctx context.Context, p principal.Principal) (int64, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return 0, e
 	}
-	return s.repo.db.Collection("feedback").CountDocuments(ctx, bson.M{"user_id": p.UserID, "status": "open"})
+	const countSQL = `SELECT count(*) FROM feedback WHERE user_id=@user AND status='open'`
+	var count int64
+	err := s.repo.db.QueryRow(ctx, countSQL, pgx.NamedArgs{"user": p.UserID}).Scan(&count)
+	return count, err
 }
 
 func (s *Service) load(ctx context.Context, p principal.Principal, id string) (Flag, error) {
-	var flag Flag
-	e := s.repo.db.Collection("feedback").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID}).Decode(&flag)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const loadSQL = `SELECT * FROM feedback WHERE id=@id AND user_id=@user`
+	rows, e := s.repo.db.Query(ctx, loadSQL, pgx.NamedArgs{"id": id, "user": p.UserID})
+	if e != nil {
+		return Flag{}, e
+	}
+	flag, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Flag])
+	if errors.Is(e, pgx.ErrNoRows) {
 		return Flag{}, principal.ErrNotFound
 	}
 	return flag, e
@@ -172,7 +180,8 @@ func (s *Service) Resolve(ctx context.Context, p principal.Principal, in Resolve
 		out.Status, out.Resolution, out.Answer, out.ResolvedBy, out.ResolvedAt = "resolved", in.Resolution, in.Note, p.Actor, &now
 		summary := map[string]string{"fixed": "Fixed a flagged number", "explained": "Explained a flagged number", "wont_fix": "Closed a flagged number without a change", "duplicate": "Closed a duplicate flag"}[in.Resolution]
 		_, e = s.audit.Write(audit.WithSummary(tx, summary), p, "feedback_resolve", audit.Target{Collection: "feedback", ID: in.ID}, in.Note, old, out, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("feedback").ReplaceOne(tx, bson.M{"_id": in.ID, "user_id": p.UserID}, out)
+			const updateSQL = `UPDATE feedback SET status=@status,resolution=@resolution,answer=@answer,resolved_by=@actor,resolved_at=@at WHERE id=@id AND user_id=@user`
+			_, e := s.repo.db.Exec(tx, updateSQL, pgx.NamedArgs{"id": out.ID, "user": p.UserID, "status": out.Status, "resolution": out.Resolution, "answer": out.Answer, "actor": out.ResolvedBy, "at": out.ResolvedAt})
 			return e
 		})
 		return e
@@ -193,7 +202,8 @@ func (s *Service) Reopen(ctx context.Context, p principal.Principal, id, reason 
 		next := old
 		next.Status, next.Resolution, next.Answer, next.ResolvedBy, next.ResolvedAt = "open", "", "", principal.Actor{}, nil
 		_, e = s.audit.Write(audit.WithSummary(tx, "Reopened a flagged number"), p, "feedback_reopen", audit.Target{Collection: "feedback", ID: id}, reason, old, next, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("feedback").ReplaceOne(tx, bson.M{"_id": id, "user_id": p.UserID}, next)
+			const updateSQL = `UPDATE feedback SET status=@status,resolution=@resolution,answer=@answer,resolved_by=@actor,resolved_at=@at WHERE id=@id AND user_id=@user`
+			_, e := s.repo.db.Exec(tx, updateSQL, pgx.NamedArgs{"id": next.ID, "user": p.UserID, "status": next.Status, "resolution": next.Resolution, "answer": next.Answer, "actor": next.ResolvedBy, "at": next.ResolvedAt})
 			return e
 		})
 		return e
@@ -212,7 +222,9 @@ func (s *Service) Record(ctx context.Context, p principal.Principal, in UsageBea
 	now := time.Now().UTC()
 	date := now.Format("2006-01-02")
 	key := p.UserID + "|" + date + "|" + path + "|" + in.Dashboard
-	_, e := s.repo.db.Collection("usage").UpdateOne(ctx, bson.M{"_id": key}, bson.M{"$inc": bson.M{"views": int64(1)}, "$max": bson.M{"last_at": now.Format(time.RFC3339)}, "$setOnInsert": bson.M{"user_id": p.UserID, "date": date, "path": path, "dashboard": in.Dashboard}}, options.UpdateOne().SetUpsert(true))
+	const recordSQL = `INSERT INTO usage (id,user_id,date,path,dashboard,views,last_at) VALUES (@id,@user,@date,@path,@dashboard,1,@at)
+ ON CONFLICT (id) DO UPDATE SET views=usage.views+1,last_at=GREATEST(usage.last_at,EXCLUDED.last_at)`
+	_, e := s.repo.db.Exec(ctx, recordSQL, pgx.NamedArgs{"id": key, "user": p.UserID, "date": date, "path": path, "dashboard": in.Dashboard, "at": now.Format(time.RFC3339)})
 	return e
 }
 
@@ -232,31 +244,17 @@ func (s *Service) Usage(ctx context.Context, p principal.Principal, in UsageInpu
 			return UsageReport{}, fmt.Errorf("from and to must be YYYY-MM-DD")
 		}
 	}
-	pipeline := bson.A{
-		bson.M{"$match": bson.M{"user_id": p.UserID, "date": bson.M{"$gte": in.From, "$lte": in.To}}},
-		bson.M{"$group": bson.M{"_id": bson.M{"path": "$path", "dashboard": "$dashboard"}, "views": bson.M{"$sum": "$views"}, "last_at": bson.M{"$max": "$last_at"}}},
-		bson.M{"$sort": bson.D{{Key: "views", Value: -1}, {Key: "_id.path", Value: 1}}},
-		bson.M{"$limit": 200},
-	}
-	cur, e := s.repo.db.Collection("usage").Aggregate(ctx, pipeline)
+	const usageSQL = `SELECT path,dashboard,SUM(views)::bigint AS views,MAX(last_at) AS last_at FROM usage
+ WHERE user_id=@user AND date>=@from AND date<=@to GROUP BY path,dashboard ORDER BY views DESC,path LIMIT 200`
+	rows, e := s.repo.db.Query(ctx, usageSQL, pgx.NamedArgs{"user": p.UserID, "from": in.From, "to": in.To})
 	if e != nil {
 		return UsageReport{}, e
 	}
-	var rows []struct {
-		ID struct {
-			Path      string `bson:"path"`
-			Dashboard string `bson:"dashboard"`
-		} `bson:"_id"`
-		Views  int64  `bson:"views"`
-		LastAt string `bson:"last_at"`
-	}
-	if e = cur.All(ctx, &rows); e != nil {
+	pages, e := pgx.CollectRows(rows, pgx.RowToStructByName[UsageRow])
+	if e != nil {
 		return UsageReport{}, e
 	}
-	out := UsageReport{From: in.From, To: in.To, Pages: []UsageRow{}}
-	for _, row := range rows {
-		out.Pages = append(out.Pages, UsageRow{row.ID.Path, row.ID.Dashboard, row.Views, row.LastAt})
-	}
+	out := UsageReport{From: in.From, To: in.To, Pages: pages}
 	return out, nil
 }
 
@@ -264,12 +262,12 @@ func (s *Service) SavedViews(ctx context.Context, p principal.Principal) ([]Save
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("saved_views").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetLimit(200))
+	const viewsSQL = `SELECT * FROM saved_views WHERE user_id=@user ORDER BY name LIMIT 200`
+	rows, e := s.repo.db.Query(ctx, viewsSQL, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	out := []SavedView{}
-	return out, cur.All(ctx, &out)
+	return pgx.CollectRows(rows, pgx.RowToStructByName[SavedView])
 }
 
 // SaveView keeps personal page state; like other browser preferences it is not an audited finance write.
@@ -282,7 +280,9 @@ func (s *Service) SaveView(ctx context.Context, p principal.Principal, v SavedVi
 	}
 	if v.ID == "" {
 		v.ID = ulid.Make().String()
-		n, e := s.repo.db.Collection("saved_views").CountDocuments(ctx, bson.M{"user_id": p.UserID})
+		const countSQL = `SELECT count(*) FROM saved_views WHERE user_id=@user`
+		var n int64
+		e := s.repo.db.QueryRow(ctx, countSQL, pgx.NamedArgs{"user": p.UserID}).Scan(&n)
 		if e != nil {
 			return SavedView{}, e
 		}
@@ -294,7 +294,13 @@ func (s *Service) SaveView(ctx context.Context, p principal.Principal, v SavedVi
 		return SavedView{}, fmt.Errorf("invalid view id")
 	}
 	v.UserID, v.Key = p.UserID, p.UserID+":"+v.ID
-	_, e := s.repo.db.Collection("saved_views").ReplaceOne(ctx, bson.M{"_id": v.Key, "user_id": p.UserID}, v, options.Replace().SetUpsert(true))
+	const saveSQL = `INSERT INTO saved_views (storage_key,user_id,id,name,page,state) VALUES (@key,@user,@id,@name,@page,@state)
+ ON CONFLICT (storage_key) DO UPDATE SET id=EXCLUDED.id,name=EXCLUDED.name,page=EXCLUDED.page,state=EXCLUDED.state
+ WHERE saved_views.user_id=EXCLUDED.user_id`
+	result, e := s.repo.db.Exec(ctx, saveSQL, pgx.NamedArgs{"key": v.Key, "user": v.UserID, "id": v.ID, "name": v.Name, "page": v.Page, "state": v.State})
+	if e == nil && result.RowsAffected() != 1 {
+		return SavedView{}, principal.ErrConflict
+	}
 	return v, e
 }
 
@@ -302,8 +308,9 @@ func (s *Service) DeleteView(ctx context.Context, p principal.Principal, id stri
 	if e := p.Require("ledger:read"); e != nil {
 		return e
 	}
-	result, e := s.repo.db.Collection("saved_views").DeleteOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID})
-	if e == nil && result.DeletedCount != 1 {
+	const deleteSQL = `DELETE FROM saved_views WHERE storage_key=@key AND user_id=@user`
+	result, e := s.repo.db.Exec(ctx, deleteSQL, pgx.NamedArgs{"key": p.UserID + ":" + id, "user": p.UserID})
+	if e == nil && result.RowsAffected() != 1 {
 		return principal.ErrNotFound
 	}
 	return e
