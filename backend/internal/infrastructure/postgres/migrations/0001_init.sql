@@ -338,3 +338,39 @@ CREATE TABLE income_models (
  user_id text NOT NULL DEFAULT '',
  streams jsonb NOT NULL DEFAULT '[]'
 );
+
+CREATE TABLE tables (
+ storage_key text PRIMARY KEY,
+ user_id text NOT NULL DEFAULT '',
+ id text NOT NULL DEFAULT '',
+ name text NOT NULL DEFAULT '',
+ columns jsonb NOT NULL DEFAULT '[]',
+ keys jsonb,
+ checks jsonb,
+ ledger jsonb,
+ description text NOT NULL DEFAULT '',
+ archived boolean NOT NULL DEFAULT false,
+ UNIQUE(user_id,id)
+);
+CREATE INDEX tables_user_name ON tables(user_id,name);
+CREATE TABLE rows (
+ storage_key text NOT NULL UNIQUE,
+ user_id text NOT NULL,
+ table_id text NOT NULL,
+ id text NOT NULL,
+ cells jsonb NOT NULL DEFAULT '{}',
+ version integer NOT NULL DEFAULT 0,
+ key_hashes text[],
+ decimal_cells text[] NOT NULL DEFAULT '{}',
+ archived boolean NOT NULL DEFAULT false,
+ PRIMARY KEY(user_id,table_id,id)
+);
+CREATE TABLE row_keys (
+ user_id text NOT NULL,
+ table_id text NOT NULL,
+ key_hash text NOT NULL,
+ row_id text NOT NULL,
+ PRIMARY KEY(user_id,table_id,key_hash),
+ FOREIGN KEY(user_id,table_id,row_id) REFERENCES rows(user_id,table_id,id) ON DELETE CASCADE
+);
+CREATE INDEX row_keys_row ON row_keys(user_id,table_id,row_id);

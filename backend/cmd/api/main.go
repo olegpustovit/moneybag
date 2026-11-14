@@ -115,7 +115,7 @@ func run() error {
 	book.Expr = expr
 	prices := rates.NewService(rates.NewPostgresRepository(pool), a)
 	budgets := budget.NewService(budget.NewPostgresRepository(pool), a, prices)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	tab := tables.NewService(tables.NewPostgresRepository(pool), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
 	models := model.NewService(model.NewPostgresRepository(pool), tab, a, expr)

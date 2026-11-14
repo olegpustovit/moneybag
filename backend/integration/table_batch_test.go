@@ -12,7 +12,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
@@ -105,11 +104,17 @@ func testValidatedTables(t *testing.T, ctx context.Context, p principal.Principa
 			t.Fatal("batch undo overwrote a later edit")
 		}
 		priorVersion := rows("batch-a")[0].Version
-		if err := db.RunCommand(ctx, bson.D{{Key: "collMod", Value: "rows"}, {Key: "validator", Value: bson.M{"cells.blocked": bson.M{"$ne": true}}}}).Err(); err != nil {
+		if err := func() error {
+			_, e := pgdb.Exec(ctx, `ALTER TABLE rows ADD CONSTRAINT test_blocked CHECK ((cells->>'blocked')::boolean IS DISTINCT FROM true)`)
+			return e
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_ = db.RunCommand(context.Background(), bson.D{{Key: "collMod", Value: "rows"}, {Key: "validator", Value: bson.M{}}}).Err()
+			_ = func() error {
+				_, e := pgdb.Exec(context.Background(), `ALTER TABLE rows DROP CONSTRAINT IF EXISTS test_blocked`)
+				return e
+			}()
 		})
 		response, _ = call("db_batch", tables.BatchInput{Ops: []tables.BatchOp{
 			{DB: "batch-a", Upsert: &tables.RowUpsert{RowID: "one", Cells: map[string]any{"amount": "2.00"}}},
@@ -122,7 +127,7 @@ func testValidatedTables(t *testing.T, ctx context.Context, p principal.Principa
 		if !strings.Contains(string(rawError), "after 1 of 2 rows") || !strings.Contains(string(rawError), "Batch event") {
 			t.Fatalf("partial-write recovery details missing: %s", rawError)
 		}
-		if err := db.RunCommand(ctx, bson.D{{Key: "collMod", Value: "rows"}, {Key: "validator", Value: bson.M{}}}).Err(); err != nil {
+		if err := func() error { _, e := pgdb.Exec(ctx, `ALTER TABLE rows DROP CONSTRAINT test_blocked`); return e }(); err != nil {
 			t.Fatal(err)
 		}
 		if strings.Contains(string(rawError), "Document failed validation") || strings.Contains(string(rawError), "moneybag_test_") {

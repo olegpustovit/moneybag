@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func TestJoinedEntryAliasUsesReferenceIndex(t *testing.T) {
@@ -20,18 +20,21 @@ func TestJoinedEntryAliasUsesReferenceIndex(t *testing.T) {
 	table := Table{ID: "allocations", Columns: []Column{{ID: "ledger_id", Type: "entry"}, {ID: "label", Type: "string"}}}
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}
 	for _, joined := range []bool{false, true} {
-		filter, err := service.queryFilter(table, QueryInput{JoinEntry: joined, Where: `row.entry == 'entry-id' && row.label == 'allocation'`}, p)
+		filter, args, err := service.queryFilter(table, QueryInput{JoinEntry: joined, Where: `row.entry == 'entry-id' && row.label == 'allocation'`}, p)
 		if err != nil {
 			t.Fatal(err)
 		}
-		predicate, ok := filter["cells.ledger_id"]
+		predicate, ok := args["values0"]
+		if joined && args["column0"] != "ledger_id" {
+			t.Fatal(args)
+		}
 		if ok != joined {
 			t.Fatalf("joined=%v filter=%#v", joined, filter)
 		}
-		if joined && !reflect.DeepEqual(predicate, bson.M{"$in": []any{"entry-id"}}) {
+		if joined && !reflect.DeepEqual(predicate, []string{"entry-id"}) {
 			t.Fatal(filter)
 		}
-		if _, ok := filter["cells.entry"]; ok {
+		if strings.Contains(filter, "cells.entry") {
 			t.Fatal("indexed the alias rather than the stored column", filter)
 		}
 	}

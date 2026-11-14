@@ -2,16 +2,13 @@ package tables
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"maps"
 	"slices"
 
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func (s *Service) referenceSchemas(ctx context.Context, p principal.Principal, id string, columns []Column) error {
@@ -28,41 +25,15 @@ func (s *Service) referenceSchemas(ctx context.Context, p principal.Principal, i
 	return nil
 }
 
-func (s *Service) columnIndexes(ctx context.Context, columns []Column, keys ...[]string) error {
-	indexed := map[string]bool{}
-	for _, key := range keys {
-		for _, id := range key {
-			indexed[id] = true
-		}
-	}
-	for _, column := range columns {
-		if column.Type != "entry" && column.Type != "account" && column.Type != "ref" && !indexed[column.ID] {
-			continue
-		}
-		hash := sha256.Sum256([]byte(column.ID))
-		_, err := s.repo.db.Collection("rows").Indexes().CreateOne(ctx, mongo.IndexModel{
-			Keys:    bson.D{{Key: "user_id", Value: 1}, {Key: "table_id", Value: 1}, {Key: "cells." + column.ID, Value: 1}},
-			Options: options.Index().SetName(fmt.Sprintf("table_column_%x", hash[:8])),
-		})
-		if err != nil {
-			return fmt.Errorf("index column %s: %w", column.ID, err)
-		}
-	}
-	return nil
-}
-
 func (s *Service) allTables(ctx context.Context, p principal.Principal) ([]Table, error) {
 	if err := p.Valid(); err != nil {
 		return nil, err
 	}
-	cursor, err := s.repo.db.Collection("tables").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}})
+	cursor, err := s.repo.db.Query(ctx, `SELECT * FROM tables WHERE user_id=@user AND NOT archived`, pgx.NamedArgs{"user": p.UserID})
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
-	var out []Table
-	err = cursor.All(ctx, &out)
-	return out, err
+	return pgx.CollectRows(cursor, pgx.RowToStructByName[Table])
 }
 
 func (s *Service) rowReference(ctx context.Context, p principal.Principal, table, id string, state BatchState) (bool, error) {
@@ -79,11 +50,9 @@ func (s *Service) rowReference(ctx context.Context, p principal.Principal, table
 			return false, err
 		}
 	}
-	err := s.repo.db.Collection("rows").FindOne(ctx, bson.M{"user_id": p.UserID, "table_id": table, "id": id, "archived": bson.M{"$ne": true}}).Err()
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return false, nil
-	}
-	return err == nil, err
+	var exists bool
+	err := s.repo.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rows WHERE user_id=@user AND table_id=@table AND id=@id AND NOT archived)`, pgx.NamedArgs{"user": p.UserID, "table": table, "id": id}).Scan(&exists)
+	return exists, err
 }
 
 // Reference validation sees the complete overlay, so repointing and deleting in
@@ -167,13 +136,13 @@ func (s *Service) validateReferences(ctx context.Context, p principal.Principal,
 			if column.Type != "ref" || len(ids) == 0 {
 				continue
 			}
-			cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": definition.ID, "archived": bson.M{"$ne": true}, "cells." + column.ID: bson.M{"$in": ids}})
+			cursor, err := s.repo.db.Query(ctx, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived AND cells->>@column=ANY(@ids::text[])`, pgx.NamedArgs{"user": p.UserID, "table": definition.ID, "column": column.ID, "ids": ids})
 			if err != nil {
 				return issues, err
 			}
-			for cursor.Next(ctx) {
+			for cursor.Next() {
 				var row Row
-				if err = cursor.Decode(&row); err != nil {
+				if row, err = rowFrom(cursor, definition); err != nil {
 					break
 				}
 				for _, changed := range state.Tables[definition.ID] {
@@ -191,7 +160,7 @@ func (s *Service) validateReferences(ctx context.Context, p principal.Principal,
 				}
 			}
 			cursorErr := cursor.Err()
-			_ = cursor.Close(ctx)
+			cursor.Close()
 			if err != nil {
 				return issues, err
 			}
@@ -222,8 +191,8 @@ func (s *Service) guardTableDrop(ctx context.Context, p principal.Principal, id 
 }
 
 func (s *Service) guardTableRestore(ctx context.Context, p principal.Principal, id string) error {
-	var table Table
-	if err := s.repo.db.Collection("tables").FindOne(ctx, bson.M{"user_id": p.UserID, "id": id}).Decode(&table); err != nil {
+	table, err := s.repo.table(ctx, p.UserID, id, true)
+	if err != nil {
 		return err
 	}
 	if err := s.referenceSchemas(ctx, p, id, table.Columns); err != nil {
@@ -240,14 +209,14 @@ func (s *Service) guardTableRestore(ctx context.Context, p principal.Principal, 
 	if len(linked.Columns) == 0 {
 		return nil
 	}
-	cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": id, "archived": bson.M{"$ne": true}})
+	cursor, err := s.repo.db.Query(ctx, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived`, pgx.NamedArgs{"user": p.UserID, "table": id})
 	if err != nil {
 		return err
 	}
-	defer cursor.Close(ctx)
-	for cursor.Next(ctx) {
+	defer cursor.Close()
+	for cursor.Next() {
 		var row Row
-		if err = cursor.Decode(&row); err != nil {
+		if row, err = rowFrom(cursor, table); err != nil {
 			return err
 		}
 		issues, err := s.validateReferences(ctx, p, BatchState{Tables: map[string][]Row{id: {row}}}, map[string]Table{id: linked})
@@ -281,13 +250,13 @@ func (s *Service) BrokenReferences(ctx context.Context, p principal.Principal) (
 		if !linked {
 			continue
 		}
-		cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": definition.ID, "archived": bson.M{"$ne": true}})
+		cursor, err := s.repo.db.Query(ctx, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived`, pgx.NamedArgs{"user": p.UserID, "table": definition.ID})
 		if err != nil {
 			return issues, err
 		}
-		for cursor.Next(ctx) {
+		for cursor.Next() {
 			var row Row
-			if err = cursor.Decode(&row); err != nil {
+			if row, err = rowFrom(cursor, definition); err != nil {
 				break
 			}
 			var found []Violation
@@ -298,7 +267,7 @@ func (s *Service) BrokenReferences(ctx context.Context, p principal.Principal) (
 			issues = append(issues, found...)
 		}
 		cursorErr := cursor.Err()
-		_ = cursor.Close(ctx)
+		cursor.Close()
 		if err != nil {
 			return issues, err
 		}

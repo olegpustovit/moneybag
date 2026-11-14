@@ -67,7 +67,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 	book.Expr = expr
 	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	tab := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
 	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)

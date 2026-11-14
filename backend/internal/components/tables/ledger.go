@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"maps"
 	"math/big"
 	"slices"
 	"strings"
 
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (s *Service) validateLedger(ctx context.Context, p principal.Principal, before, after BatchState, definitions map[string]Table) ([]Violation, error) {
@@ -55,20 +55,20 @@ func (s *Service) validateLedger(ctx context.Context, p principal.Principal, bef
 					continue
 				}
 			}
-			cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": db, "cells." + constraint.Entry: id, "archived": bson.M{"$ne": true}})
+			cursor, err := s.repo.db.Query(ctx, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived AND cells->>@column=@entry`, pgx.NamedArgs{"user": p.UserID, "table": db, "column": constraint.Entry, "entry": id})
 			if err != nil {
 				return issues, err
 			}
 			rows := map[string]Row{}
-			for cursor.Next(ctx) {
+			for cursor.Next() {
 				var row Row
-				if err = cursor.Decode(&row); err != nil {
+				if row, err = rowFrom(cursor, definitions[db]); err != nil {
 					break
 				}
 				rows[row.ID] = row
 			}
 			cursorErr := cursor.Err()
-			_ = cursor.Close(ctx)
+			cursor.Close()
 			if err != nil {
 				return issues, err
 			}

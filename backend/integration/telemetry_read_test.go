@@ -119,7 +119,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	book := ledger.NewService(repo, a)
 	book.Expr = expr
 	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	tab := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
 	var reader dashboard.Reader = &dashboard.Sources{Ledger: book, Tables: tab, Valuer: prices, Rates: prices, Snapshots: cache, Expr: expr}
 	if extra != nil {
 		reader = extra

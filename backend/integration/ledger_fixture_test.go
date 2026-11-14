@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"testing"
 
@@ -77,4 +78,16 @@ func insertAssertions(ctx context.Context, db *pgxpool.Pool, assertions ...recon
 		rows = append(rows, []any{a.ID, a.UserID, a.Account, a.Date, amount, a.Source, a.OK, a.Diff.String()})
 	}
 	return db.CopyFrom(ctx, pgx.Identifier{"balance_assertions"}, []string{"id", "user_id", "account", "date", "amount", "source", "ok", "diff"}, pgx.CopyFromRows(rows))
+}
+
+func insertRows(ctx context.Context, db *pgxpool.Pool, rows ...tables.Row) (int64, error) {
+	values := make([][]any, 0, len(rows))
+	for _, row := range rows {
+		cells, err := json.Marshal(row.Cells)
+		if err != nil {
+			return 0, err
+		}
+		values = append(values, []any{row.Key, row.UserID, row.TableID, row.ID, cells, row.Version, row.KeyHashes, row.Archived})
+	}
+	return db.CopyFrom(ctx, pgx.Identifier{"rows"}, []string{"storage_key", "user_id", "table_id", "id", "cells", "version", "key_hashes", "archived"}, pgx.CopyFromRows(values))
 }

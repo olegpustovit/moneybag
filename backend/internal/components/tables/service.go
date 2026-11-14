@@ -6,15 +6,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math"
 	"math/big"
 	"regexp"
@@ -34,16 +35,16 @@ type Column struct {
 	Formula     string `json:"formula,omitempty" bson:"formula,omitempty"`
 }
 type Table struct {
-	Keys        [][]string        `json:"keys,omitempty" bson:"keys,omitempty"`
-	Checks      []RowCheck        `json:"checks,omitempty" bson:"checks,omitempty"`
-	Ledger      *LedgerConstraint `json:"ledger,omitempty" bson:"ledger,omitempty"`
-	Description string            `json:"description,omitempty" bson:"description,omitempty"`
-	Archived    bool              `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key         string            `json:"-" bson:"_id"`
-	UserID      string            `json:"-" bson:"user_id"`
-	ID          string            `json:"id" bson:"id"`
-	Name        string            `json:"name" bson:"name"`
-	Columns     []Column          `json:"columns" bson:"columns"`
+	Keys        [][]string        `json:"keys,omitempty" bson:"keys,omitempty" db:"keys"`
+	Checks      []RowCheck        `json:"checks,omitempty" bson:"checks,omitempty" db:"checks"`
+	Ledger      *LedgerConstraint `json:"ledger,omitempty" bson:"ledger,omitempty" db:"ledger"`
+	Description string            `json:"description,omitempty" bson:"description,omitempty" db:"description"`
+	Archived    bool              `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
+	Key         string            `json:"-" bson:"_id" db:"storage_key"`
+	UserID      string            `json:"-" bson:"user_id" db:"user_id"`
+	ID          string            `json:"id" bson:"id" db:"id"`
+	Name        string            `json:"name" bson:"name" db:"name"`
+	Columns     []Column          `json:"columns" bson:"columns" db:"columns"`
 }
 
 func (t *Table) UnmarshalBSON(data []byte) error {
@@ -54,16 +55,16 @@ func (t *Table) UnmarshalBSON(data []byte) error {
 }
 
 type Row struct {
-	Entry     *JoinedEntry `json:"entry,omitempty" bson:"-"`
+	Entry     *JoinedEntry `json:"entry,omitempty" bson:"-" db:"-"`
 	joined    bool
-	KeyHashes []string       `json:"-" bson:"key_hashes,omitempty"`
-	Archived  bool           `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key       string         `json:"-" bson:"_id"`
-	UserID    string         `json:"-" bson:"user_id"`
-	TableID   string         `json:"-" bson:"table_id"`
-	ID        string         `json:"id" bson:"id"`
-	Cells     map[string]any `json:"cells" bson:"cells"`
-	Version   int            `json:"version" bson:"version"`
+	KeyHashes []string       `json:"-" bson:"key_hashes,omitempty" db:"key_hashes"`
+	Archived  bool           `json:"archived,omitempty" bson:"archived,omitempty" db:"archived"`
+	Key       string         `json:"-" bson:"_id" db:"storage_key"`
+	UserID    string         `json:"-" bson:"user_id" db:"user_id"`
+	TableID   string         `json:"-" bson:"table_id" db:"table_id"`
+	ID        string         `json:"id" bson:"id" db:"id"`
+	Cells     map[string]any `json:"cells" bson:"cells" db:"cells"`
+	Version   int            `json:"version" bson:"version" db:"version"`
 }
 
 // Decode nested cells as maps so CEL can address JSON fields by name.
@@ -122,19 +123,19 @@ type UpdateResult struct {
 	DependentsRecomputed []string    `json:"dependents_recomputed"`
 	EventID              string      `json:"event_id"`
 }
-type MongoRepository struct {
-	db *mongo.Database
+type PostgresRepository struct {
+	db *pgxpool.Pool
 }
 type Service struct {
 	Ledger *ledger.Service
 	Rates  *rates.Service
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	audit  *audit.Service
 	expr   *expressions.Engine
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db: db} }
-func NewService(r *MongoRepository, a *audit.Service, e *expressions.Engine) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db: db} }
+func NewService(r *PostgresRepository, a *audit.Service, e *expressions.Engine) *Service {
 	return &Service{repo: r, audit: a, expr: e}
 }
 
@@ -165,19 +166,13 @@ func (s *Service) createNamed(ctx context.Context, p principal.Principal, id str
 	if err := s.referenceSchemas(ctx, p, id, in.Columns); err != nil {
 		return Table{}, err
 	}
-	if err := s.columnIndexes(ctx, in.Columns, in.Keys...); err != nil {
-		return Table{}, err
-	}
-	if err := s.uniqueIndex(ctx); err != nil {
-		return Table{}, err
-	}
 	t := Table{Key: p.UserID + ":" + id, UserID: p.UserID, ID: id, Name: in.Name, Description: in.Description, Columns: in.Columns, Keys: in.Keys, Checks: in.Checks, Ledger: in.Ledger}
 	if err := s.validateDefinition(t); err != nil {
 		return Table{}, err
 	}
 	_, e := s.audit.Write(ctx, p, "db_create", audit.Target{Collection: "tables", ID: id}, "", nil, t, func(tx context.Context) error {
-		_, err := s.repo.db.Collection("tables").InsertOne(tx, t)
-		if mongo.IsDuplicateKeyError(err) {
+		_, err := s.repo.insertTable(tx, t)
+		if postgres.IsUniqueViolation(err) {
 			return principal.ErrConflict
 		}
 		return err
@@ -242,9 +237,8 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Ta
 	if e := p.Valid(); e != nil {
 		return Table{}, e
 	}
-	var t Table
-	e := s.repo.db.Collection("tables").FindOne(ctx, bson.M{"user_id": p.UserID, "id": id, "archived": bson.M{"$ne": true}}).Decode(&t)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	t, e := s.repo.table(ctx, p.UserID, id, false)
+	if postgres.IsNotFound(e) {
 		e = principal.ErrNotFound
 	}
 	return t, e
@@ -253,13 +247,14 @@ func (s *Service) List(ctx context.Context, p principal.Principal) ([]Table, err
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("tables").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "name", Value: 1}}).SetLimit(501))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM tables WHERE user_id=@user AND NOT archived ORDER BY name LIMIT 501`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Table{}
-	e = cur.All(ctx, &out)
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByName[Table])
+	if out == nil {
+		out = []Table{}
+	}
 	if len(out) > 500 {
 		return nil, fmt.Errorf("too many databases")
 	}

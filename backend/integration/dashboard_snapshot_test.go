@@ -69,7 +69,7 @@ func TestDashboardSnapshotsRespectRevisionAndReader(t *testing.T) {
 	reader.value.Store(1)
 	service := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	service.UseSnapshots(cache)
-	tableService := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	tableService := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
 	if _, err := tableService.CreateNamed(ctx, p, "catalog", tables.CreateInput{Name: "Catalog", Columns: []tables.Column{{ID: "value", Type: "number"}}}); err != nil {
 		t.Fatal(err)
 	}

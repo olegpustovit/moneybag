@@ -63,7 +63,7 @@ func (h *readHarness) docCounts(t *testing.T) map[string]int64 {
 		}
 	}
 	pool := pgtest.New(t)
-	for _, name := range []string{"counters", "prices", "rate_sync", "feedback", "saved_views", "usage", "users", "credentials", "sessions", "invites", "settings", "oauth_clients", "oauth_codes", "oauth_grants", "oauth_tokens", "admin_confirmations", "shares", "dashboard_snapshots", "events", "audit_outcomes", "accounts", "journal", "entry_tags", "balances", "budgets", "rules", "balance_assertions", "discrepancies", "scenarios", "income_models"} {
+	for _, name := range []string{"counters", "prices", "rate_sync", "feedback", "saved_views", "usage", "users", "credentials", "sessions", "invites", "settings", "oauth_clients", "oauth_codes", "oauth_grants", "oauth_tokens", "admin_confirmations", "shares", "dashboard_snapshots", "events", "audit_outcomes", "accounts", "journal", "entry_tags", "balances", "budgets", "rules", "balance_assertions", "discrepancies", "scenarios", "income_models", "tables", "rows", "row_keys"} {
 		var count int64
 		if err := pool.QueryRow(h.ctx, "SELECT count(*) FROM "+pgx.Identifier{name}.Sanitize()).Scan(&count); err != nil {
 			t.Fatal(err)

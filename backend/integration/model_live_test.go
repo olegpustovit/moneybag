@@ -60,7 +60,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	expr, _ := expressions.New()
 	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	tab := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
 	models := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test"}); e != nil {

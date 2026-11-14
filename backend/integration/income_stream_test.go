@@ -39,7 +39,7 @@ func TestIncomeReconcileStreamsJournalAndPreservesLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tables.NewService(tables.NewMongoRepository(db), nil, expr), nil, expr)
+	service := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), nil, expr), nil, expr)
 	service.Ledger = sources.Ledger
 	reads.Store(0)
 	empty, err := service.IncomeReconcile(ctx, p, model.ReconcileInput{From: "2026-01-01", To: "2026-01-31"})

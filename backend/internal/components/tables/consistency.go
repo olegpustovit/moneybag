@@ -3,10 +3,10 @@ package tables
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"slices"
 
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 // ConstraintIssues detects incomplete receipt metadata after interrupted writes.
@@ -23,26 +23,28 @@ func (s *Service) ConstraintIssues(ctx context.Context, p principal.Principal) (
 		if len(table.Keys) == 0 && len(table.Checks) == 0 && table.Ledger == nil {
 			continue
 		}
-		cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": table.ID, "archived": bson.M{"$ne": true}})
+		cursor, err := s.repo.db.Query(ctx, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived`, pgx.NamedArgs{"user": p.UserID, "table": table.ID})
 		if err != nil {
 			return nil, err
 		}
 		rows := []Row{}
 		bytes := 0
-		for cursor.Next(ctx) {
-			bytes += len(cursor.Current)
+		for cursor.Next() {
+			for _, raw := range cursor.RawValues() {
+				bytes += len(raw)
+			}
 			if len(rows) >= 250000 || bytes > 64*1024*1024 {
 				err = fmt.Errorf("table %s exceeds the consistency scan budget", table.ID)
 				break
 			}
 			var row Row
-			if err = cursor.Decode(&row); err != nil {
+			if row, err = rowFrom(cursor, table); err != nil {
 				break
 			}
 			rows = append(rows, row)
 		}
 		ce := cursor.Err()
-		_ = cursor.Close(ctx)
+		cursor.Close()
 		if err != nil {
 			return nil, err
 		}

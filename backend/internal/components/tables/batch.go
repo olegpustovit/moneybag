@@ -5,15 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"maps"
 	"slices"
 	"strings"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type RowUpsert struct {
@@ -133,9 +133,8 @@ func (s *Service) prepareBatch(ctx context.Context, p principal.Principal, ops [
 		if row := pending[db][id]; row != nil {
 			return row, nil
 		}
-		var row Row
-		err := s.repo.db.Collection("rows").FindOne(ctx, bson.M{"user_id": p.UserID, "table_id": db, "id": id}).Decode(&row)
-		if errors.Is(err, mongo.ErrNoDocuments) {
+		row, err := s.repo.row(ctx, p.UserID, tables[db], id)
+		if postgres.IsNotFound(err) {
 			row = Row{Key: p.UserID + ":" + db + ":" + id, UserID: p.UserID, TableID: db, ID: id, Cells: map[string]any{}}
 		} else if err != nil {
 			return nil, err
@@ -356,7 +355,7 @@ func (e *partialWriteError) RecoveryMessage() string {
 	if e.eventID != "" {
 		event = " Batch event " + e.eventID + "."
 	}
-	return fmt.Sprintf("Table write stopped after %d of %d %s confirmed saved; earlier writes remain. The failing write may also have reached MongoDB.%s %s", e.written, e.total, kind, event, action)
+	return fmt.Sprintf("Table write stopped after %d of %d %s confirmed saved; earlier writes remain. The failing write may also have reached PostgreSQL.%s %s", e.written, e.total, kind, event, action)
 }
 func (e *partialWriteError) Error() string { return e.RecoveryMessage() + " Cause: " + e.cause.Error() }
 
@@ -369,9 +368,28 @@ func (s *Service) writeBatch(ctx context.Context, p principal.Principal, state B
 	}
 	for _, db := range slices.Sorted(maps.Keys(state.Tables)) {
 		for _, row := range state.Tables[db] {
-			_, err := s.repo.db.Collection("rows").ReplaceOne(ctx, bson.M{"user_id": p.UserID, "table_id": db, "id": row.ID}, row, options.Replace().SetUpsert(true))
+			decimalCells := []string{}
+			for id, value := range row.Cells {
+				if _, ok := value.(ledger.Decimal); ok {
+					decimalCells = append(decimalCells, id)
+				}
+			}
+			slices.Sort(decimalCells)
+			err := pgx.BeginFunc(ctx, s.repo.db, func(tx pgx.Tx) error {
+				_, err := tx.Exec(ctx, `INSERT INTO rows(storage_key,user_id,table_id,id,cells,version,key_hashes,archived,decimal_cells) VALUES (@key,@user,@table,@id,@cells,@version,@hashes,@archived,@decimals) ON CONFLICT(user_id,table_id,id) DO UPDATE SET storage_key=EXCLUDED.storage_key,cells=EXCLUDED.cells,version=EXCLUDED.version,key_hashes=EXCLUDED.key_hashes,archived=EXCLUDED.archived,decimal_cells=EXCLUDED.decimal_cells`, pgx.NamedArgs{"key": row.Key, "user": p.UserID, "table": db, "id": row.ID, "cells": row.Cells, "version": row.Version, "hashes": row.KeyHashes, "archived": row.Archived, "decimals": decimalCells})
+				if err != nil {
+					return err
+				}
+				if _, err = tx.Exec(ctx, `DELETE FROM row_keys WHERE user_id=@user AND table_id=@table AND row_id=@id`, pgx.NamedArgs{"user": p.UserID, "table": db, "id": row.ID}); err != nil {
+					return err
+				}
+				if !row.Archived && len(row.KeyHashes) > 0 {
+					_, err = tx.Exec(ctx, `INSERT INTO row_keys(user_id,table_id,key_hash,row_id) SELECT @user,@table,hash,@id FROM unnest(@hashes::text[]) hash`, pgx.NamedArgs{"user": p.UserID, "table": db, "id": row.ID, "hashes": row.KeyHashes})
+				}
+				return err
+			})
 			if err != nil {
-				if mongo.IsDuplicateKeyError(err) {
+				if postgres.IsUniqueViolation(err) {
 					err = fmt.Errorf("unique key conflict; reload the table: %w", principal.ErrConflict)
 				}
 				return &partialWriteError{written: written, total: total, cause: err}
@@ -401,8 +419,8 @@ func (s *Service) RestoreBatch(ctx context.Context, p principal.Principal, befor
 						versions[row.ID] = row.Version
 					}
 					for _, old := range before.Tables[db] {
-						var current Row
-						if err = s.repo.db.Collection("rows").FindOne(snapshot, bson.M{"user_id": p.UserID, "table_id": db, "id": old.ID}).Decode(&current); err != nil {
+						current, err := s.repo.row(snapshot, p.UserID, table, old.ID)
+						if err != nil {
 							return err
 						}
 						if current.Version != versions[old.ID] {

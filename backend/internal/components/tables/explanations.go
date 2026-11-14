@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type Explanation struct {
@@ -38,19 +37,18 @@ func (s *Service) ExplainedEntryIDs(ctx context.Context, p principal.Principal, 
 	if column == "" {
 		return nil, fmt.Errorf("table %s has no entry column", db)
 	}
-	cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": db, "archived": bson.M{"$ne": true}}, options.Find().SetProjection(bson.M{"cells." + column: 1}))
+	cursor, err := s.repo.db.Query(ctx, `SELECT COALESCE(cells->>@column,'') FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived`, pgx.NamedArgs{"column": column, "user": p.UserID, "table": db})
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
+	defer cursor.Close()
 	ids := []string{}
 	seen := map[string]bool{}
-	for cursor.Next(ctx) {
-		var row Row
-		if err := cursor.Decode(&row); err != nil {
+	for cursor.Next() {
+		var id string
+		if err := cursor.Scan(&id); err != nil {
 			return nil, err
 		}
-		id, _ := row.Cells[column].(string)
 		if id != "" && !seen[id] {
 			ids = append(ids, id)
 			seen[id] = true
@@ -73,20 +71,20 @@ func (s *Service) Explanations(ctx context.Context, p principal.Principal, entry
 		if column == "" {
 			continue
 		}
-		cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": t.ID, "archived": bson.M{"$ne": true}, "cells." + column: entry}, options.Find().SetProjection(bson.M{"id": 1}).SetSort(bson.D{{Key: "id", Value: 1}}))
+		cursor, err := s.repo.db.Query(ctx, `SELECT id FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived AND cells->>@column=@entry ORDER BY id`, pgx.NamedArgs{"user": p.UserID, "table": t.ID, "column": column, "entry": entry})
 		if err != nil {
 			return nil, err
 		}
 		explanation := Explanation{DB: t.ID, Rows: []string{}}
-		for cursor.Next(ctx) {
-			var row Row
-			if err = cursor.Decode(&row); err != nil {
+		for cursor.Next() {
+			var id string
+			if err = cursor.Scan(&id); err != nil {
 				break
 			}
-			explanation.Rows = append(explanation.Rows, row.ID)
+			explanation.Rows = append(explanation.Rows, id)
 		}
 		ce := cursor.Err()
-		_ = cursor.Close(ctx)
+		cursor.Close()
 		if err != nil {
 			return nil, err
 		}
