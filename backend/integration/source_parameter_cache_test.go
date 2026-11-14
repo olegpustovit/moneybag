@@ -3,8 +3,8 @@ package integration
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"os"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,10 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type blockedSourceValuer struct {
@@ -42,36 +38,14 @@ func (v *blockedSourceValuer) Convert(ctx context.Context, p principal.Principal
 }
 
 func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
+	ctx := context.Background()
+	var err error
 	var journalReads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
-			journalReads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_source_parameters")
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) }()
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
 	other := p
 	other.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAW"
 	for _, owner := range []principal.Principal{p, other} {
-		_, err = db.Collection("accounts").InsertOne(ctx, ledger.Account{Key: owner.UserID + ":assets:test", UserID: owner.UserID, ID: "assets:test", Type: "asset", Name: "Test", Commodities: []string{"EUR"}})
+		_, err = insertAccount(ctx, pgtest.New(t), ledger.Account{Key: owner.UserID + ":assets:test", UserID: owner.UserID, ID: "assets:test", Type: "asset", Name: "Test", Commodities: []string{"EUR"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -79,10 +53,10 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	entry := func(owner principal.Principal, id, date string, seq int64) ledger.Entry {
 		return ledger.Entry{ID: id, UserID: owner.UserID, Seq: seq, Date: date, Status: "posted", Kind: "entry", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}}
 	}
-	if _, err = db.Collection("journal").InsertMany(ctx, []any{entry(p, "a", "2026-01-01", 1), entry(p, "b", "2026-02-01", 2), entry(other, "c", "2026-01-01", 1)}); err != nil {
+	if _, err = insertJournal(ctx, pgtest.New(t), []ledger.Entry{entry(p, "a", "2026-01-01", 1), entry(p, "b", "2026-02-01", 2), entry(other, "c", "2026-01-01", 1)}...); err != nil {
 		t.Fatal(err)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
 		t.Fatal(err)
@@ -92,7 +66,12 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sources := &dashboard.Sources{Ledger: ledger.NewService(ledger.NewMongoRepository(db), nil), Valuer: testValuer{}, Snapshots: cache}
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "SELECT to_jsonb(j)") || strings.Contains(sql, "WITH source AS MATERIALIZED") || strings.Contains(sql, "SUM(") {
+			journalReads.Add(1)
+		}
+	}))
+	sources := &dashboard.Sources{Ledger: ledger.NewService(ledger.NewPostgresRepository(pool), nil), Valuer: testValuer{}, Snapshots: cache}
 	engine := dashboard.Engine{Expr: expr, Reader: sources}
 	data := map[string]dashboard.Query{"rows": {From: "postings", Agg: map[string]string{"count": "count()"}}}
 	run := func(owner principal.Principal, params map[string]any) (float64, error) {
@@ -139,7 +118,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("source cache crossed owner boundaries")
 	}
 	if err = a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("journal").InsertOne(tx, entry(p, "d", "2026-03-01", 3))
+		_, e := insertJournal(tx, pgtest.New(t), entry(p, "d", "2026-03-01", 3))
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -158,11 +137,11 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("balance sources missed the shared cache")
 	}
 	sources.Expr = expr
-	sources.Views = dashboard.NewService(dashboard.NewMongoRepository(db), &engine, a)
+	sources.Views = dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &engine, a)
 	leaf := dashboard.View{Key: p.UserID + ":leaf", UserID: p.UserID, ID: "leaf", Query: dashboard.Query{From: "postings", Where: "row.amount > 0.0"}}
 	parameterized := dashboard.View{Key: p.UserID + ":parameterized", UserID: p.UserID, ID: "parameterized", Query: dashboard.Query{From: "postings", Where: "row.amount > params.floor"}}
 	if err := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").InsertMany(tx, []any{leaf, parameterized})
+		_, e := insertViews(tx, pgtest.New(t), leaf, parameterized)
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -198,7 +177,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("view crossed owner boundary")
 	}
 	if err := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > 2.0"}})
+		_, e := pgtest.New(t).Exec(tx, `UPDATE views SET query=jsonb_set(query,'{where}',to_jsonb(@where::text)) WHERE storage_key=@key`, pgx.NamedArgs{"where": "row.amount > 2.0", "key": leaf.Key})
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -207,7 +186,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("view edit did not invalidate cached output")
 	}
 	if err := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > 0.0"}})
+		_, e := pgtest.New(t).Exec(tx, `UPDATE views SET query=jsonb_set(query,'{where}',to_jsonb(@where::text)) WHERE storage_key=@key`, pgx.NamedArgs{"where": "row.amount > 0.0", "key": leaf.Key})
 		return e
 	}); err != nil {
 		t.Fatal(err)
@@ -223,7 +202,7 @@ func TestSourceCacheSharesOnlyRelevantParameters(t *testing.T) {
 		t.Fatal("view did not reach the blocked source")
 	}
 	writeErr := a.Mutation(ctx, p, func(tx context.Context) error {
-		_, e := db.Collection("views").UpdateOne(tx, bson.M{"_id": leaf.Key}, bson.M{"$set": bson.M{"query.where": "row.amount > params.floor"}})
+		_, e := pgtest.New(t).Exec(tx, `UPDATE views SET query=jsonb_set(query,'{where}',to_jsonb(@where::text)) WHERE storage_key=@key`, pgx.NamedArgs{"where": "row.amount > params.floor", "key": leaf.Key})
 		return e
 	})
 	close(blocker.release)

@@ -2,9 +2,9 @@ package rates
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (s *Service) Archive(ctx context.Context, p principal.Principal, id string, archived bool, reason string) error {
@@ -13,16 +13,16 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 	}
 	return s.audit.Workflow(ctx, func(tx context.Context) error {
 		var old struct {
-			Archived bool `json:"archived" bson:"archived"`
+			Archived bool `json:"archived" db:"archived"`
 		}
-		filter := bson.M{"user_id": p.UserID, "_id": id}
-		if e := s.repo.db.Collection("prices").FindOne(tx, filter).Decode(&old); e != nil {
+		args := pgx.NamedArgs{"user": p.UserID, "id": id}
+		if e := s.repo.db.QueryRow(tx, `SELECT archived FROM prices WHERE user_id=@user AND id=@id`, args).Scan(&old.Archived); e != nil {
 			return e
 		}
 		next := old
 		next.Archived = archived
 		_, e := s.audit.Write(audit.RateOnly(tx), p, "rate_archive", audit.Target{Collection: "prices", ID: id}, reason, old, next, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("prices").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}})
+			_, e := s.repo.db.Exec(tx, `UPDATE prices SET archived=@archived WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": id, "archived": archived})
 			return e
 		})
 		return e

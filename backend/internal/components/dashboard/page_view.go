@@ -15,7 +15,7 @@ import (
 	"github.com/klauspost/compress/gzip"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
 )
@@ -130,7 +130,7 @@ func (s *Service) pageView(ctx context.Context, p principal.Principal, id, versi
 		params = nil
 	}
 	ctx = expressions.WithVolatility(reqcache.With(ctx))
-	if s.snapshots == nil || mongodb.InWorkflow(ctx) {
+	if s.snapshots == nil || postgres.InWorkflow(ctx) {
 		// Scoped services have no snapshots, so a grant's restricted view is never cached.
 		entry, err := s.buildView(ctx, p, id, version, params)
 		if err != nil {

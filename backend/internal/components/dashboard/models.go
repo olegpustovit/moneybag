@@ -158,28 +158,28 @@ type Spec struct {
 	Tests      []SpecTest        `json:"tests,omitempty" jsonschema:"questions dashboard_test checks against the ledger; all must pass to publish"`
 }
 type Head struct {
-	PublishedBy      principal.Actor `json:"published_by,omitempty" bson:"published_by,omitempty"`
-	PublishedAt      *time.Time      `json:"published_at,omitempty" bson:"published_at,omitempty"`
-	PublishNote      string          `json:"publish_note,omitempty" bson:"publish_note,omitempty"`
-	Archived         bool            `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key              string          `json:"-" bson:"_id"`
-	UserID           string          `json:"-" bson:"user_id"`
-	ID               string          `json:"id" bson:"id"`
-	Title            string          `json:"title" bson:"title"`
-	PublishedVersion int             `json:"published_version" bson:"published_version"`
-	DraftVersion     int             `json:"draft_version" bson:"draft_version"`
-	Revision         int             `json:"revision" bson:"revision"`
-	Home             bool            `json:"home,omitempty" bson:"home,omitempty"`
+	PublishedBy      principal.Actor `json:"published_by,omitempty" db:"published_by"`
+	PublishedAt      *time.Time      `json:"published_at,omitempty" db:"published_at"`
+	PublishNote      string          `json:"publish_note,omitempty" db:"publish_note"`
+	Archived         bool            `json:"archived,omitempty" db:"archived"`
+	Key              string          `json:"-" db:"storage_key"`
+	UserID           string          `json:"-" db:"user_id"`
+	ID               string          `json:"id" db:"id"`
+	Title            string          `json:"title" db:"title"`
+	PublishedVersion int             `json:"published_version" db:"published_version"`
+	DraftVersion     int             `json:"draft_version" db:"draft_version"`
+	Revision         int             `json:"revision" db:"revision"`
+	Home             bool            `json:"home,omitempty" db:"home"`
 }
 type Version struct {
-	Key         string          `json:"-" bson:"_id"`
-	UserID      string          `json:"-" bson:"user_id"`
-	DashboardID string          `json:"dashboard_id" bson:"dashboard_id"`
-	Version     int             `json:"version" bson:"version"`
-	Spec        Spec            `json:"spec" bson:"spec"`
-	Author      principal.Actor `json:"author" bson:"author"`
-	CreatedAt   time.Time       `json:"created_at" bson:"created_at"`
-	Note        string          `json:"note" bson:"note"`
+	Key         string          `json:"-" db:"storage_key"`
+	UserID      string          `json:"-" db:"user_id"`
+	DashboardID string          `json:"dashboard_id" db:"dashboard_id"`
+	Version     int             `json:"version" db:"version"`
+	Spec        Spec            `json:"spec" db:"spec"`
+	Author      principal.Actor `json:"author" db:"author"`
+	CreatedAt   time.Time       `json:"created_at" db:"created_at"`
+	Note        string          `json:"note" db:"note"`
 }
 type Issue struct {
 	Path        string `json:"path"`
@@ -205,10 +205,10 @@ type Validation struct {
 	Cost     uint64  `json:"cost"`
 }
 type Rendered struct {
-	Pages      []Page         `json:"pages,omitempty" bson:"pages,omitempty"`
+	Pages      []Page         `json:"pages,omitempty"`
 	Values     map[string]any `json:"values"`
 	Computed   map[string]any `json:"computed,omitempty"`
 	Validation Validation     `json:"validation"`
 	// Resolved holds each component after its templates ran, for lint to read the text people actually see.
-	Resolved map[string]Component `json:"-" bson:"-"`
+	Resolved map[string]Component `json:"-"`
 }

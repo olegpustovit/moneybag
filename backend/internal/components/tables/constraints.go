@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"maps"
 	"regexp"
 	"slices"
@@ -13,20 +14,17 @@ import (
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type RowCheck struct {
-	Expr    string `json:"expr" bson:"expr"`
-	Message string `json:"message" bson:"message"`
-	Level   string `json:"level,omitempty" bson:"level,omitempty"`
+	Expr    string `json:"expr"`
+	Message string `json:"message"`
+	Level   string `json:"level,omitempty"`
 }
 type LedgerConstraint struct {
-	Entry    string   `json:"entry" bson:"entry"`
-	Amount   string   `json:"amount" bson:"amount"`
-	Accounts []string `json:"accounts" bson:"accounts"`
+	Entry    string   `json:"entry"`
+	Amount   string   `json:"amount"`
+	Accounts []string `json:"accounts"`
 }
 
 var ledgerPrefix = regexp.MustCompile(`^(assets|liabilities|income|expenses|equity):[a-z0-9_:-]*$`)
@@ -84,11 +82,6 @@ func (s *Service) validateDefinition(table Table) error {
 		}
 	}
 	return nil
-}
-
-func (s *Service) uniqueIndex(ctx context.Context) error {
-	_, err := s.repo.db.Collection("rows").Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "user_id", Value: 1}, {Key: "table_id", Value: 1}, {Key: "key_hashes", Value: 1}}, Options: options.Index().SetName("table_unique_keys").SetUnique(true).SetPartialFilterExpression(bson.M{"key_hashes.0": bson.M{"$exists": true}})})
-	return err
 }
 
 func keyHashes(table Table, cells map[string]any) ([]string, error) {
@@ -187,27 +180,43 @@ func (s *Service) validateKeys(ctx context.Context, p principal.Principal, state
 				}
 				seen[hash] = row.ID
 			}
-			matches := bson.A{bson.M{"key_hashes": bson.M{"$in": row.KeyHashes}}}
-			for _, key := range definitions[db].Keys {
-				values := bson.M{}
-				for _, column := range key {
+			args := pgx.NamedArgs{"user": p.UserID, "table": db, "hashes": row.KeyHashes}
+			matches := []string{`EXISTS(SELECT 1 FROM row_keys k WHERE k.user_id=r.user_id AND k.table_id=r.table_id AND k.row_id=r.id AND k.key_hash=ANY(@hashes::text[]))`}
+			for i, key := range definitions[db].Keys {
+				values := []string{}
+				for j, column := range key {
 					value := row.Cells[column]
 					if value == nil || value == "" {
 						continue
 					}
-					values["cells."+column] = value
+					cast := "text"
+					for _, c := range definitions[db].Columns {
+						if c.ID == column {
+							switch c.Type {
+							case "decimal", "number":
+								cast = "numeric"
+							case "bool":
+								cast = "boolean"
+							case "datetime":
+								cast = "timestamptz"
+							}
+						}
+					}
+					col, val := fmt.Sprintf("key%dcol%d", i, j), fmt.Sprintf("key%dval%d", i, j)
+					args[col], args[val] = column, fmt.Sprint(value)
+					values = append(values, fmt.Sprintf("(r.cells->>@%s)::%s=@%s::%s", col, cast, val, cast))
 				}
 				if len(values) == len(key) {
-					matches = append(matches, values)
+					matches = append(matches, "("+strings.Join(values, " AND ")+")")
 				}
 			}
-			cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": db, "archived": bson.M{"$ne": true}, "$or": matches})
+			cursor, err := s.repo.db.Query(ctx, `SELECT r.* FROM rows r WHERE r.user_id=@user AND r.table_id=@table AND NOT r.archived AND (`+strings.Join(matches, " OR ")+`)`, args)
 			if err != nil {
 				return issues, err
 			}
-			for cursor.Next(ctx) {
+			for cursor.Next() {
 				var other Row
-				if err = cursor.Decode(&other); err != nil {
+				if other, err = rowFrom(cursor, definitions[db]); err != nil {
 					break
 				}
 				if next, ok := pending[other.ID]; ok {
@@ -238,7 +247,7 @@ func (s *Service) validateKeys(ctx context.Context, p principal.Principal, state
 				}
 			}
 			cursorErr := cursor.Err()
-			_ = cursor.Close(ctx)
+			cursor.Close()
 			if err != nil {
 				return issues, err
 			}

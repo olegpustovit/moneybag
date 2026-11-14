@@ -3,10 +3,9 @@ package audit
 import (
 	"context"
 	"fmt"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
 	"slices"
 	"strings"
 	"time"
@@ -65,8 +64,8 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 	if err := p.Require("ledger:read"); err != nil {
 		return ChangesPage{}, err
 	}
-	db, err := mongodb.Shared(s.repo.DB, p)
-	if err != nil {
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
 		return ChangesPage{}, err
 	}
 	limit := in.Limit
@@ -76,9 +75,8 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 	if limit < 1 || limit > 200 || len(in.Q) > 200 {
 		return ChangesPage{}, fmt.Errorf("limit must be 1..200 and q at most 200 characters")
 	}
-	f := bson.M{"user_id": p.UserID}
-	dates := bson.M{}
-	for field, value := range map[string]string{"$gte": in.From, "$lte": in.To} {
+	var from, to *time.Time
+	for field, value := range map[string]string{"from": in.From, "to": in.To} {
 		if value == "" {
 			continue
 		}
@@ -87,28 +85,30 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 			if at, e = time.Parse("2006-01-02", value); e != nil {
 				return ChangesPage{}, fmt.Errorf("from and to must be YYYY-MM-DD or RFC3339")
 			}
-			if field == "$lte" {
+			if field == "to" {
 				at = at.Add(24*time.Hour - time.Millisecond)
 			}
 		}
-		dates[field] = at
+		at = at.UTC().Truncate(time.Millisecond)
+		if field == "from" {
+			from = &at
+		} else {
+			to = &at
+		}
 	}
-	if len(dates) > 0 {
-		f["at"] = dates
-	}
-	if in.Cursor > 0 {
-		f["seq"] = bson.M{"$lt": in.Cursor}
-	}
+	cursor := in.Cursor
 	const batch = 500
 	query := strings.ToLower(in.Q)
 	out := ChangesPage{Groups: []ChangeGroup{}}
 	for page := 0; page < 5; page++ {
-		cur, err := db.Collection("events").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "seq", Value: -1}}).SetLimit(batch))
+		const changesSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND (@cursor::bigint<=0 OR seq<@cursor)
+ AND (@from::timestamptz IS NULL OR at>=@from) AND (@to::timestamptz IS NULL OR at<=@to) ORDER BY seq DESC LIMIT 500`
+		rows, err := db.Query(ctx, changesSQL, pgx.NamedArgs{"user": p.UserID, "cursor": cursor, "from": from, "to": to})
 		if err != nil {
 			return ChangesPage{}, fmt.Errorf("read changes: %w", err)
 		}
-		var events []Event
-		if err = cur.All(ctx, &events); err != nil {
+		events, err := pgx.CollectRows(rows, pgx.RowToStructByName[Event])
+		if err != nil {
 			return ChangesPage{}, fmt.Errorf("decode changes: %w", err)
 		}
 		if len(events) == 0 {
@@ -144,7 +144,7 @@ func (s *Service) Changes(ctx context.Context, p principal.Principal, in Changes
 			out.Groups = append(out.Groups, group)
 			out.Next = e.Seq
 		}
-		f["seq"] = bson.M{"$lt": events[len(events)-1].Seq}
+		cursor = events[len(events)-1].Seq
 		if len(events) < batch {
 			out.Next = 0
 			return out, nil
@@ -225,19 +225,20 @@ func (s *Service) statuses(ctx context.Context, p principal.Principal, events []
 		ids[i] = e.ID
 		out[e.ID] = "interrupted"
 	}
-	cur, err := s.repo.DB.Collection("audit_outcomes").Find(ctx, bson.M{"user_id": p.UserID, "_id": bson.M{"$in": ids}}, options.Find().SetProjection(bson.M{"status": 1}))
+	rows, err := s.repo.DB.Query(ctx, `SELECT id,status FROM audit_outcomes WHERE user_id=@user AND id=ANY(@ids::text[])`, pgx.NamedArgs{"user": p.UserID, "ids": ids})
 	if err != nil {
 		return nil, fmt.Errorf("read change outcomes: %w", err)
 	}
-	var rows []struct {
-		ID     string `bson:"_id"`
-		Status string `bson:"status"`
+	defer rows.Close()
+	for rows.Next() {
+		var id, status string
+		if err := rows.Scan(&id, &status); err != nil {
+			return nil, fmt.Errorf("decode change outcomes: %w", err)
+		}
+		out[id] = status
 	}
-	if err = cur.All(ctx, &rows); err != nil {
+	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("decode change outcomes: %w", err)
-	}
-	for _, row := range rows {
-		out[row.ID] = row.Status
 	}
 	return out, nil
 }

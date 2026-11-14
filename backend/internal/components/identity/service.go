@@ -9,12 +9,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"golang.org/x/crypto/argon2"
 	"net/mail"
 	"strings"
@@ -24,41 +23,40 @@ import (
 var ErrCredentials = errors.New("invalid email or password")
 
 type User struct {
-	ID        string    `json:"id" bson:"_id"`
-	Email     string    `json:"email" bson:"email"`
-	Name      string    `json:"name" bson:"name"`
-	Admin     bool      `json:"is_admin" bson:"is_admin"`
-	CreatedAt time.Time `json:"created_at" bson:"created_at"`
-	Disabled  bool      `json:"disabled,omitempty" bson:"disabled,omitempty"`
+	ID        string    `json:"id" db:"id"`
+	Email     string    `json:"email" db:"email"`
+	Name      string    `json:"name" db:"name"`
+	Admin     bool      `json:"is_admin" db:"is_admin"`
+	CreatedAt time.Time `json:"created_at" db:"created_at"`
+	Disabled  bool      `json:"disabled,omitempty" db:"disabled"`
 }
 type credential struct {
-	ID   string `bson:"_id"`
-	Hash []byte `bson:"hash"`
-	Salt []byte `bson:"salt"`
+	ID   string `db:"id"`
+	Hash []byte `db:"hash"`
+	Salt []byte `db:"salt"`
 }
 type Session struct {
-	Hash      string    `json:"-" bson:"_id"`
-	UserID    string    `json:"-" bson:"user_id"`
-	CSRF      string    `json:"-" bson:"csrf"`
-	ExpiresAt time.Time `json:"expires_at" bson:"expires_at"`
+	Hash      string    `json:"-" db:"id"`
+	UserID    string    `json:"-" db:"user_id"`
+	CSRF      string    `json:"-" db:"csrf"`
+	ExpiresAt time.Time `json:"expires_at" db:"expires_at"`
 }
 type Invite struct {
-	Hash      string     `json:"-" bson:"_id"`
-	Email     string     `json:"email" bson:"email"`
-	CreatedBy string     `json:"created_by" bson:"created_by"`
-	ExpiresAt time.Time  `json:"expires_at" bson:"expires_at"`
-	UsedAt    *time.Time `json:"used_at,omitempty" bson:"used_at,omitempty"`
+	Hash      string     `json:"-" db:"id"`
+	Email     string     `json:"email" db:"email"`
+	CreatedBy string     `json:"created_by" db:"created_by"`
+	ExpiresAt time.Time  `json:"expires_at" db:"expires_at"`
+	UsedAt    *time.Time `json:"used_at,omitempty" db:"used_at"`
 }
-type MongoRepository struct {
-	db     *mongo.Database
-	client *mongo.Client
+type PostgresRepository struct {
+	db *pgxpool.Pool
 }
-type Service struct{ repo *MongoRepository }
+type Service struct{ repo *PostgresRepository }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository {
-	return &MongoRepository{db, db.Client()}
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
+	return &PostgresRepository{db}
 }
-func NewService(r *MongoRepository) *Service { return &Service{r} }
+func NewService(r *PostgresRepository) *Service { return &Service{r} }
 func Random() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -78,22 +76,17 @@ func validateUser(email, name, password string) (string, error) {
 	}
 	return email, nil
 }
-func (s *Service) Init(ctx context.Context) error {
-	for coll, models := range map[string][]mongo.IndexModel{
-		"users":    {{Keys: bson.D{{Key: "email", Value: 1}}, Options: options.Index().SetUnique(true)}},
-		"sessions": {{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}},
-		"invites":  {{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)}},
-	} {
-		if _, e := s.repo.db.Collection(coll).Indexes().CreateMany(ctx, models); e != nil {
-			return e
-		}
-	}
-	return nil
-}
+func (s *Service) Init(context.Context) error { return nil }
 func (s *Service) NeedsSetup(ctx context.Context) (bool, error) {
-	n, e := s.repo.db.Collection("users").CountDocuments(ctx, bson.M{})
-	return n == 0, e
+	const setupSQL = `SELECT NOT EXISTS (SELECT 1 FROM users)`
+	var needed bool
+	e := s.repo.db.QueryRow(ctx, setupSQL).Scan(&needed)
+	return needed, e
 }
+
+const insertUserSQL = `INSERT INTO users (id,email,name,is_admin,created_at,disabled) VALUES (@id,@email,@name,@admin,@at,@disabled)`
+const insertCredentialSQL = `INSERT INTO credentials (id,hash,salt) VALUES (@id,@hash,@salt)`
+
 func (s *Service) Setup(ctx context.Context, email, name, password string) (User, error) {
 	email, e := validateUser(email, name, password)
 	if e != nil {
@@ -103,7 +96,7 @@ func (s *Service) Setup(ctx context.Context, email, name, password string) (User
 	if e != nil {
 		return User{}, e
 	}
-	e = mongodb.Workflow(ctx, func(tx context.Context) error {
+	e = postgres.Workflow(ctx, func(tx context.Context) error {
 		needed, e := s.NeedsSetup(tx)
 		if e != nil {
 			return e
@@ -111,21 +104,21 @@ func (s *Service) Setup(ctx context.Context, email, name, password string) (User
 		if !needed {
 			return principal.ErrForbidden
 		}
-		if _, e = s.repo.db.Collection("settings").InsertOne(tx, bson.M{"_id": "owner_initialized"}); mongo.IsDuplicateKeyError(e) {
+		if _, e = s.repo.db.Exec(tx, `INSERT INTO settings (id) VALUES ('owner_initialized')`); postgres.IsUniqueViolation(e) {
 			return principal.ErrForbidden
 		} else if e != nil {
 			return e
 		}
-		if _, e = s.repo.db.Collection("users").InsertOne(tx, u); e != nil {
+		if _, e = s.repo.db.Exec(tx, insertUserSQL, pgx.NamedArgs{"id": u.ID, "email": u.Email, "name": u.Name, "admin": u.Admin, "at": u.CreatedAt, "disabled": u.Disabled}); e != nil {
 			return e
 		}
-		_, e = s.repo.db.Collection("credentials").InsertOne(tx, cred)
+		_, e = s.repo.db.Exec(tx, insertCredentialSQL, pgx.NamedArgs{"id": cred.ID, "hash": cred.Hash, "salt": cred.Salt})
 		return e
 	})
 	return u, e
 }
 func newUser(email, name, password string, admin bool) (User, credential, error) {
-	u := User{ID: ulid.Make().String(), Email: email, Name: strings.TrimSpace(name), Admin: admin, CreatedAt: time.Now().UTC()}
+	u := User{ID: ulid.Make().String(), Email: email, Name: strings.TrimSpace(name), Admin: admin, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
 	salt := make([]byte, 16)
 	if _, e := rand.Read(salt); e != nil {
 		return User{}, credential{}, e
@@ -134,16 +127,26 @@ func newUser(email, name, password string, admin bool) (User, credential, error)
 }
 func (s *Service) User(ctx context.Context, id string) (User, error) {
 	var u User
-	e := s.repo.db.Collection("users").FindOne(ctx, bson.M{"_id": id}).Decode(&u)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const userSQL = `SELECT * FROM users WHERE id=@id`
+	rows, e := s.repo.db.Query(ctx, userSQL, pgx.NamedArgs{"id": id})
+	if e != nil {
+		return u, e
+	}
+	u, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[User])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = principal.ErrNotFound
 	}
 	return u, e
 }
 func (s *Service) ByEmail(ctx context.Context, email string) (User, error) {
 	var u User
-	e := s.repo.db.Collection("users").FindOne(ctx, bson.M{"email": strings.ToLower(strings.TrimSpace(email))}).Decode(&u)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const emailSQL = `SELECT * FROM users WHERE email=@email`
+	rows, e := s.repo.db.Query(ctx, emailSQL, pgx.NamedArgs{"email": strings.ToLower(strings.TrimSpace(email))})
+	if e != nil {
+		return u, e
+	}
+	u, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[User])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = principal.ErrNotFound
 	}
 	return u, e
@@ -155,10 +158,11 @@ func (s *Service) Login(ctx context.Context, email, password string) (User, erro
 	u, e := s.ByEmail(ctx, email)
 	var cred credential
 	if e == nil {
-		e = s.repo.db.Collection("credentials").FindOne(ctx, bson.M{"_id": u.ID}).Decode(&cred)
+		const credentialSQL = `SELECT id,hash,salt FROM credentials WHERE id=@id`
+		e = s.repo.db.QueryRow(ctx, credentialSQL, pgx.NamedArgs{"id": u.ID}).Scan(&cred.ID, &cred.Hash, &cred.Salt)
 	}
 	if e != nil {
-		if !errors.Is(e, principal.ErrNotFound) && !errors.Is(e, mongo.ErrNoDocuments) {
+		if !errors.Is(e, principal.ErrNotFound) && !errors.Is(e, pgx.ErrNoRows) {
 			return User{}, e
 		}
 		_ = passwordHash(password, make([]byte, 16))
@@ -171,15 +175,17 @@ func (s *Service) Login(ctx context.Context, email, password string) (User, erro
 }
 func (s *Service) StartSession(ctx context.Context, u User) (string, Session, error) {
 	raw := Random()
-	session := Session{Hash: Hash(raw), UserID: u.ID, CSRF: Random(), ExpiresAt: time.Now().Add(7 * 24 * time.Hour)}
-	_, e := s.repo.db.Collection("sessions").InsertOne(ctx, session)
+	session := Session{Hash: Hash(raw), UserID: u.ID, CSRF: Random(), ExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Millisecond)}
+	const sessionSQL = `INSERT INTO sessions (id,user_id,csrf,expires_at) VALUES (@id,@user,@csrf,@expires)`
+	_, e := s.repo.db.Exec(ctx, sessionSQL, pgx.NamedArgs{"id": session.Hash, "user": session.UserID, "csrf": session.CSRF, "expires": session.ExpiresAt})
 	return raw, session, e
 }
 func (s *Service) Session(ctx context.Context, raw string) (principal.Principal, Session, error) {
 	var session Session
-	e := s.repo.db.Collection("sessions").FindOne(ctx, bson.M{"_id": Hash(raw), "expires_at": bson.M{"$gt": time.Now()}}).Decode(&session)
+	const sessionSQL = `SELECT id,user_id,csrf,expires_at FROM sessions WHERE id=@id AND expires_at>@now`
+	e := s.repo.db.QueryRow(ctx, sessionSQL, pgx.NamedArgs{"id": Hash(raw), "now": time.Now().UTC().Truncate(time.Millisecond)}).Scan(&session.Hash, &session.UserID, &session.CSRF, &session.ExpiresAt)
 	if e != nil {
-		if errors.Is(e, mongo.ErrNoDocuments) {
+		if errors.Is(e, pgx.ErrNoRows) {
 			e = principal.ErrForbidden
 		}
 		return principal.Principal{}, session, e
@@ -198,7 +204,7 @@ func Principal(u User) principal.Principal {
 	return principal.Principal{UserID: u.ID, Scopes: scopes, Actor: principal.Actor{Kind: "human", ID: u.ID}, Admin: u.Admin}
 }
 func (s *Service) Logout(ctx context.Context, raw string) error {
-	_, e := s.repo.db.Collection("sessions").DeleteOne(ctx, bson.M{"_id": Hash(raw)})
+	_, e := s.repo.db.Exec(ctx, `DELETE FROM sessions WHERE id=@id`, pgx.NamedArgs{"id": Hash(raw)})
 	return e
 }
 func (s *Service) Invite(ctx context.Context, p principal.Principal, email string) (string, error) {
@@ -216,12 +222,14 @@ func (s *Service) Invite(ctx context.Context, p principal.Principal, email strin
 		return "", e
 	}
 	raw := Random()
-	_, e = s.repo.db.Collection("invites").InsertOne(ctx, Invite{Hash: Hash(raw), Email: email, CreatedBy: p.UserID, ExpiresAt: time.Now().Add(72 * time.Hour)})
+	const inviteSQL = `INSERT INTO invites (id,email,created_by,expires_at) VALUES (@id,@email,@by,@expires)`
+	_, e = s.repo.db.Exec(ctx, inviteSQL, pgx.NamedArgs{"id": Hash(raw), "email": email, "by": p.UserID, "expires": time.Now().UTC().Add(72 * time.Hour).Truncate(time.Millisecond)})
 	return raw, e
 }
 func (s *Service) Register(ctx context.Context, token, name, password string) (User, error) {
 	var invite Invite
-	e := s.repo.db.Collection("invites").FindOne(ctx, bson.M{"_id": Hash(token), "used_at": bson.M{"$exists": false}, "expires_at": bson.M{"$gt": time.Now()}}).Decode(&invite)
+	const inviteSQL = `SELECT id,email,created_by,expires_at,used_at FROM invites WHERE id=@id AND used_at IS NULL AND expires_at>@now`
+	e := s.repo.db.QueryRow(ctx, inviteSQL, pgx.NamedArgs{"id": Hash(token), "now": time.Now().UTC().Truncate(time.Millisecond)}).Scan(&invite.Hash, &invite.Email, &invite.CreatedBy, &invite.ExpiresAt, &invite.UsedAt)
 	if e != nil {
 		return User{}, fmt.Errorf("invite is invalid or expired")
 	}
@@ -232,18 +240,19 @@ func (s *Service) Register(ctx context.Context, token, name, password string) (U
 	if e != nil {
 		return User{}, e
 	}
-	e = mongodb.Workflow(ctx, func(tx context.Context) error {
-		r, e := s.repo.db.Collection("invites").UpdateOne(tx, bson.M{"_id": invite.Hash, "used_at": bson.M{"$exists": false}, "expires_at": bson.M{"$gt": time.Now()}}, bson.M{"$set": bson.M{"used_at": time.Now()}})
+	e = postgres.Workflow(ctx, func(tx context.Context) error {
+		const useSQL = `UPDATE invites SET used_at=@now WHERE id=@id AND used_at IS NULL AND expires_at>@now`
+		r, e := s.repo.db.Exec(tx, useSQL, pgx.NamedArgs{"id": invite.Hash, "now": time.Now().UTC().Truncate(time.Millisecond)})
 		if e != nil {
 			return e
 		}
-		if r.ModifiedCount != 1 {
+		if r.RowsAffected() != 1 {
 			return principal.ErrForbidden
 		}
-		if _, e = s.repo.db.Collection("users").InsertOne(tx, u); e != nil {
+		if _, e = s.repo.db.Exec(tx, insertUserSQL, pgx.NamedArgs{"id": u.ID, "email": u.Email, "name": u.Name, "admin": u.Admin, "at": u.CreatedAt, "disabled": u.Disabled}); e != nil {
 			return e
 		}
-		_, e = s.repo.db.Collection("credentials").InsertOne(tx, cred)
+		_, e = s.repo.db.Exec(tx, insertCredentialSQL, pgx.NamedArgs{"id": cred.ID, "hash": cred.Hash, "salt": cred.Salt})
 		return e
 	})
 	return u, e
@@ -264,48 +273,51 @@ func (s *Service) ChangePassword(ctx context.Context, p principal.Principal, cur
 		return e
 	}
 	cred.ID = u.ID
-	return mongodb.Workflow(ctx, func(tx context.Context) error {
-		if _, e := s.repo.db.Collection("credentials").ReplaceOne(tx, bson.M{"_id": u.ID}, cred); e != nil {
+	return postgres.Workflow(ctx, func(tx context.Context) error {
+		if _, e := s.repo.db.Exec(tx, `UPDATE credentials SET hash=@hash,salt=@salt WHERE id=@id`, pgx.NamedArgs{"id": u.ID, "hash": cred.Hash, "salt": cred.Salt}); e != nil {
 			return e
 		}
-		_, e := s.repo.db.Collection("sessions").DeleteMany(tx, bson.M{"user_id": u.ID})
+		_, e := s.repo.db.Exec(tx, `DELETE FROM sessions WHERE user_id=@user`, pgx.NamedArgs{"user": u.ID})
 		return e
 	})
 }
 
 // Users lists everyone on this server; callers enforce admin:users. Password material lives in another collection and never reaches it.
 func (s *Service) Users(ctx context.Context) ([]User, error) {
-	cur, e := s.repo.db.Collection("users").Find(ctx, bson.M{}, options.Find().SetSort(bson.D{{Key: "created_at", Value: 1}}).SetLimit(500))
+	const usersSQL = `SELECT * FROM users ORDER BY created_at LIMIT 500`
+	rows, e := s.repo.db.Query(ctx, usersSQL)
 	if e != nil {
 		return nil, e
 	}
-	out := []User{}
-	return out, cur.All(ctx, &out)
+	return pgx.CollectRows(rows, pgx.RowToStructByName[User])
 }
 
 // SetDisabled blocks or restores a user; disabling also ends their sessions, and their agents stop at the next token check.
 func (s *Service) SetDisabled(ctx context.Context, id string, disabled bool) error {
-	r, e := s.repo.db.Collection("users").UpdateOne(ctx, bson.M{"_id": id}, bson.M{"$set": bson.M{"disabled": disabled}})
-	if e == nil && r.MatchedCount != 1 {
+	const disableSQL = `UPDATE users SET disabled=@disabled WHERE id=@id`
+	r, e := s.repo.db.Exec(ctx, disableSQL, pgx.NamedArgs{"id": id, "disabled": disabled})
+	if e == nil && r.RowsAffected() != 1 {
 		return principal.ErrNotFound
 	}
 	if e != nil || !disabled {
 		return e
 	}
-	_, e = s.repo.db.Collection("sessions").DeleteMany(ctx, bson.M{"user_id": id})
+	_, e = s.repo.db.Exec(ctx, `DELETE FROM sessions WHERE user_id=@user`, pgx.NamedArgs{"user": id})
 	return e
 }
 
 // EachUser is for operator maintenance; it is never exposed by an HTTP or MCP handler.
 func (s *Service) EachUser(ctx context.Context, fn func(principal.Principal) error) error {
-	cur, e := s.repo.db.Collection("users").Find(ctx, bson.M{}, options.Find().SetProjection(bson.M{"_id": 1, "admin": 1}).SetBatchSize(100))
+	// The original projection omitted is_admin, so maintenance principals stay non-admin.
+	const eachSQL = `SELECT id FROM users`
+	rows, e := s.repo.db.Query(ctx, eachSQL)
 	if e != nil {
 		return e
 	}
-	defer cur.Close(ctx)
-	for cur.Next(ctx) {
+	defer rows.Close()
+	for rows.Next() {
 		var u User
-		if e = cur.Decode(&u); e != nil {
+		if e = rows.Scan(&u.ID); e != nil {
 			return e
 		}
 		p := Principal(u)
@@ -314,5 +326,5 @@ func (s *Service) EachUser(ctx context.Context, fn func(principal.Principal) err
 			return e
 		}
 	}
-	return cur.Err()
+	return rows.Err()
 }

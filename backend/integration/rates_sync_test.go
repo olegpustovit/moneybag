@@ -2,11 +2,10 @@ package integration
 
 import (
 	"context"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -18,30 +17,14 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
 func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, e := url.Parse(uri)
-	if e != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("integration tests require the dedicated moneybag_test_ database")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	client, e := mongodb.Connect(ctx, uri)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_ratesync")
-	_ = db.Drop(ctx)
-	defer db.Drop(context.Background())
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	var e error
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -50,8 +33,8 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 		t.Fatal(e)
 	}
 	p := identity.Principal(u)
-	a := audit.NewService(audit.NewMongoRepository(db))
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
 
 	var goldDown atomic.Bool
 	goldDown.Store(true)
@@ -155,7 +138,7 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	if s := state("swissquote"); s.Status != "skipped" {
 		t.Fatal("fallback not skipped", s)
 	}
-	revisions := audit.NewService(audit.NewMongoRepository(db))
+	revisions := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	before, e := revisions.Revision(ctx, p)
 	if e != nil {
 		t.Fatal(e)
@@ -206,10 +189,14 @@ func TestRateSyncStateAndCorrectionsSurvive(t *testing.T) {
 	}
 	timer := time.NewTimer(time.Until(future) + 100*time.Millisecond)
 	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		t.Fatal(ctx.Err())
-	case <-timer.C:
+	// A host clock correction can make a monotonic timer fire before the wall-clock quote date.
+	for time.Now().Before(future.Add(100 * time.Millisecond)) {
+		select {
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		case <-timer.C:
+			timer.Reset(time.Until(future) + 100*time.Millisecond)
+		}
 	}
 	afterRate, e := sources.Rows(ctx, p, "rates:EUR/USD")
 	if e != nil || afterRate[0]["value"] != float64(2) {

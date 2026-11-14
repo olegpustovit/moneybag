@@ -3,8 +3,8 @@ package integration
 import (
 	"context"
 	"fmt"
-	"net/url"
-	"os"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"reflect"
 	"strings"
 	"sync"
@@ -19,59 +19,40 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestBudgetMonthlyReadSharing(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	var reads, extraJournalReads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
-			reads.Add(1)
-		}
-		if e.CommandName == "find" && e.Command.Lookup("find").StringValue() == "journal" || e.CommandName == "getMore" && e.Command.Lookup("collection").StringValue() == "journal" {
-			extraJournalReads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_budget_month_cache")
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) }()
+	var reads, extraJournalReads atomic.Int64
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "FROM journal") {
+			if strings.Contains(sql, "SUM(") || strings.Contains(sql, "WITH source AS MATERIALIZED") {
+				reads.Add(1)
+			} else {
+				extraJournalReads.Add(1)
+			}
+		}
+	}))
+	var err error
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
-	_, err = db.Collection("budgets").InsertOne(ctx, bson.M{"_id": "line", "user_id": p.UserID, "id": "food", "accounts": bson.A{"expenses:food"}, "limit": ledger.MustDecimal("100")})
+	_, err = pool.Exec(ctx, `INSERT INTO budgets (storage_key,user_id,id,accounts,"limit") VALUES ('line',@user,'food',ARRAY['expenses:food'],100)`, pgx.NamedArgs{"user": p.UserID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs := []any{}
+	docs := []ledger.Entry{}
 	for i, v := range []struct{ date, amount, currency, price string }{{"2026-01-01", "10000000000000000", "EUR", ""}, {"2026-01-01", "1", "EUR", ""}, {"2026-01-01", "-10000000000000000", "EUR", ""}, {"2026-01-02", "3", "USD", "2"}, {"2026-02-03", "0.1", "EUR", ""}, {"2026-02-03", "0.2", "EUR", ""}, {"2026-03-01", "9", "EUR", ""}} {
 		post := ledger.Posting{Account: "expenses:food", Amount: ledger.Amount{Value: ledger.MustDecimal(v.amount), Commodity: v.currency}}
 		if v.price != "" {
 			post.Price = &ledger.Amount{Value: ledger.MustDecimal(v.price), Commodity: "EUR"}
 		}
-		docs = append(docs, bson.M{"_id": fmt.Sprintf("entry-%d", i), "seq": int64(i + 1), "kind": "entry", "user_id": p.UserID, "status": "posted", "date": v.date, "postings": []ledger.Posting{post}})
+		docs = append(docs, ledger.Entry{ID: fmt.Sprintf("entry-%d", i), Seq: int64(i + 1), Kind: "entry", UserID: p.UserID, Status: "posted", Date: v.date, Postings: []ledger.Posting{post}})
 	}
-	docs = append(docs, bson.M{"_id": "other-entry", "seq": int64(1), "kind": "entry", "user_id": "01ARZ3NDEKTSV4RRFFQ69G5FAW", "status": "posted", "date": "2026-01-01", "postings": []ledger.Posting{{Account: "expenses:other", Amount: ledger.Amount{Value: ledger.MustDecimal("999"), Commodity: "EUR"}}}})
-	if _, err = db.Collection("journal").InsertMany(ctx, docs); err != nil {
+	docs = append(docs, ledger.Entry{ID: "other-entry", Seq: int64(1), Kind: "entry", UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", Status: "posted", Date: "2026-01-01", Postings: []ledger.Posting{{Account: "expenses:other", Amount: ledger.Amount{Value: ledger.MustDecimal("999"), Commodity: "EUR"}}}})
+	if _, err = insertJournal(ctx, pgtest.New(t), docs...); err != nil {
 		t.Fatal(err)
 	}
-	svc := budget.NewService(budget.NewMongoRepository(db), nil, nil)
+	svc := budget.NewService(budget.NewPostgresRepository(pool), nil, nil)
 	ranges := [][2]string{{"2026-01-01", "2026-02-28"}, {"2026-02-01", "2026-03-31"}}
 	expected := make([][]budget.Month, len(ranges))
 	for i, r := range ranges {
@@ -118,7 +99,7 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if err != nil || result.Value == nil || reads.Load() != 1 {
 		t.Fatalf("dashboard sources used %d aggregates: %v", reads.Load(), err)
 	}
-	book := ledger.NewService(ledger.NewMongoRepository(db), nil)
+	book := ledger.NewService(ledger.NewPostgresRepository(pool), nil)
 	combinedEngine := dashboard.Engine{Expr: expr, Reader: &dashboard.Sources{Budget: svc, Ledger: book, Valuer: testValuer{}}}
 	combinedData := map[string]dashboard.Query{"lines": {From: "budget_lines"}, "months": {From: "months"}, "postings": {From: "postings", Agg: map[string]string{"n": "count()"}}}
 	reads.Store(0)
@@ -133,7 +114,7 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if err != nil || !reflect.DeepEqual(combinedMonths, expected[0]) {
 		t.Fatal("combined monthly values differ")
 	}
-	grouped, ok, err := ledger.NewMongoRepository(db).CombinedMonthRows(combinedCtx, p, "2026-01-01", "2026-03-31")
+	grouped, ok, err := ledger.NewPostgresRepository(pool).CombinedMonthRows(combinedCtx, p, "2026-01-01", "2026-03-31")
 	if err != nil || !ok {
 		t.Fatal("combined month rows unavailable")
 	}
@@ -148,7 +129,7 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 		t.Fatal("priced synthetic group missing")
 	}
 	grouped[priceIndex].ID.Price.Commodity = "modified"
-	again, ok, err := ledger.NewMongoRepository(db).CombinedMonthRows(combinedCtx, p, "2026-01-01", "2026-03-31")
+	again, ok, err := ledger.NewPostgresRepository(pool).CombinedMonthRows(combinedCtx, p, "2026-01-01", "2026-03-31")
 	if err != nil || !ok || again[priceIndex].ID.Price.Commodity != "EUR" {
 		t.Fatal("combined monthly rows were mutated")
 	}
@@ -182,7 +163,7 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if err != nil || len(otherCombined) != 2 || otherCombined[0].Total != 999 || reads.Load() != 2 {
 		t.Fatal("combined monthly results crossed user boundaries")
 	}
-	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewMongoRepository(db)))
+	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewPostgresRepository(pool)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,11 +204,11 @@ func TestBudgetMonthlyReadSharing(t *testing.T) {
 	if v, e := monthValue(map[string]any{"month": "2026-02"}); e != nil || v != float64(0.3) || reads.Load() != 2 {
 		t.Fatal("monthly source reused incompatible month")
 	}
-	many := make([]any, 5001)
+	many := make([]ledger.Entry, 5001)
 	for i := range many {
-		many[i] = bson.M{"user_id": p.UserID, "status": "posted", "date": "2025-12-01", "postings": []ledger.Posting{{Account: fmt.Sprintf("expenses:bulk%d", i), Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}}
+		many[i] = ledger.Entry{ID: fmt.Sprintf("bulk-%d", i), Seq: int64(i + 100), UserID: p.UserID, Status: "posted", Date: "2025-12-01", Postings: []ledger.Posting{{Account: fmt.Sprintf("expenses:bulk%d", i), Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}}
 	}
-	if _, err = db.Collection("journal").InsertMany(ctx, many); err != nil {
+	if _, err = insertJournal(ctx, pgtest.New(t), many...); err != nil {
 		t.Fatal(err)
 	}
 	ctx = budget.WithMonthReadWindow(reqcache.With(ctx), "2025-12-01", "2026-03-31")

@@ -3,6 +3,8 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"net/http"
 	"strings"
@@ -50,15 +52,14 @@ func mcpCall(name string) string {
 
 func (h *readHarness) docCounts(t *testing.T) map[string]int64 {
 	t.Helper()
-	names, err := h.db.ListCollectionNames(h.ctx, map[string]any{})
-	if err != nil {
-		t.Fatal(err)
-	}
 	out := map[string]int64{}
-	for _, name := range names {
-		if out[name], err = h.db.Collection(name).CountDocuments(h.ctx, map[string]any{}); err != nil {
+	pool := pgtest.New(t)
+	for _, name := range []string{"counters", "prices", "rate_sync", "feedback", "saved_views", "usage", "users", "credentials", "sessions", "invites", "settings", "oauth_clients", "oauth_codes", "oauth_grants", "oauth_tokens", "admin_confirmations", "shares", "dashboard_snapshots", "events", "audit_outcomes", "accounts", "journal", "entry_tags", "balances", "budgets", "rules", "balance_assertions", "discrepancies", "scenarios", "income_models", "tables", "rows", "row_keys", "import_batches", "import_rows", "import_files", "feeds", "dashboards", "dashboard_versions", "views", "metrics", "labels", "payee_aliases", "annotations", "nav"} {
+		var count int64
+		if err := pool.QueryRow(h.ctx, "SELECT count(*) FROM "+pgx.Identifier{name}.Sanitize()).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
+		out["postgres."+name] = count
 	}
 	return out
 }

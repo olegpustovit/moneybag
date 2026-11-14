@@ -7,7 +7,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"net/url"
 	"slices"
 	"strings"
@@ -48,7 +47,7 @@ func (s *Service) BackfillECB(ctx context.Context, p principal.Principal, from s
 	if len(quotes) == 0 {
 		return []Quote{}, nil
 	}
-	have, e := s.existing(ctx, p, bson.M{"at": bson.M{"$gte": from}})
+	have, e := s.existing(ctx, p, from, "", nil)
 	if e != nil {
 		return nil, e
 	}

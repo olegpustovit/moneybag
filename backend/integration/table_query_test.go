@@ -3,28 +3,30 @@ package integration
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testLargeTableQuery(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testLargeTableQuery(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
+	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("indexed table query beyond 5000 rows", func(t *testing.T) {
 		_, err := s.Tables.CreateNamed(ctx, p, "query-large", tables.CreateInput{Name: "Synthetic query boundary", Columns: []tables.Column{{ID: "token", Type: "string"}}, Keys: [][]string{{"token"}}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		documents := make([]any, 5102)
+		documents := make([]tables.Row, 5102)
 		for i := range documents {
 			id := fmt.Sprintf("%05d", i)
 			documents[i] = tables.Row{Key: p.UserID + ":query-large:" + id, UserID: p.UserID, TableID: "query-large", ID: id, Version: 1, Cells: map[string]any{"token": id}}
 		}
-		if _, err := db.Collection("rows").InsertMany(ctx, documents); err != nil {
+		if _, err := insertRows(ctx, pgdb, documents...); err != nil {
 			t.Fatal(err)
 		}
 		filtered, err := s.Tables.Query(ctx, p, tables.QueryInput{DB: "query-large", Where: `row.token in ['05100','05101']`})
@@ -52,12 +54,12 @@ func testLargeTableQuery(t *testing.T, ctx context.Context, p principal.Principa
 		if _, err := s.Tables.CreateNamed(ctx, p, "query-expanded", tables.CreateInput{Name: "Bounded expansion", Columns: []tables.Column{{ID: "target", Type: "ref", Table: "query-large-target"}}}); err != nil {
 			t.Fatal(err)
 		}
-		expanded := make([]any, 600)
+		expanded := make([]tables.Row, 600)
 		for i := range expanded {
 			id := fmt.Sprintf("%05d", i)
 			expanded[i] = tables.Row{Key: p.UserID + ":query-expanded:" + id, UserID: p.UserID, TableID: "query-expanded", ID: id, Version: 1, Cells: map[string]any{"target": "one"}}
 		}
-		if _, err := db.Collection("rows").InsertMany(ctx, expanded); err != nil {
+		if _, err := insertRows(ctx, pgdb, expanded...); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := s.Tables.Query(ctx, p, tables.QueryInput{DB: "query-expanded", Expand: []string{"target"}}); err == nil || !strings.Contains(err.Error(), "output budget") {

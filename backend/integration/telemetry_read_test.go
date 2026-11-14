@@ -7,13 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -38,17 +39,13 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const tailnetOrigin = "https://moneybag.example.ts.net:8443"
 
 type readHarness struct {
 	ctx      context.Context
-	db       *mongo.Database
+	db       *pgxpool.Pool
 	endpoint string
 	services mcpserver.Services
 	audit    *audit.Service
@@ -59,39 +56,18 @@ type readHarness struct {
 	capture  atomic.Pointer[preview.Capture]
 }
 
-func testDatabase(t *testing.T, suffix string, monitor *event.CommandMonitor) (*mongo.Database, context.Context) {
+func testDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
 	t.Helper()
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	t.Cleanup(cancel)
-	opts := options.Client().ApplyURI(uri)
-	if monitor != nil {
-		opts.SetMonitor(monitor)
-	}
-	client, err := mongo.Connect(opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + suffix)
-	if err = db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
-	return db, ctx
+	return pgtest.New(t), ctx
 }
 
 // newReadHarness runs the real handlers, snapshots, sharing and ledger behind the real compression wrapper.
 func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHarness {
 	t.Helper()
-	db, ctx := testDatabase(t, suffix, nil)
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	db, ctx := testDatabase(t)
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if err := ids.Init(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -100,11 +76,11 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 		t.Fatal(err)
 	}
 	owner := identity.Principal(user)
-	repo := ledger.NewMongoRepository(db)
+	repo := ledger.NewPostgresRepository(pgtest.New(t))
 	if err = repo.Init(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	cache, err := dashboard.NewSnapshots(a)
 	if err != nil {
 		t.Fatal(err)
@@ -116,20 +92,20 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	}
 	book := ledger.NewService(repo, a)
 	book.Expr = expr
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
+	tab := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
 	var reader dashboard.Reader = &dashboard.Sources{Ledger: book, Tables: tab, Valuer: prices, Rates: prices, Snapshots: cache, Expr: expr}
 	if extra != nil {
 		reader = extra
 	}
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: reader}, a)
+	dash := dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &dashboard.Engine{Expr: expr, Reader: reader}, a)
 	dash.UseSnapshots(cache)
-	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, reader, expr, a)
-	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
+	shares := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, reader, expr, a)
+	rec := reconcile.NewService(reconcile.NewPostgresRepository(pgtest.New(t)), book, a)
 	h := &readHarness{ctx: ctx, db: db, audit: a, owner: owner, http: &http.Client{Transport: &http.Transport{DisableCompression: true}}}
-	h.services = mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Tables: tab, Dashboard: dash, Expr: expr, Sources: reader, Sharing: shares, Reconcile: rec, Imports: imports.NewService(imports.NewMongoRepository(db), book, nil, rec, a), Logger: slog.Default()}
-	h.services.Semantic = semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
-	h.services.Feedback = feedback.NewService(feedback.NewMongoRepository(db), a)
+	h.services = mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Tables: tab, Dashboard: dash, Expr: expr, Sources: reader, Sharing: shares, Reconcile: rec, Imports: imports.NewService(imports.NewPostgresRepository(pgtest.New(t)), book, nil, rec, a), Logger: slog.Default()}
+	h.services.Semantic = semantic.NewService(semantic.NewPostgresRepository(pgtest.New(t)), book, prices, a, expr)
+	h.services.Feedback = feedback.NewService(feedback.NewPostgresRepository(pgtest.New(t)), a)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +114,7 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	h.services.Previews = preview.New(h.endpoint, func(ctx context.Context, target string, width, height int) ([]byte, error) {
 		return (*h.capture.Load())(ctx, target, width, height)
 	})
-	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewMongoRepository(db), ids, "https://public.example.test"), repo, db.Client())
+	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db)
 	compress, err := handlers.Compression()
 	if err != nil {
 		t.Fatal(err)
@@ -518,7 +494,7 @@ func TestSharedGrantsEnforceRestrictedReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = h.db.Collection("dashboard_snapshots").UpdateOne(ctx, bson.M{"_id": frozen.ShareID}, bson.M{"$set": bson.M{"rendered": bson.M{"html": "<p>frozen output</p>", "values": bson.M{}}}}); err != nil {
+	if _, err = pgtest.New(t).Exec(ctx, `UPDATE dashboard_snapshots SET rendered='{"html":"<p>frozen output</p>","values":{}}'::jsonb WHERE id=$1`, frozen.ShareID); err != nil {
 		t.Fatal(err)
 	}
 	if r := h.get(t, "/api/shared/"+frozen.ShareID, viewerCookie, "", true); r.status != 200 || r.body["legacy_html"] != "<p>frozen output</p>" {
@@ -760,28 +736,29 @@ func TestTailnetOriginAndPublicIdentity(t *testing.T) {
 // Plans and read counts are the evidence for the audit, journal and reconcile fixes.
 func TestTelemetryQueryPlans(t *testing.T) {
 	var reads, writes atomic.Int64
-	db, ctx := testDatabase(t, "_plans", &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		switch e.CommandName {
-		case "find", "aggregate", "getMore":
-			reads.Add(1)
-		case "insert", "update", "delete", "findAndModify":
-			writes.Add(1)
-		}
-	}})
+	ctx := context.Background()
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "ledger:write"}, Actor: principal.Actor{Kind: "user", ID: "owner"}}
-	if err := ledger.NewMongoRepository(db).Init(ctx, p); err != nil {
+	if err := ledger.NewPostgresRepository(pgtest.New(t)).Init(ctx, p); err != nil {
 		t.Fatal(err)
 	}
 	const entries = 4000
-	journal := make([]any, entries)
+	journal := make([]ledger.Entry, entries)
 	for i := range journal {
 		account := fmt.Sprintf("assets:a%02d", i%40)
-		journal[i] = bson.M{"_id": fmt.Sprintf("j%d", i), "user_id": p.UserID, "seq": int64(i + 1), "status": "posted", "date": fmt.Sprintf("2026-%02d-%02d", i%12+1, i%28+1), "postings": bson.A{bson.M{"account": account, "amount": bson.M{"v": bson.Decimal128{}, "c": "EUR"}}, bson.M{"account": "expenses:x", "amount": bson.M{"v": bson.Decimal128{}, "c": "EUR"}}}}
+		journal[i] = ledger.Entry{ID: fmt.Sprintf("j%d", i), UserID: p.UserID, Seq: int64(i + 1), Status: "posted", Date: fmt.Sprintf("2026-%02d-%02d", i%12+1, i%28+1), Postings: []ledger.Posting{{Account: account, Amount: ledger.Amount{Value: ledger.MustDecimal("0"), Commodity: "EUR"}}, {Account: "expenses:x", Amount: ledger.Amount{Value: ledger.MustDecimal("0"), Commodity: "EUR"}}}}
 	}
-	if _, err := db.Collection("journal").InsertMany(ctx, journal); err != nil {
+	if _, err := insertJournal(ctx, pgtest.New(t), journal...); err != nil {
 		t.Fatal(err)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	pgdb := pgtest.New(t)
+	config := pgdb.Config().Copy()
+	config.ConnConfig.Tracer = sqlQueryCounter{reads: &reads, writes: &writes}
+	traced, err := pgxpool.NewWithConfig(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(traced.Close)
+	a := audit.NewService(audit.NewPostgresRepository(traced))
 	for i := range 210 {
 		tool := "tool_a"
 		if i%3 == 0 {
@@ -809,11 +786,11 @@ func TestTelemetryQueryPlans(t *testing.T) {
 	if len(before) == 0 || len(after) == 0 {
 		t.Fatal("Result lost the payloads")
 	}
-	var stored bson.M
-	if err = db.Collection("audit_outcomes").FindOne(ctx, bson.M{"_id": page.Events[0].ID}).Decode(&stored); err != nil {
+	var storedBefore []byte
+	if err = pgdb.QueryRow(ctx, `SELECT before FROM audit_outcomes WHERE id=@id`, pgx.NamedArgs{"id": page.Events[0].ID}).Scan(&storedBefore); err != nil {
 		t.Fatal(err)
 	}
-	if _, dup := stored["before"]; dup {
+	if storedBefore != nil {
 		t.Fatal("outcome still stores before")
 	}
 	if err = a.Verify(ctx, p); err != nil {
@@ -822,7 +799,7 @@ func TestTelemetryQueryPlans(t *testing.T) {
 	// An outcome written before this change keeps its payloads and hash, and still verifies.
 	legacy := audit.Outcome{ID: page.Events[0].ID, UserID: p.UserID, Status: "completed", Before: page.Events[0].Before, After: page.Events[0].After, At: page.Events[0].Outcome.At}
 	legacy.Hash = audit.OutcomeDigest(page.Events[0].Hash, legacy)
-	if _, err = db.Collection("audit_outcomes").ReplaceOne(ctx, bson.M{"_id": legacy.ID}, legacy); err != nil {
+	if _, err = pgdb.Exec(ctx, `UPDATE audit_outcomes SET hash=@hash,user_id=@user,status=@status,before=@before,after=@after,at=@at WHERE id=@id`, pgx.NamedArgs{"hash": legacy.Hash, "user": legacy.UserID, "status": legacy.Status, "before": []byte(legacy.Before), "after": []byte(legacy.After), "at": legacy.At, "id": legacy.ID}); err != nil {
 		t.Fatal(err)
 	}
 	if err = a.Verify(ctx, p); err != nil {
@@ -832,49 +809,69 @@ func TestTelemetryQueryPlans(t *testing.T) {
 		t.Fatal("legacy outcome duplicates its event", err)
 	}
 
-	type plan struct {
-		find     string
-		filter   bson.M
-		sort     bson.D
-		index    string
-		examined int64
+	// Give PostgreSQL representative cross-owner cardinality before inspecting its real plans.
+	if _, err = pgdb.Exec(ctx, `INSERT INTO events(id,user_id,seq,at) SELECT 'noise-'||n,'01ARZ3NDEKTSV4RRFFQ69G5FAW',n,now() FROM generate_series(1,10000) n`); err != nil {
+		t.Fatal(err)
 	}
-	for _, c := range []plan{
-		{"events", bson.M{"user_id": p.UserID, "tool": "tool_b"}, bson.D{{Key: "seq", Value: -1}}, "user_id_1_tool_1_seq_-1", 70},
-		{"events", bson.M{"user_id": p.UserID, "actor.id": "actor-1"}, bson.D{{Key: "seq", Value: -1}}, "user_id_1_actor.id_1_seq_-1", 42},
-		{"journal", bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$lte": "2026-12-31"}, "postings.account": bson.M{"$in": bson.A{"assets:a07"}}}, nil, "user_id_1_postings.account_1_date_1", entries / 40},
+	if _, err = pgdb.Exec(ctx, `ANALYZE events`); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		query, index string
+		count        int
+	}{
+		{`SELECT id FROM events WHERE user_id=@user AND tool='tool_b' ORDER BY seq DESC`, "events_user_tool_seq", 70},
+		{`SELECT id FROM events WHERE user_id=@user AND actor_id='actor-1' ORDER BY seq DESC`, "events_user_actor_seq", 42},
 	} {
-		command := bson.D{{Key: "find", Value: c.find}, {Key: "filter", Value: c.filter}}
-		if c.sort != nil {
-			command = append(command, bson.E{Key: "sort", Value: c.sort})
-		}
-		var result bson.M
-		if err = db.RunCommand(ctx, bson.D{{Key: "explain", Value: command}, {Key: "verbosity", Value: "executionStats"}}).Decode(&result); err != nil {
+		var raw []byte
+		if err = pgdb.QueryRow(ctx, "EXPLAIN (ANALYZE,FORMAT JSON) "+tc.query, pgx.NamedArgs{"user": p.UserID}).Scan(&raw); err != nil {
 			t.Fatal(err)
 		}
-		encoded, _ := bson.MarshalExtJSON(result["queryPlanner"], false, false)
-		winning, _ := json.Marshal(mustDecode(encoded)["winningPlan"])
-		if !strings.Contains(string(winning), `"indexName":"`+c.index+`"`) || strings.Contains(string(winning), `"stage":"SORT"`) || strings.Contains(string(winning), `"stage":"COLLSCAN"`) {
-			t.Fatalf("%s plan: %s", c.index, winning)
+		var result []struct {
+			Plan struct {
+				Node    string  `json:"Node Type"`
+				Index   string  `json:"Index Name"`
+				Rows    float64 `json:"Actual Rows"`
+				Removed float64 `json:"Rows Removed by Filter"`
+			}
 		}
-		stats, _ := bson.MarshalExtJSON(result["executionStats"], false, false)
-		values := mustDecode(stats)
-		t.Logf("%s: %v docs examined, %v returned, %v ms", c.index, values["totalDocsExamined"], values["nReturned"], values["executionTimeMillis"])
-		if examined := values["totalDocsExamined"].(float64); examined > float64(c.examined) {
-			t.Fatalf("%s examined %v documents, want at most %d", c.index, examined, c.examined)
+		if err = json.Unmarshal(raw, &result); err != nil {
+			t.Fatal(err)
+		}
+		if len(result) != 1 || result[0].Plan.Node != "Index Scan" || result[0].Plan.Index != tc.index || result[0].Plan.Rows != float64(tc.count) || result[0].Plan.Rows+result[0].Plan.Removed > float64(tc.count) {
+			t.Fatalf("%s plan: %s", tc.index, raw)
 		}
 	}
 
+	// The migration plan deliberately defers postings GIN; measure the bounded owner scan.
+	var journalPlan []byte
+	if err = pgdb.QueryRow(ctx, `EXPLAIN (ANALYZE,FORMAT JSON) SELECT id FROM journal WHERE user_id=@user AND status='posted' AND date<='2026-12-31' AND postings @> '[{"account":"assets:a07"}]'::jsonb`, pgx.NamedArgs{"user": p.UserID}).Scan(&journalPlan); err != nil {
+		t.Fatal(err)
+	}
+	var journalStats []struct {
+		Plan struct {
+			Rows    float64 `json:"Actual Rows"`
+			Removed float64 `json:"Rows Removed by Filter"`
+		}
+	}
+	if err = json.Unmarshal(journalPlan, &journalStats); err != nil {
+		t.Fatal(err)
+	}
+	if len(journalStats) != 1 || journalStats[0].Plan.Rows != entries/40 || journalStats[0].Plan.Rows+journalStats[0].Plan.Removed > entries {
+		t.Fatalf("journal owner scan: %s", journalPlan)
+	}
+	t.Logf("journal owner scan: %s", journalPlan)
+
 	// reconcile_status writes nothing even for a principal that may write, however stale the assertion is.
-	if _, err = db.Collection("accounts").InsertOne(ctx, bson.M{"_id": p.UserID + ":assets:a01", "user_id": p.UserID, "id": "assets:a01", "type": "asset", "name": "Synthetic", "commodities": bson.A{"EUR"}}); err != nil {
+	if _, err = insertAccount(ctx, pgdb, ledger.Account{Key: p.UserID + ":assets:a01", UserID: p.UserID, ID: "assets:a01", Type: "asset", Name: "Synthetic", Commodities: []string{"EUR"}}); err != nil {
 		t.Fatal(err)
 	}
 	assertion := reconcile.Assertion{ID: p.UserID + ":assets:a01:2026-12-31:EUR", UserID: p.UserID, Account: "assets:a01", Date: "2026-12-31", Amount: ledger.Amount{Value: ledger.MustDecimal("999"), Commodity: "EUR"}, Source: "synthetic", OK: true, Diff: ledger.MustDecimal("0")}
-	if _, err = db.Collection("balance_assertions").InsertOne(ctx, assertion); err != nil {
+	if _, err = insertAssertions(ctx, pgdb, assertion); err != nil {
 		t.Fatal(err)
 	}
-	book := ledger.NewService(ledger.NewMongoRepository(db), a)
-	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
+	book := ledger.NewService(ledger.NewPostgresRepository(traced), a)
+	rec := reconcile.NewService(reconcile.NewPostgresRepository(traced), book, a)
 	writes.Store(0)
 	status, err := rec.Status(ctx, p, "")
 	if err != nil || len(status) != 1 || status[0].LastOK != "2026-12-31" || writes.Load() != 0 {

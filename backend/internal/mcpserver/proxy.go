@@ -38,7 +38,7 @@ func (t tokenTransport) RoundTrip(r *http.Request) (*http.Response, error) {
 	return t.next.RoundTrip(clone)
 }
 
-// Proxy keeps all writes in the API process; stdio never connects to MongoDB.
+// Proxy keeps all writes in the API process; stdio never connects to the database.
 func Proxy(ctx context.Context, endpoint, tokenFile string, log *slog.Logger) (*mcp.Server, *mcp.ClientSession, error) {
 	u, e := url.Parse(endpoint)
 	if e != nil || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "/mcp" && u.Path != "/mcp/readonly") || (u.Scheme != "https" && !(u.Scheme == "http" && (u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))) {

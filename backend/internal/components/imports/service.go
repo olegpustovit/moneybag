@@ -8,16 +8,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/classify"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/reconcile"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"net/http"
 	"slices"
 	"strings"
@@ -25,35 +25,35 @@ import (
 )
 
 type Candidate struct {
-	RowID     string `json:"row_id" bson:"row_id"`
-	Duplicate bool   `json:"duplicate" bson:"duplicate"`
+	RowID     string `json:"row_id"`
+	Duplicate bool   `json:"duplicate"`
 }
 type Batch struct {
-	ID             string         `json:"id" bson:"_id"`
-	UserID         string         `json:"-" bson:"user_id"`
-	Account        string         `json:"account" bson:"account"`
-	Format         string         `json:"format" bson:"format"`
-	FileSHA256     string         `json:"file_sha256" bson:"file_sha256"`
-	Status         string         `json:"status" bson:"status"`
-	Candidates     []Candidate    `json:"-" bson:"candidates"`
-	From           string         `json:"from" bson:"from"`
-	To             string         `json:"to" bson:"to"`
-	ClosingBalance *ledger.Amount `json:"closing_balance,omitempty" bson:"closing_balance,omitempty"`
-	CreatedAt      time.Time      `json:"created_at" bson:"created_at"`
+	ID             string         `json:"id" db:"id"`
+	UserID         string         `json:"-" db:"user_id"`
+	Account        string         `json:"account" db:"account"`
+	Format         string         `json:"format" db:"format"`
+	FileSHA256     string         `json:"file_sha256" db:"file_sha256"`
+	Status         string         `json:"status" db:"status"`
+	Candidates     []Candidate    `json:"-" db:"candidates"`
+	From           string         `json:"from" db:"from"`
+	To             string         `json:"to" db:"to"`
+	ClosingBalance *ledger.Amount `json:"closing_balance,omitempty" db:"closing_balance"`
+	CreatedAt      time.Time      `json:"created_at" db:"created_at"`
 }
 type ImportRow struct {
-	ID         string            `json:"id" bson:"_id"`
-	UserID     string            `json:"-" bson:"user_id"`
-	BatchID    string            `json:"batch_id" bson:"batch_id"`
-	Account    string            `json:"account" bson:"account"`
-	DedupeKey  string            `json:"dedupe_key" bson:"dedupe_key"`
-	Raw        map[string]string `json:"raw" bson:"raw"`
-	Proposed   ledger.EntryInput `json:"proposed" bson:"proposed"`
-	Kind       string            `json:"kind" bson:"kind"`
-	EntryID    string            `json:"entry_id,omitempty" bson:"entry_id,omitempty"`
-	ReversalID string            `json:"reversal_id,omitempty" bson:"reversal_id,omitempty"`
-	ProposedID string            `json:"-" bson:"proposed_id"`
-	Skip       bool              `json:"skip" bson:"skip"`
+	ID         string            `json:"id" db:"id"`
+	UserID     string            `json:"-" db:"user_id"`
+	BatchID    string            `json:"batch_id" db:"batch_id"`
+	Account    string            `json:"account" db:"account"`
+	DedupeKey  string            `json:"dedupe_key" db:"dedupe_key"`
+	Raw        map[string]string `json:"raw" db:"raw"`
+	Proposed   ledger.EntryInput `json:"proposed" db:"proposed"`
+	Kind       string            `json:"kind" db:"kind"`
+	EntryID    string            `json:"entry_id,omitempty" db:"entry_id"`
+	ReversalID string            `json:"reversal_id,omitempty" db:"reversal_id"`
+	ProposedID string            `json:"-" db:"proposed_id"`
+	Skip       bool              `json:"skip" db:"skip"`
 }
 type StartInput struct {
 	Account    string  `json:"account"`
@@ -91,9 +91,9 @@ type CommitResult struct {
 	Skipped     int    `json:"skipped"`
 	AssertionID string `json:"assertion_id,omitempty"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo      *MongoRepository
+	repo      *PostgresRepository
 	ledger    *ledger.Service
 	classify  *classify.Service
 	reconcile *reconcile.Service
@@ -102,8 +102,8 @@ type Service struct {
 	http      *http.Client
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, l *ledger.Service, c *classify.Service, rec *reconcile.Service, a *audit.Service) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, l *ledger.Service, c *classify.Service, rec *reconcile.Service, a *audit.Service) *Service {
 	return &Service{repo: r, ledger: l, classify: c, reconcile: rec, audit: a, http: safefetch.Client()}
 }
 func importWriter(p principal.Principal) principal.Principal {
@@ -179,7 +179,7 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 	mapping, _ := json.Marshal(in.Mapping)
 	keyHash := sha256.Sum256([]byte(in.Account + in.Format + fileHash + string(mapping) + since))
 	batchID := p.UserID + ":" + hex.EncodeToString(keyHash[:])
-	batch := Batch{ID: batchID, UserID: p.UserID, Account: in.Account, Format: in.Format, FileSHA256: fileHash, Status: "staging", Candidates: []Candidate{}, From: parsed[0].Date, To: parsed[0].Date, CreatedAt: time.Now().UTC()}
+	batch := Batch{ID: batchID, UserID: p.UserID, Account: in.Account, Format: in.Format, FileSHA256: fileHash, Status: "staging", Candidates: []Candidate{}, From: parsed[0].Date, To: parsed[0].Date, CreatedAt: time.Now().UTC().Truncate(time.Millisecond)}
 	for _, row := range parsed {
 		if row.Date < batch.From {
 			batch.From = row.Date
@@ -192,20 +192,19 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 		}
 	}
 	e = s.audit.Workflow(ctx, func(tx context.Context) error {
-		var existing Batch
-		e := s.repo.db.Collection("import_batches").FindOne(tx, bson.M{"_id": batchID, "user_id": p.UserID}).Decode(&existing)
+		existing, e := s.repo.batch(tx, p.UserID, batchID)
 		if e == nil {
 			batch = existing
 			if batch.Status != "staging" {
 				return nil
 			}
-		} else if !errors.Is(e, mongo.ErrNoDocuments) {
+		} else if !postgres.IsNotFound(e) {
 			return e
 		} else {
-			if _, e = s.repo.db.Collection("import_batches").InsertOne(tx, batch); e != nil {
+			if _, e = s.repo.db.Exec(tx, `INSERT INTO import_batches(id,user_id,account,format,file_sha256,status,candidates,"from","to",closing_balance,created_at) VALUES (@id,@user,@account,@format,@sha,@status,COALESCE(@candidates::jsonb,'null'::jsonb),@from,@to,@closing,@created)`, pgx.NamedArgs{"id": batch.ID, "user": p.UserID, "account": batch.Account, "format": batch.Format, "sha": batch.FileSHA256, "status": batch.Status, "candidates": batch.Candidates, "from": batch.From, "to": batch.To, "closing": batch.ClosingBalance, "created": batch.CreatedAt}); e != nil {
 				return e
 			}
-			if _, e = s.repo.db.Collection("import_files").InsertOne(tx, bson.M{"_id": batchID, "user_id": p.UserID, "content": content, "sha256": fileHash}); e != nil {
+			if _, e = s.repo.db.Exec(tx, `INSERT INTO import_files(id,user_id,content,sha256) VALUES (@id,@user,@content,@sha)`, pgx.NamedArgs{"id": batchID, "user": p.UserID, "content": content, "sha": fileHash}); e != nil {
 				return e
 			}
 		}
@@ -214,8 +213,11 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 				if i < len(batch.Candidates) {
 					continue
 				}
-				var imported ImportRow
-				e := s.repo.db.Collection("import_rows").FindOne(tx, bson.M{"user_id": p.UserID, "account": in.Account, "dedupe_key": row.DedupeKey}).Decode(&imported)
+				rows, e := s.repo.db.Query(tx, `SELECT * FROM import_rows WHERE user_id=@user AND account=@account AND dedupe_key=@key`, pgx.NamedArgs{"user": p.UserID, "account": in.Account, "key": row.DedupeKey})
+				if e != nil {
+					return e
+				}
+				imported, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[ImportRow])
 				duplicate := false
 				if e == nil {
 					duplicate = imported.BatchID != batchID
@@ -224,7 +226,7 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 							duplicate = true
 						}
 					}
-				} else if !errors.Is(e, mongo.ErrNoDocuments) {
+				} else if !postgres.IsNotFound(e) {
 					return e
 				} else {
 					counterpart, name, kind := "expenses:unclassified", "Unclassified expenses", "expense"
@@ -258,18 +260,18 @@ func (s *Service) start(ctx context.Context, p principal.Principal, in StartInpu
 						return fmt.Errorf("invalid statement proposal: %w", e)
 					}
 					imported = ImportRow{ID: ulid.Make().String(), UserID: p.UserID, BatchID: batchID, Account: in.Account, DedupeKey: row.DedupeKey, Raw: row.Raw, Proposed: proposed, ProposedID: ulid.Make().String(), Kind: rule.Kind}
-					if _, e = s.repo.db.Collection("import_rows").InsertOne(tx, imported); e != nil {
+					if _, e = s.repo.db.Exec(tx, `INSERT INTO import_rows(id,user_id,batch_id,account,dedupe_key,raw,proposed,kind,entry_id,reversal_id,proposed_id,skip) VALUES (@id,@user,@batch,@account,@key,@raw,@proposed,@kind,@entry,@reversal,@proposal,@skip)`, pgx.NamedArgs{"id": imported.ID, "user": p.UserID, "batch": imported.BatchID, "account": imported.Account, "key": imported.DedupeKey, "raw": imported.Raw, "proposed": imported.Proposed, "kind": imported.Kind, "entry": imported.EntryID, "reversal": imported.ReversalID, "proposal": imported.ProposedID, "skip": imported.Skip}); e != nil {
 						return e
 					}
 				}
 				candidate := Candidate{RowID: imported.ID, Duplicate: duplicate}
-				if _, e = s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": batchID, "user_id": p.UserID}, bson.M{"$push": bson.M{"candidates": candidate}}); e != nil {
+				if _, e = s.repo.db.Exec(tx, `UPDATE import_batches SET candidates=COALESCE(NULLIF(candidates,'null'::jsonb),'[]'::jsonb)||jsonb_build_array(@candidate::jsonb) WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"candidate": candidate, "id": batchID, "user": p.UserID}); e != nil {
 					return e
 				}
 				batch.Candidates = append(batch.Candidates, candidate)
 			}
 			batch.Status = "ready"
-			_, e := s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": batchID, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": "ready"}})
+			_, e := s.repo.db.Exec(tx, `UPDATE import_batches SET status=@status WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"status": "ready", "id": batchID, "user": p.UserID})
 			return e
 		})
 		return e
@@ -283,17 +285,20 @@ func (s *Service) batch(ctx context.Context, p principal.Principal, id string) (
 	if e := p.Valid(); e != nil {
 		return Batch{}, e
 	}
-	var b Batch
-	e := s.repo.db.Collection("import_batches").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID}).Decode(&b)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	b, e := s.repo.batch(ctx, p.UserID, id)
+	if postgres.IsNotFound(e) {
 		e = principal.ErrNotFound
 	}
 	return b, e
 }
 func (s *Service) row(ctx context.Context, p principal.Principal, id string) (ImportRow, error) {
 	var r ImportRow
-	e := s.repo.db.Collection("import_rows").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID}).Decode(&r)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.db.Query(ctx, `SELECT * FROM import_rows WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": id, "user": p.UserID})
+	if e != nil {
+		return r, e
+	}
+	r, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[ImportRow])
+	if postgres.IsNotFound(e) {
 		e = principal.ErrNotFound
 	}
 	return r, e
@@ -379,8 +384,8 @@ func (s *Service) Edit(ctx context.Context, p principal.Principal, in EditInput)
 		}
 	}
 	_, e = s.audit.Write(ctx, p, "import_edit", audit.Target{Collection: "import_rows", ID: row.ID}, "", old, row, func(tx context.Context) error {
-		r, e := s.repo.db.Collection("import_rows").ReplaceOne(tx, bson.M{"_id": row.ID, "user_id": p.UserID, "entry_id": bson.M{"$in": bson.A{"", nil}}}, row)
-		if e == nil && r.MatchedCount != 1 {
+		r, e := s.repo.db.Exec(tx, `UPDATE import_rows SET batch_id=@batch,account=@account,dedupe_key=@key,raw=@raw,proposed=@proposed,kind=@kind,entry_id=@entry,reversal_id=@reversal,proposed_id=@proposal,skip=@skip WHERE id=@id AND user_id=@user AND entry_id=''`, pgx.NamedArgs{"batch": row.BatchID, "account": row.Account, "key": row.DedupeKey, "raw": row.Raw, "proposed": row.Proposed, "kind": row.Kind, "entry": row.EntryID, "reversal": row.ReversalID, "proposal": row.ProposedID, "skip": row.Skip, "id": row.ID, "user": p.UserID})
+		if e == nil && r.RowsAffected() != 1 {
 			return principal.ErrConflict
 		}
 		return e
@@ -404,7 +409,7 @@ func (s *Service) Commit(ctx context.Context, p principal.Principal, id string, 
 			return fmt.Errorf("statement has no closing balance")
 		}
 		writer := importWriter(p)
-		if _, e = s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": "committing"}}); e != nil {
+		if _, e = s.repo.db.Exec(tx, `UPDATE import_batches SET status=@status WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"status": "committing", "id": id, "user": p.UserID}); e != nil {
 			return e
 		}
 		for _, candidate := range b.Candidates {
@@ -431,7 +436,7 @@ func (s *Service) Commit(ctx context.Context, p principal.Principal, id string, 
 			if e != nil {
 				return e
 			}
-			if _, e = s.repo.db.Collection("import_rows").UpdateOne(tx, bson.M{"_id": row.ID, "user_id": p.UserID}, bson.M{"$set": bson.M{"entry_id": entry.Entry.ID}}); e != nil {
+			if _, e = s.repo.db.Exec(tx, `UPDATE import_rows SET entry_id=@entry WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"entry": entry.Entry.ID, "id": row.ID, "user": p.UserID}); e != nil {
 				return e
 			}
 			out.Posted++
@@ -444,7 +449,7 @@ func (s *Service) Commit(ctx context.Context, p principal.Principal, id string, 
 			out.AssertionID = result.Assertion.ID
 		}
 		_, e = s.audit.Write(audit.WithSummary(tx, fmt.Sprintf("Imported %d transactions from a statement, %d skipped", out.Posted, out.Skipped)), p, "import_commit", audit.Target{Collection: "import_batches", ID: id}, "", b, out, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": "committed"}})
+			_, e := s.repo.db.Exec(tx, `UPDATE import_batches SET status=@status WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"status": "committed", "id": id, "user": p.UserID})
 			return e
 		})
 		return e
@@ -481,7 +486,7 @@ func (s *Service) reverseBatch(ctx context.Context, p principal.Principal, id, r
 			return fmt.Errorf("batch must be %s before this operation", start)
 		}
 		_, e = s.audit.Write(tx, p, tool, audit.Target{Collection: "import_batches", ID: id}, reason, b, &out, func(tx context.Context) error {
-			if _, e = s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": running}}); e != nil {
+			if _, e = s.repo.db.Exec(tx, `UPDATE import_batches SET status=@status WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"status": running, "id": id, "user": p.UserID}); e != nil {
 				return e
 			}
 			for _, c := range b.Candidates {
@@ -519,16 +524,12 @@ func (s *Service) reverseBatch(ctx context.Context, p principal.Principal, id, r
 				} else if e != nil {
 					return e
 				}
-				set := bson.M{"reversal_id": reversal.ID}
-				if redo {
-					set = bson.M{"entry_id": reversal.ID, "reversal_id": ""}
-				}
-				if _, e = s.repo.db.Collection("import_rows").UpdateOne(tx, bson.M{"_id": row.ID, "user_id": p.UserID}, bson.M{"$set": set}); e != nil {
+				if _, e = s.repo.db.Exec(tx, `UPDATE import_rows SET reversal_id=CASE WHEN @redo THEN '' ELSE @reversal END,entry_id=CASE WHEN @redo THEN @reversal ELSE entry_id END WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"redo": redo, "reversal": reversal.ID, "id": row.ID, "user": p.UserID}); e != nil {
 					return e
 				}
 				out = append(out, reversal)
 			}
-			_, e = s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": finished}})
+			_, e = s.repo.db.Exec(tx, `UPDATE import_batches SET status=@status WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"status": finished, "id": id, "user": p.UserID})
 			return e
 		})
 		return e
@@ -553,7 +554,7 @@ func (s *Service) SetStagedStatus(ctx context.Context, p principal.Principal, id
 		after := b
 		after.Status = status
 		_, e = s.audit.Write(tx, p, "import_status", audit.Target{Collection: "import_batches", ID: id}, reason, b, after, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("import_batches").UpdateOne(tx, bson.M{"_id": id, "user_id": p.UserID}, bson.M{"$set": bson.M{"status": status}})
+			_, e := s.repo.db.Exec(tx, `UPDATE import_batches SET status=@status WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"status": status, "id": id, "user": p.UserID})
 			return e
 		})
 		return e
@@ -563,13 +564,14 @@ func (s *Service) List(ctx context.Context, p principal.Principal) ([]Batch, err
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("import_batches").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}).SetLimit(100))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM import_batches WHERE user_id=@user ORDER BY created_at DESC LIMIT 100`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Batch{}
-	e = cur.All(ctx, &out)
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByName[Batch])
+	if out == nil {
+		out = []Batch{}
+	}
 	return out, e
 }
 
@@ -578,7 +580,9 @@ func (s *Service) StagedCount(ctx context.Context, p principal.Principal) (int64
 	if err := p.Require("ledger:read"); err != nil {
 		return 0, err
 	}
-	return s.repo.db.Collection("import_batches").CountDocuments(ctx, bson.M{"user_id": p.UserID, "status": bson.M{"$in": []string{"staging", "ready", "committing"}}})
+	var n int64
+	err := s.repo.db.QueryRow(ctx, `SELECT count(*) FROM import_batches WHERE user_id=@user AND status IN ('staging','ready','committing')`, pgx.NamedArgs{"user": p.UserID}).Scan(&n)
+	return n, err
 }
 
 // mappedAccount returns the account a CSV category names, "" for free-text categories, and an error for account-shaped values of an unknown type.

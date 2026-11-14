@@ -1,11 +1,12 @@
 package ledger
 
 import (
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
+	"math"
 	"math/big"
 	"regexp"
 	"slices"
@@ -14,20 +15,53 @@ import (
 	"time"
 )
 
-// Decimal preserves exact base-ten values in MongoDB and strings in public JSON.
-type Decimal struct{ bson.Decimal128 }
+// Decimal preserves exact base-ten values and their public string formatting.
+type Decimal struct{ s string }
 
 var decimalPattern = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?$`)
 
 func ParseDecimal(s string) (Decimal, error) {
-	if len(strings.TrimPrefix(s, "-")) > 80 || !decimalPattern.MatchString(s) {
+	unsigned := strings.TrimPrefix(s, "-")
+	if len(unsigned) > 80 || !decimalPattern.MatchString(s) {
 		return Decimal{}, fmt.Errorf("amount must be a finite decimal string")
 	}
-	d, e := bson.ParseDecimal128(s)
-	if e != nil {
+	integer, fraction, _ := strings.Cut(unsigned, ".")
+	digits := strings.TrimLeft(integer+fraction, "0")
+	scale := len(fraction)
+	// The 80-character, non-exponent input bound already lies inside Decimal128's exponent range.
+	for len(digits) > 34 && strings.HasSuffix(digits, "0") {
+		digits = strings.TrimSuffix(digits, "0")
+		scale--
+	}
+	if len(digits) > 34 {
 		return Decimal{}, fmt.Errorf("amount exceeds Decimal128 precision")
 	}
-	return Decimal{d}, nil
+	sign := ""
+	if strings.HasPrefix(s, "-") {
+		sign = "-"
+	}
+	if digits == "" {
+		if scale > 6 {
+			return Decimal{s: "0"}, nil
+		}
+		return Decimal{s: s}, nil
+	}
+	// Decimal128 used scientific notation below adjusted exponent -6; String normalized that through Rat.
+	if len(digits)-scale-1 < -6 {
+		for strings.HasSuffix(digits, "0") {
+			digits = strings.TrimSuffix(digits, "0")
+			scale--
+		}
+	}
+	switch {
+	case scale <= 0:
+		s = sign + digits + strings.Repeat("0", -scale)
+	case scale >= len(digits):
+		s = sign + "0." + strings.Repeat("0", scale-len(digits)) + digits
+	default:
+		s = sign + digits[:len(digits)-scale] + "." + digits[len(digits)-scale:]
+	}
+	return Decimal{s: s}, nil
 }
 func MustDecimal(s string) Decimal {
 	d, e := ParseDecimal(s)
@@ -37,19 +71,10 @@ func MustDecimal(s string) Decimal {
 	return d
 }
 func (d Decimal) String() string {
-	raw := d.Decimal128.String()
-	if !strings.ContainsAny(raw, "eE") {
-		return raw
+	if d.s == "" {
+		return "0"
 	}
-	r, ok := new(big.Rat).SetString(raw)
-	if !ok {
-		return raw
-	}
-	s, e := exactString(r)
-	if e != nil {
-		return raw
-	}
-	return s
+	return d.s
 }
 func exactString(r *big.Rat) (string, error) {
 	d := new(big.Int).Set(r.Denom())
@@ -81,6 +106,25 @@ func DecimalFromRat(r *big.Rat) (Decimal, error) {
 	return ParseDecimal(s)
 }
 func (d Decimal) MarshalJSON() ([]byte, error) { return json.Marshal(d.String()) }
+
+func (d Decimal) Value() (driver.Value, error) { return d.String(), nil }
+
+func (d *Decimal) Scan(src any) error {
+	var text string
+	switch v := src.(type) {
+	case string:
+		text = v
+	case []byte:
+		text = string(v)
+	default:
+		return fmt.Errorf("amount must be a decimal string")
+	}
+	value, err := ParseDecimal(text)
+	if err == nil {
+		*d = value
+	}
+	return err
+}
 func (d *Decimal) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
@@ -92,13 +136,6 @@ func (d *Decimal) UnmarshalJSON(b []byte) error {
 	}
 	return err
 }
-func (d Decimal) MarshalBSONValue() (byte, []byte, error) {
-	t, b, e := bson.MarshalValue(d.Decimal128)
-	return byte(t), b, e
-}
-func (d *Decimal) UnmarshalBSONValue(t byte, b []byte) error {
-	return bson.UnmarshalValue(bson.Type(t), b, &d.Decimal128)
-}
 func (d Decimal) Rat() *big.Rat {
 	r, ok := new(big.Rat).SetString(d.String())
 	if !ok {
@@ -107,39 +144,40 @@ func (d Decimal) Rat() *big.Rat {
 	return r
 }
 func (d Decimal) Float() float64 {
-	if !d.IsNaN() && d.IsInf() == 0 {
-		v, err := strconv.ParseFloat(d.Decimal128.String(), 64)
-		if v != 0 && (err == nil || errors.Is(err, strconv.ErrRange)) {
-			return v
-		}
+	v, err := strconv.ParseFloat(d.String(), 64)
+	if v != 0 && !math.IsNaN(v) && (err == nil && !math.IsInf(v, 0) || errors.Is(err, strconv.ErrRange)) {
+		return v
 	}
-	v, _ := d.Rat().Float64()
+	v, _ = d.Rat().Float64()
 	return v
 }
 func (d Decimal) Negate() Decimal {
-	h, l := d.Decimal128.GetBytes()
-	return Decimal{bson.NewDecimal128(h^(uint64(1)<<63), l)}
+	text := d.String()
+	if strings.HasPrefix(text, "-") {
+		return Decimal{s: strings.TrimPrefix(text, "-")}
+	}
+	return Decimal{s: "-" + text}
 }
 
 type Amount struct {
-	Value     Decimal `json:"v" bson:"v"`
-	Commodity string  `json:"c" bson:"c"`
+	Value     Decimal `json:"v" db:"v"`
+	Commodity string  `json:"c" db:"c"`
 }
 type Account struct {
-	UserID      string            `json:"-" bson:"user_id"`
-	Key         string            `json:"-" bson:"_id"`
-	ID          string            `json:"id" bson:"id"`
-	Type        string            `json:"type" bson:"type"`
-	Name        string            `json:"name" bson:"name"`
-	Pot         string            `json:"pot,omitempty" bson:"pot,omitempty"`
-	Commodities []string          `json:"commodities" bson:"commodities"`
-	Location    string            `json:"location,omitempty" bson:"location,omitempty"`
-	Class       string            `json:"class,omitempty" bson:"class,omitempty"`
-	Groups      map[string]string `json:"groups,omitempty" bson:"groups,omitempty"`
-	ClosedAt    *time.Time        `json:"closed_at,omitempty" bson:"closed_at,omitempty"`
-	DisplayName string            `json:"display_name,omitempty" bson:"display_name,omitempty" jsonschema:"human name shown everywhere; name keeps working when this is empty"`
-	Note        string            `json:"note,omitempty" bson:"note,omitempty" jsonschema:"working notes, shown in Details rather than beside the name"`
-	Estimated   *bool             `json:"estimated,omitempty" bson:"estimated,omitempty" jsonschema:"true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix"`
+	UserID      string            `json:"-" db:"user_id"`
+	Key         string            `json:"-" db:"storage_key"`
+	ID          string            `json:"id" db:"id"`
+	Type        string            `json:"type" db:"type"`
+	Name        string            `json:"name" db:"name"`
+	Pot         string            `json:"pot,omitempty" db:"pot"`
+	Commodities []string          `json:"commodities" db:"commodities"`
+	Location    string            `json:"location,omitempty" db:"location"`
+	Class       string            `json:"class,omitempty" db:"class"`
+	Groups      map[string]string `json:"groups,omitempty" db:"groups"`
+	ClosedAt    *time.Time        `json:"closed_at,omitempty" db:"closed_at"`
+	DisplayName string            `json:"display_name,omitempty" db:"display_name" jsonschema:"human name shown everywhere; name keeps working when this is empty"`
+	Note        string            `json:"note,omitempty" db:"note" jsonschema:"working notes, shown in Details rather than beside the name"`
+	Estimated   *bool             `json:"estimated,omitempty" db:"estimated" jsonschema:"true marks reconstructed or modeled amounts; defaults from the expenses:estimated id prefix"`
 }
 
 // IsEstimated is the stored flag, or for accounts older than the flag, the expenses:estimated id prefix.
@@ -159,32 +197,32 @@ func (a Account) Label() string {
 }
 
 type Posting struct {
-	Account string  `json:"account" bson:"account"`
-	Amount  Amount  `json:"amount" bson:"amount"`
-	Cost    *Amount `json:"cost,omitempty" bson:"cost,omitempty"`
-	Price   *Amount `json:"price,omitempty" bson:"price,omitempty"`
-	Memo    string  `json:"memo,omitempty" bson:"memo,omitempty"`
+	Account string  `json:"account" db:"account"`
+	Amount  Amount  `json:"amount" db:"amount"`
+	Cost    *Amount `json:"cost,omitempty" db:"cost"`
+	Price   *Amount `json:"price,omitempty" db:"price"`
+	Memo    string  `json:"memo,omitempty" db:"memo"`
 }
 type Link struct {
-	Rel string `json:"rel" bson:"rel"`
-	ID  string `json:"id" bson:"id"`
+	Rel string `json:"rel" db:"rel"`
+	ID  string `json:"id" db:"id"`
 }
 type Entry struct {
-	UserID    string          `json:"-" bson:"user_id"`
-	ID        string          `json:"id" bson:"_id"`
-	Seq       int64           `json:"seq" bson:"seq"`
-	Date      string          `json:"date" bson:"date"`
-	Kind      string          `json:"kind" bson:"kind"`
-	Payee     string          `json:"payee" bson:"payee"`
-	Postings  []Posting       `json:"postings" bson:"postings"`
-	Tags      []string        `json:"tags" bson:"tags"`
-	Links     []Link          `json:"links" bson:"links"`
-	Status    string          `json:"status" bson:"status"`
-	Actor     principal.Actor `json:"actor" bson:"actor"`
-	CreatedAt time.Time       `json:"created_at" bson:"created_at"`
+	UserID    string          `json:"-" db:"user_id"`
+	ID        string          `json:"id" db:"id"`
+	Seq       int64           `json:"seq" db:"seq"`
+	Date      string          `json:"date" db:"date"`
+	Kind      string          `json:"kind" db:"kind"`
+	Payee     string          `json:"payee" db:"payee"`
+	Postings  []Posting       `json:"postings" db:"postings"`
+	Tags      []string        `json:"tags" db:"tags"`
+	Links     []Link          `json:"links" db:"links"`
+	Status    string          `json:"status" db:"status"`
+	Actor     principal.Actor `json:"actor" db:"actor"`
+	CreatedAt time.Time       `json:"created_at" db:"created_at"`
 }
 type EntryInput struct {
-	ID       string    `json:"id,omitempty" bson:"-"`
+	ID       string    `json:"id,omitempty" db:"-"`
 	Date     string    `json:"date,omitempty"`
 	Payee    string    `json:"payee,omitempty"`
 	Postings []Posting `json:"postings,omitempty"`
@@ -236,7 +274,7 @@ type AccountsPage struct {
 var accountClasses = []string{"bank", "cash", "metal_holding", "receivable", "liability", "equity", "income", "expense"}
 var groupKey = regexp.MustCompile(`^[A-Za-z0-9_-]{1,40}$`)
 
-// ValidateGroupKey checks a group dimension name; it is also used as a Mongo field name.
+// ValidateGroupKey checks a group dimension name; it is also used as an account-group key.
 func ValidateGroupKey(k string) bool { return groupKey.MatchString(k) }
 
 func validateClassGroups(class string, groups map[string]string) error {

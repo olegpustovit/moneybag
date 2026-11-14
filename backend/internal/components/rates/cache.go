@@ -2,10 +2,8 @@ package rates
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"sort"
 	"sync"
 )
@@ -36,11 +34,11 @@ func (s *Service) cachedQuote(ctx context.Context, c *quoteCache, p principal.Pr
 	}
 	list, ok := byPair[pair]
 	if !ok {
-		cur, e := s.repo.db.Collection("prices").Find(ctx, bson.M{"user_id": p.UserID, "pair": pair, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "at", Value: 1}}))
+		const loadSQL = `SELECT ` + quoteColumns + ` FROM prices WHERE user_id=@user AND pair=@pair AND archived=false ORDER BY at`
+		rows, e := s.repo.db.Query(ctx, loadSQL, pgx.NamedArgs{"user": p.UserID, "pair": pair})
 		var all []Quote
 		if e == nil {
-			e = cur.All(ctx, &all)
-			_ = cur.Close(ctx)
+			all, e = pgx.CollectRows(rows, pgx.RowToStructByName[Quote])
 		}
 		if e != nil {
 			c.mu.Unlock()
@@ -52,7 +50,7 @@ func (s *Service) cachedQuote(ctx context.Context, c *quoteCache, p principal.Pr
 	c.mu.Unlock()
 	i := sort.Search(len(list), func(i int) bool { return list[i].At > at })
 	if i == 0 {
-		return Quote{}, mongo.ErrNoDocuments
+		return Quote{}, pgx.ErrNoRows
 	}
 	return list[i-1], nil
 }

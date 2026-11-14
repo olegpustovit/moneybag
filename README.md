@@ -16,11 +16,11 @@ The screenshot is from the running application. Every amount, account and transa
 - Versioned dashboards rendered as HTML/SVG, private HTML/PNG previews, publish validation, rollback and restricted dashboard sharing. KPI components can set `sparkline` to a CEL expression returning up to 600 finite numbers, for example `[1.0, 2.0, 1.5]`.
 - 64 typed MCP tools, eight resource definitions and five prompts. OAuth code + S256 PKCE, rotating refresh tokens and separate full/read-only endpoints.
 
-**One shared `moneybag` database serves all users.** Financial records, queries, indexes and counters are scoped by `user_id`. Production reuses the existing standalone MongoDB on oracle-vm at `127.0.0.1:27017`. The API listens on `127.0.0.1:6459`; Caddy is configured separately.
+**One shared `moneybag` database serves all users.** Financial records, queries, indexes and counters are scoped by `user_id`. Use a dedicated PostgreSQL 18 database, configured by `MONEYBAG_DATABASE_URL`. The API listens on `127.0.0.1:6459`; Caddy is configured separately.
 
 ## Run
 
-Go 1.26.10 and MongoDB are required. No frontend build is needed.
+Go 1.26.10 and PostgreSQL 18 are required. No frontend build is needed.
 
 ```sh
 cd backend
@@ -56,12 +56,12 @@ The token file must be private (`0600`) and contain a valid OAuth access token. 
 cd backend
 go test ./...
 go vet ./...
-MONEYBAG_TEST_MONGO_URI=mongodb://127.0.0.1:27017/moneybag_test_local go test ./integration -v
+MONEYBAG_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres go test ./integration -v
 ```
 
-The integration suite requires a disposable database whose name starts with `moneybag_test_`; it drops that database. It checks colliding user IDs in shared collections, ledger invariants, OAuth, import retries, rules, reconciliation, sharing, undo/redo and all 64 tool scope guards through the official MCP SDK. Integration tests skip when the environment variable is absent.
+The integration suite requires a dedicated disposable PostgreSQL server and a role that can create databases; it creates and removes isolated databases for each test. It checks colliding user IDs in shared tables, ledger invariants, OAuth, import retries, rules, reconciliation, sharing, undo/redo and all 64 tool scope guards through the official MCP SDK. Integration tests skip when the environment variable is absent.
 
-Browser checks use a separate synthetic QA environment on port 6460. Start the QA server with `MONEYBAG_SETUP_TOKEN=synthetic-preview-token`, a disposable MongoDB database, and `MONEYBAG_CHROMIUM_BIN` set for `dashboard_render`:
+Browser checks use a separate synthetic QA environment on port 6460. Start the QA server with `MONEYBAG_SETUP_TOKEN=synthetic-preview-token`, a disposable PostgreSQL database, and `MONEYBAG_CHROMIUM_BIN` set for `dashboard_render`:
 
 ```sh
 cd e2e
@@ -74,4 +74,4 @@ They exercise real pages, persistent cell edits, statement imports, desktop/mobi
 
 ## Write model
 
-Standalone MongoDB provides atomic document writes. Moneybag serializes financial workflows in one API process and records an audit intent before each mutation and its outcome afterward. Interrupted multi-document work remains detectable; imports use stable IDs to resume. Inspect audit history before retrying ambiguous writes. Coordinate writers before running multiple API replicas.
+PostgreSQL provides atomic statements; a table row and its unique-key records are saved in one transaction. Moneybag serializes financial workflows in one API process and records an audit intent before each mutation and its outcome afterward. Interrupted multi-statement work remains detectable; imports use stable IDs to resume. Inspect audit history before retrying ambiguous writes. Coordinate writers before running multiple API replicas.

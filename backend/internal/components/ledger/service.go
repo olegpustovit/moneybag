@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"reflect"
 	"regexp"
 	"slices"
@@ -19,13 +19,13 @@ import (
 )
 
 type Service struct {
-	repo  *MongoRepository
+	repo  *PostgresRepository
 	audit *audit.Service
 	// Expr evaluates tags_set where expressions; nil disables them.
 	Expr *expressions.Engine
 }
 
-func NewService(r *MongoRepository, a *audit.Service) *Service { return &Service{repo: r, audit: a} }
+func NewService(r *PostgresRepository, a *audit.Service) *Service { return &Service{repo: r, audit: a} }
 
 var accountID = regexp.MustCompile(`^(assets|liabilities|income|expenses|equity):[a-z0-9_:-]{1,150}$`)
 var commodityID = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,19}$`)
@@ -63,8 +63,13 @@ func (s *Service) CreateAccount(ctx context.Context, p principal.Principal, a Ac
 		return AccountResult{}, e
 	}
 	id, e := s.audit.Write(ctx, p, "account_create", audit.Target{Collection: "accounts", ID: a.ID}, "", nil, a, func(tx context.Context) error {
-		_, err := db.Collection("accounts").InsertOne(tx, a)
-		if mongo.IsDuplicateKeyError(err) {
+		groups := a.Groups
+		if len(groups) == 0 {
+			groups = nil
+		}
+		_, err := db.Exec(tx, `INSERT INTO accounts (user_id,storage_key,id,type,name,pot,commodities,location,class,groups,closed_at,display_name,note,estimated)
+ VALUES (@user,@key,@id,@type,@name,@pot,@commodities,@location,@class,@groups,@closed,@display,@note,@estimated)`, pgx.NamedArgs{"user": a.UserID, "key": a.Key, "id": a.ID, "type": a.Type, "name": a.Name, "pot": a.Pot, "commodities": a.Commodities, "location": a.Location, "class": a.Class, "groups": groups, "closed": a.ClosedAt, "display": a.DisplayName, "note": a.Note, "estimated": a.Estimated})
+		if postgres.IsUniqueViolation(err) {
 			return principal.ErrConflict
 		}
 		return err
@@ -179,7 +184,7 @@ func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in A
 	}
 	if in.Close != nil {
 		if *in.Close {
-			now := time.Now().UTC()
+			now := time.Now().UTC().Truncate(time.Millisecond)
 			a.ClosedAt = &now
 		} else {
 			a.ClosedAt = nil
@@ -193,8 +198,12 @@ func (s *Service) UpdateAccount(ctx context.Context, p principal.Principal, in A
 		} else if !reflect.DeepEqual(current, old) {
 			return principal.ErrConflict
 		}
-		result, err := db.Collection("accounts").ReplaceOne(tx, bson.M{"_id": old.Key}, a)
-		if err == nil && result.MatchedCount != 1 {
+		groups := a.Groups
+		if len(groups) == 0 {
+			groups = nil
+		}
+		result, err := db.Exec(tx, `UPDATE accounts SET id=@id,type=@type,name=@name,pot=@pot,commodities=@commodities,location=@location,class=@class,groups=@groups,closed_at=@closed,display_name=@display,note=@note,estimated=@estimated WHERE storage_key=@key AND user_id=@user`, pgx.NamedArgs{"id": a.ID, "type": a.Type, "name": a.Name, "pot": a.Pot, "commodities": a.Commodities, "location": a.Location, "class": a.Class, "groups": groups, "closed": a.ClosedAt, "display": a.DisplayName, "note": a.Note, "estimated": a.Estimated, "key": old.Key, "user": p.UserID})
+		if err == nil && result.RowsAffected() != 1 {
 			return principal.ErrConflict
 		}
 		return err
@@ -456,7 +465,8 @@ func (s *Service) Reverse(ctx context.Context, p principal.Principal, in Reverse
 			return fmt.Errorf("only posted entries can be reversed")
 		}
 		db, _ := s.repo.db(p)
-		n, e := db.Collection("journal").CountDocuments(tx, bson.M{"user_id": p.UserID, "links": bson.M{"$elemMatch": bson.M{"rel": "reverses", "id": in.ID}}})
+		var n int64
+		e = db.QueryRow(tx, `SELECT count(*) FROM journal WHERE user_id=@user AND links @> jsonb_build_array(jsonb_build_object('rel','reverses','id',@id::text))`, pgx.NamedArgs{"user": p.UserID, "id": in.ID}).Scan(&n)
 		if e != nil {
 			return e
 		}
@@ -552,14 +562,14 @@ func (s *Service) CommitDraft(ctx context.Context, p principal.Principal, id str
 		if e := s.checkAccounts(tx, p, EntryInput{Postings: old.Postings}, false); e != nil {
 			return e
 		}
-		r, e := db.Collection("journal").ReplaceOne(tx, bson.M{"user_id": p.UserID, "_id": id, "status": "draft"}, entry)
-		if e == nil && r.MatchedCount != 1 {
+		r, e := db.Exec(tx, `UPDATE journal SET status='posted',tags=@tags WHERE user_id=@user AND id=@id AND status='draft'`, pgx.NamedArgs{"tags": entry.Tags, "user": p.UserID, "id": id})
+		if e == nil && r.RowsAffected() != 1 {
 			return principal.ErrConflict
 		}
 		if e != nil {
 			return e
 		}
-		_, e = db.Collection("balances").UpdateMany(tx, bson.M{"user_id": p.UserID}, bson.M{"$set": bson.M{"dirty": true}})
+		_, e = db.Exec(tx, `UPDATE balances SET dirty=true WHERE user_id=@user`, pgx.NamedArgs{"user": p.UserID})
 		return e
 	})
 	return EntryResult{entry, true, ev}, e

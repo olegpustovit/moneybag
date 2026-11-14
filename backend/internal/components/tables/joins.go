@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"maps"
 	"math/big"
 	"slices"
@@ -15,7 +16,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 type JoinedEntry struct {
@@ -163,7 +163,8 @@ func (s *Service) enrich(ctx context.Context, p principal.Principal, t Table, ro
 				break
 			}
 		}
-		if _, err := s.Get(ctx, p, column.Table); err != nil {
+		target, err := s.Get(ctx, p, column.Table)
+		if err != nil {
 			return err
 		}
 		ids := []string{}
@@ -174,19 +175,19 @@ func (s *Service) enrich(ctx context.Context, p principal.Principal, t Table, ro
 		}
 		targets := map[string]Row{}
 		for start := 0; start < len(ids); start += 500 {
-			cursor, err := s.repo.db.Collection("rows").Find(ctx, bson.M{"user_id": p.UserID, "table_id": column.Table, "id": bson.M{"$in": ids[start:min(start+500, len(ids))]}, "archived": bson.M{"$ne": true}})
+			cursor, err := s.repo.db.Query(ctx, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived AND id=ANY(@ids::text[])`, pgx.NamedArgs{"user": p.UserID, "table": column.Table, "ids": ids[start:min(start+500, len(ids))]})
 			if err != nil {
 				return err
 			}
-			for cursor.Next(ctx) {
+			for cursor.Next() {
 				var r Row
-				if err = cursor.Decode(&r); err != nil {
+				if r, err = rowFrom(cursor, target); err != nil {
 					break
 				}
 				targets[r.ID] = r
 			}
 			ce := cursor.Err()
-			_ = cursor.Close(ctx)
+			cursor.Close()
 			if err != nil {
 				return err
 			}

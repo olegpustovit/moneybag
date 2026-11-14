@@ -8,9 +8,8 @@ import (
 	"slices"
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type Template struct {
@@ -69,12 +68,6 @@ func (s *Service) CreateDatabase(ctx context.Context, p principal.Principal, in 
 		if err := s.validateDefinition(*table); err != nil {
 			return CreateResult{}, err
 		}
-		if err := s.columnIndexes(ctx, table.Columns, table.Keys...); err != nil {
-			return CreateResult{}, err
-		}
-	}
-	if err := s.uniqueIndex(ctx); err != nil {
-		return CreateResult{}, err
 	}
 	result := CreateResult{Tables: template.Tables}
 	for _, table := range template.Tables {
@@ -85,9 +78,8 @@ func (s *Service) CreateDatabase(ctx context.Context, p principal.Principal, in 
 	err := s.audit.Workflow(ctx, func(locked context.Context) error {
 		missing := []Table{}
 		for _, table := range template.Tables {
-			var existing Table
-			err := s.repo.db.Collection("tables").FindOne(locked, bson.M{"user_id": p.UserID, "id": table.ID}).Decode(&existing)
-			if errors.Is(err, mongo.ErrNoDocuments) {
+			existing, err := s.repo.table(locked, p.UserID, table.ID, true)
+			if postgres.IsNotFound(err) {
 				missing = append(missing, table)
 				continue
 			}
@@ -105,7 +97,7 @@ func (s *Service) CreateDatabase(ctx context.Context, p principal.Principal, in 
 		id, err := s.audit.Write(locked, p, "db_template_create", audit.Target{Collection: "tables", ID: template.ID}, "", nil, missing, func(tx context.Context) error {
 			return s.audit.Workflow(tx, func(tx context.Context) error {
 				for i, table := range missing {
-					if _, err := s.repo.db.Collection("tables").InsertOne(tx, table); err != nil {
+					if _, err := s.repo.insertTable(tx, table); err != nil {
 						return &partialWriteError{written: i, total: len(missing), kind: "tables", cause: err}
 					}
 				}

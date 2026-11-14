@@ -6,14 +6,12 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/base64"
-	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,14 +19,14 @@ import (
 )
 
 type Feed struct {
-	Key            string `json:"-" bson:"_id"`
-	UserID         string `json:"-" bson:"user_id"`
-	ID             string `json:"id" bson:"id"`
-	URL            string `json:"-" bson:"url"`
-	Account        string `json:"account" bson:"account"`
-	Format         string `json:"format" bson:"format"`
-	DateFormat     string `json:"date_format,omitempty" bson:"date_format,omitempty"`
-	TokenEncrypted string `json:"-" bson:"token_encrypted"`
+	Key            string `json:"-" db:"storage_key"`
+	UserID         string `json:"-" db:"user_id"`
+	ID             string `json:"id" db:"id"`
+	URL            string `json:"-" db:"url"`
+	Account        string `json:"account" db:"account"`
+	Format         string `json:"format" db:"format"`
+	DateFormat     string `json:"date_format,omitempty" db:"date_format"`
+	TokenEncrypted string `json:"-" db:"token_encrypted"`
 }
 type FeedInput struct {
 	ID         string
@@ -106,9 +104,8 @@ func (s *Service) ConfigureFeed(ctx context.Context, p principal.Principal, in F
 	if _, e = s.ledger.Account(ctx, importWriter(p), in.Account); e != nil {
 		return Feed{}, e
 	}
-	var old Feed
-	e = s.repo.db.Collection("feeds").FindOne(ctx, bson.M{"_id": p.UserID + ":" + in.ID, "user_id": p.UserID}).Decode(&old)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	old, e := s.repo.feed(ctx, p.UserID, in.ID)
+	if e != nil && !postgres.IsNotFound(e) {
 		return Feed{}, e
 	}
 	encrypted := old.TokenEncrypted
@@ -120,7 +117,7 @@ func (s *Service) ConfigureFeed(ctx context.Context, p principal.Principal, in F
 	}
 	feed := Feed{Key: p.UserID + ":" + in.ID, UserID: p.UserID, ID: in.ID, URL: in.URL, Account: in.Account, Format: in.Format, DateFormat: in.DateFormat, TokenEncrypted: encrypted}
 	_, e = s.audit.Write(ctx, p, "feed_configure", audit.Target{Collection: "feeds", ID: in.ID}, "", old, feed, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("feeds").ReplaceOne(tx, bson.M{"_id": feed.Key, "user_id": p.UserID}, feed, options.Replace().SetUpsert(true))
+		_, e := s.repo.db.Exec(tx, `INSERT INTO feeds(storage_key,user_id,id,url,account,format,date_format,token_encrypted) VALUES (@key,@user,@id,@url,@account,@format,@date,@token) ON CONFLICT(storage_key) DO UPDATE SET id=EXCLUDED.id,url=EXCLUDED.url,account=EXCLUDED.account,format=EXCLUDED.format,date_format=EXCLUDED.date_format,token_encrypted=EXCLUDED.token_encrypted WHERE feeds.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": feed.Key, "user": p.UserID, "id": feed.ID, "url": feed.URL, "account": feed.Account, "format": feed.Format, "date": feed.DateFormat, "token": feed.TokenEncrypted})
 		return e
 	})
 	return feed, e
@@ -140,9 +137,8 @@ func (s *Service) SetFeedSecret(ctx context.Context, p principal.Principal, id, 
 	if token == "" {
 		return fmt.Errorf("enter the credential")
 	}
-	var feed Feed
-	e := s.repo.db.Collection("feeds").FindOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}).Decode(&feed)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	feed, e := s.repo.feed(ctx, p.UserID, id)
+	if postgres.IsNotFound(e) {
 		return principal.ErrNotFound
 	}
 	if e != nil {
@@ -168,9 +164,8 @@ func (s *Service) Sync(ctx context.Context, p principal.Principal, id, since str
 			}
 		}
 	}
-	var feed Feed
-	e := s.repo.db.Collection("feeds").FindOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}).Decode(&feed)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	feed, e := s.repo.feed(ctx, p.UserID, id)
+	if postgres.IsNotFound(e) {
 		return StartResult{}, fmt.Errorf("connect the %s feed in Settings first", id)
 	}
 	if e != nil {
@@ -191,12 +186,13 @@ func (s *Service) Feeds(ctx context.Context, p principal.Principal) ([]Feed, err
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("feeds").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetLimit(3))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM feeds WHERE user_id=@user LIMIT 3`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Feed{}
-	e = cur.All(ctx, &out)
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByName[Feed])
+	if out == nil {
+		out = []Feed{}
+	}
 	return out, e
 }

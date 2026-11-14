@@ -8,9 +8,9 @@ build: ui
 	cd backend && go build -o bin/moneybag-local ./cmd/api
 check: ui backend
 	cd ui && bun run test
-# In-memory Mongo: seconds rather than minutes over the network. Needs Docker.
+# Disposable PostgreSQL with fast test-only durability settings. Needs Docker.
 test-integration:
-	docker rm -f moneybag-test-mongo >/dev/null 2>&1 || true
-	docker run -d --name moneybag-test-mongo --ulimit nofile=64000:64000 --tmpfs /data/db:size=1g -p 127.0.0.1:27099:27017 mongo:8 --wiredTigerCacheSizeGB 0.5 >/dev/null
-	timeout 30s bash -c 'until docker exec moneybag-test-mongo mongosh --quiet --eval "db.runCommand({ping:1}).ok" >/dev/null 2>&1; do sleep 0.2; done'
-	cd backend && MONEYBAG_TEST_MONGO_URI=mongodb://127.0.0.1:27099/moneybag_test_local go test -timeout 120s -count=1 ./...; status=$$?; docker rm -f moneybag-test-mongo >/dev/null; exit $$status
+	docker rm -f moneybag-test-pg >/dev/null 2>&1 || true
+	docker run -d --name moneybag-test-pg --tmpfs /var/lib/postgresql:size=1g -e POSTGRES_PASSWORD=test -p 127.0.0.1:55432:5432 postgres:18 -c fsync=off -c synchronous_commit=off -c full_page_writes=off >/dev/null
+	timeout 30s bash -c 'until docker exec moneybag-test-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 0.2; done'
+	cd backend && MONEYBAG_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres go test -timeout 120s ./...; status=$$?; docker rm -f moneybag-test-pg >/dev/null; exit $$status

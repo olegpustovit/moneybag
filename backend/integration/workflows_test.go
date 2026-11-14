@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/admin"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
@@ -25,10 +27,9 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"log/slog"
 	"net"
 	"net/http"
@@ -57,34 +58,34 @@ func (b *blockedShareReader) Rows(ctx context.Context, p principal.Principal, so
 	}
 }
 
-func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database, pa, pb principal.Principal, book *ledger.Service, a *audit.Service, ids *identity.Service) {
+func testProductWorkflows(t *testing.T, ctx context.Context, db *pgxpool.Pool, pa, pb principal.Principal, book *ledger.Service, a *audit.Service, ids *identity.Service) {
 	t.Helper()
 	expr, e := expressions.New()
 	if e != nil {
 		t.Fatal(e)
 	}
 	book.Expr = expr
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
+	tab := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
-	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
-	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
+	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
+	models := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tab, a, expr)
 	for _, p := range []principal.Principal{pa, pb} {
 		if e = models.Initialize(ctx, p); e != nil {
 			t.Fatal("default model", e)
 		}
 	}
-	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
-	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
-	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
+	classes := classify.NewService(classify.NewPostgresRepository(pgtest.New(t)), book, a, expr)
+	rec := reconcile.NewService(reconcile.NewPostgresRepository(pgtest.New(t)), book, a)
+	imp := imports.NewService(imports.NewPostgresRepository(pgtest.New(t)), book, classes, rec, a)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
-	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
+	meaning := semantic.NewService(semantic.NewPostgresRepository(pgtest.New(t)), book, prices, a, expr)
+	dash := dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	check := &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}
 	dash.Lint = check.SpecLint
-	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
+	shares := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, sources, expr, a)
 	engine := &dashboard.Engine{Expr: expr, Reader: sources}
 	// The initialized model has zero spending, so every scenario's runway is null.
 	if r, e := engine.Evaluate(ctx, pa, "data.sc.map(s, s.runway == null)", map[string]dashboard.Query{"sc": {From: "scenarios"}}, nil); e != nil || fmt.Sprint(r.Value) != "[true]" {
@@ -123,6 +124,10 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil {
 		t.Fatal("stage", e)
 	}
+	var storedFile []byte
+	if e = pgtest.New(t).QueryRow(ctx, `SELECT content FROM import_files WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": start.BatchID, "user": pa.UserID}).Scan(&storedFile); e != nil || string(storedFile) != csv {
+		t.Fatalf("statement bytes changed: %d bytes, %v", len(storedFile), e)
+	}
 	preview, e := imp.Preview(ctx, pa, start.BatchID, 0)
 	if e != nil || len(preview.Proposed) != 2 {
 		t.Fatal("preview", preview, e)
@@ -152,7 +157,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal(e)
 	}
 	// A batch staged before the display-payee fix must also remain resumable.
-	if _, e = db.Collection("import_rows").UpdateOne(ctx, bson.M{"_id": preview.Proposed[0].ID, "user_id": pa.UserID}, bson.M{"$set": bson.M{"proposed.payee": longDescription}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `UPDATE import_rows SET proposed=jsonb_set(proposed,'{payee}',to_jsonb(@payee::text)) WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"payee": longDescription, "id": preview.Proposed[0].ID, "user": pa.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	posted, e := imp.Commit(ctx, pa, start.BatchID, true)
@@ -240,7 +245,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("tag overlay missing", tagged, e)
 	}
 	var original ledger.Entry
-	if e = db.Collection("journal").FindOne(ctx, bson.M{"_id": tagged.Items[0].ID, "user_id": pa.UserID}).Decode(&original); e != nil {
+	if e = pgtest.New(t).QueryRow(ctx, `SELECT tags FROM journal WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": tagged.Items[0].ID, "user": pa.UserID}).Scan(&original.Tags); e != nil {
 		t.Fatal(e)
 	}
 	if len(original.Tags) != 0 {
@@ -334,7 +339,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	}
 
 	blocked := &blockedShareReader{reader: sources, entered: make(chan struct{}), release: make(chan struct{})}
-	blockedService := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, blocked, expr, a)
+	blockedService := sharing.NewService(sharing.NewPostgresRepository(pgtest.New(t)), ids, dash, blocked, expr, a)
 	result := make(chan error, 1)
 	go func() { _, err := blockedService.View(ctx, pb, live.ShareID); result <- err }()
 	<-blocked.entered
@@ -435,7 +440,7 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	hist := &history.Service{Audit: a, Ledger: book, Budget: budgets, Classify: classes, Dashboard: dash, Imports: imp, Model: models, Rates: prices, Sharing: shares, Tables: tab, Reconcile: rec}
 	testViewsTablesUnpublish(t, ctx, pa, pb, dash, tab, hist, sources, expr)
 	createShared("undo-publish", "1", map[string]dashboard.Query{})
-	if _, e = db.Collection("dashboards").UpdateOne(ctx, bson.M{"user_id": pa.UserID, "id": "undo-publish"}, bson.M{"$unset": bson.M{"published_at": ""}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `UPDATE dashboards SET published_at=NULL WHERE user_id=@user AND id='undo-publish'`, pgx.NamedArgs{"user": pa.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	legacyEvents, err := a.List(ctx, pa, audit.ListInput{Tool: "dashboard_publish", Target: "undo-publish", Limit: 1})
@@ -571,7 +576,6 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || len(q.Rows) != 2 {
 		t.Fatal("restore created row", q, e)
 	}
-	rawCount := db.Collection("import_rows")
 	reversals, e := imp.Undo(ctx, pa, start.BatchID, "Synthetic import correction")
 	if e != nil || len(reversals) != 2 {
 		t.Fatal("import undo", reversals, e)
@@ -589,7 +593,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 	if e != nil || afterRedo.Count != 0 {
 		t.Fatal("reversal chain changed effective categories", afterRedo, e)
 	}
-	n, e := rawCount.CountDocuments(ctx, bson.M{"user_id": pa.UserID, "batch_id": start.BatchID})
+	var n int64
+	e = pgtest.New(t).QueryRow(ctx, `SELECT count(*) FROM import_rows WHERE user_id=@user AND batch_id=@batch`, pgx.NamedArgs{"user": pa.UserID, "batch": start.BatchID}).Scan(&n)
 	if e != nil || n != 2 {
 		t.Fatal("import raw provenance lost", n, e)
 	}
@@ -598,8 +603,8 @@ func testProductWorkflows(t *testing.T, ctx context.Context, db *mongo.Database,
 		t.Fatal("resolved assertion was stale", state, e)
 	}
 	testSingleSource(t, ctx, pa, book, budgets, sources)
-	flags := feedback.NewService(feedback.NewMongoRepository(db), a)
-	people := admin.NewService(admin.NewMongoRepository(db), ids, oauth.NewService(oauth.NewMongoRepository(db), ids, "http://localhost:6459"), a, "http://localhost:6459")
+	flags := feedback.NewService(feedback.NewPostgresRepository(pgtest.New(t)), a)
+	people := admin.NewService(admin.NewPostgresRepository(pgtest.New(t)), ids, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "http://localhost:6459"), a, "http://localhost:6459")
 	hist.Semantic, hist.Feedback, hist.Admin = meaning, flags, people
 	imp.SetSecretKey(make([]byte, 32))
 	testMCPWorkflows(t, ctx, pa, pb, mcpserver.Services{Semantic: meaning, Feedback: flags, Admin: people, PublicURL: "http://localhost:6459", History: hist, Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Classify: classes, Imports: imp, Reconcile: rec, Sharing: shares, Logger: slog.Default(), Consistency: &consistency.Service{Ledger: book, Reconcile: rec, Dashboard: dash, Model: models, Tables: tab, Budget: budgets, Rates: prices}}, db)

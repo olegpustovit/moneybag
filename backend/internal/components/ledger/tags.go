@@ -4,10 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"slices"
 	"strings"
 )
@@ -93,7 +92,7 @@ func (s *Service) SetTags(ctx context.Context, p principal.Principal, in TagInpu
 		}
 		event, e := s.audit.Write(tx, p, "tags_set", audit.Target{Collection: "journal", ID: ids[0]}, "", b, a, func(ctx context.Context) error {
 			for _, id := range ids {
-				if _, e := db.Collection("entry_tags").ReplaceOne(ctx, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID}, bson.M{"_id": p.UserID + ":" + id, "user_id": p.UserID, "entry_id": id, "tags": after[id]}, options.Replace().SetUpsert(true)); e != nil {
+				if _, e := db.Exec(ctx, `INSERT INTO entry_tags (id,user_id,entry_id,tags) VALUES (@key,@user,@id,@tags) ON CONFLICT (id) DO UPDATE SET entry_id=EXCLUDED.entry_id,tags=EXCLUDED.tags WHERE entry_tags.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": p.UserID + ":" + id, "user": p.UserID, "id": id, "tags": after[id]}); e != nil {
 					return e
 				}
 			}

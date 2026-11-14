@@ -3,11 +3,11 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/internal/components/consistency"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"strings"
 	"testing"
 )
@@ -75,7 +75,7 @@ func schemaExample(value any, root map[string]any) any {
 		return nil
 	}
 }
-func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testMCPWorkflows(t *testing.T, ctx context.Context, pa, pb principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
 	t.Helper()
 	blocked := pa
 	blocked.Scopes = nil

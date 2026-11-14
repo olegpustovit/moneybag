@@ -5,9 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"math/big"
-	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,10 +19,6 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 type testValuer struct{}
@@ -33,57 +29,35 @@ func (testValuer) Convert(_ context.Context, _ principal.Principal, a ledger.Amo
 
 func postingsFixture(tb testing.TB) (context.Context, principal.Principal, *dashboard.Sources, *atomic.Int64) {
 	tb.Helper()
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		tb.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		tb.Fatal("dedicated test database required")
-	}
-	dbName := strings.TrimPrefix(parsed.Path, "/") + "_postings"
-	var reads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "aggregate" || e.CommandName == "find" || e.CommandName == "getMore" {
-			reads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(monitor))
-	if err != nil {
-		tb.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	tb.Cleanup(cancel)
-	db := client.Database(dbName)
-	if err := db.Drop(ctx); err != nil {
-		tb.Fatal(err)
-	}
-	tb.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	var reads atomic.Int64
+	pool := tracedPool(tb, sqlQueryCounter{reads: &reads})
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read"}}
-	repo := ledger.NewMongoRepository(db)
+	repo := ledger.NewPostgresRepository(pool)
 	if err := repo.Init(ctx, p); err != nil {
 		tb.Fatal(err)
 	}
-	if _, err := db.Collection("accounts").InsertOne(ctx, ledger.Account{Key: p.UserID + ":assets:test", UserID: p.UserID, ID: "assets:test", Type: "asset", Class: "bank", Name: "Test", Commodities: []string{"EUR"}}); err != nil {
+	if _, err := insertAccount(ctx, pgtest.New(tb), ledger.Account{Key: p.UserID + ":assets:test", UserID: p.UserID, ID: "assets:test", Type: "asset", Class: "bank", Name: "Test", Commodities: []string{"EUR"}}); err != nil {
 		tb.Fatal(err)
 	}
-	docs := make([]any, 20000)
+	docs := make([]ledger.Entry, 20000)
 	for i := range docs {
 		docs[i] = ledger.Entry{UserID: p.UserID, ID: fmt.Sprintf("entry-%05d", i), Seq: int64(i + 1), Date: "2026-01-01", Kind: "entry", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}}
 	}
-	if _, err := db.Collection("journal").InsertMany(ctx, docs); err != nil {
+	if _, err := insertJournal(ctx, pgtest.New(tb), docs...); err != nil {
 		tb.Fatal(err)
 	}
-	reversals := []any{
+	reversals := []ledger.Entry{
 		ledger.Entry{UserID: p.UserID, ID: "rev-1", Seq: 20001, Date: "2026-01-01", Kind: "reversal", Status: "posted", Links: []ledger.Link{{Rel: "reverses", ID: "entry-00000"}}},
 		ledger.Entry{UserID: p.UserID, ID: "rev-2", Seq: 20002, Date: "2026-01-01", Kind: "reversal", Status: "posted", Links: []ledger.Link{{Rel: "reverses", ID: "rev-1"}}},
 		ledger.Entry{UserID: p.UserID, ID: "rev-3", Seq: 20003, Date: "2026-01-01", Kind: "reversal", Status: "posted", Links: []ledger.Link{{Rel: "reverses", ID: "entry-00001"}}},
 		ledger.Entry{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAW", ID: "other-user", Seq: 1, Date: "2026-01-01", Kind: "entry", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("1"), Commodity: "EUR"}}}},
 	}
-	if _, err := db.Collection("journal").InsertMany(ctx, reversals); err != nil {
+	if _, err := insertJournal(ctx, pgtest.New(tb), reversals...); err != nil {
 		tb.Fatal(err)
 	}
-	if _, err := db.Collection("entry_tags").InsertOne(ctx, bson.M{"_id": p.UserID + ":entry-00000", "user_id": p.UserID, "entry_id": "entry-00000", "tags": []string{"synthetic"}}); err != nil {
+	if _, err := insertTags(ctx, pgtest.New(tb), p.UserID, "entry-00000", []string{"synthetic"}); err != nil {
 		tb.Fatal(err)
 	}
 	sources := &dashboard.Sources{Ledger: ledger.NewService(repo, nil), Valuer: testValuer{}}
@@ -148,19 +122,12 @@ func (historyValuer) Convert(_ context.Context, _ principal.Principal, a ledger.
 }
 func TestBalanceSeriesMatchesIndividualDates(t *testing.T) {
 	ctx, p, sources, reads := postingsFixture(t)
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	parsed, _ := url.Parse(uri)
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
+	var err error
+	if _, err = insertAccount(ctx, pgtest.New(t), ledger.Account{Key: p.UserID + ":liabilities:test", UserID: p.UserID, ID: "liabilities:test", Type: "liability", Name: "Loan", Commodities: []string{"USD"}}); err != nil {
 		t.Fatal(err)
 	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
-	if _, err = db.Collection("accounts").InsertOne(ctx, ledger.Account{Key: p.UserID + ":liabilities:test", UserID: p.UserID, ID: "liabilities:test", Type: "liability", Name: "Loan", Commodities: []string{"USD"}}); err != nil {
-		t.Fatal(err)
-	}
-	docs := []any{ledger.Entry{UserID: p.UserID, ID: "later", Seq: 20010, Date: "2026-02-15", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("0.123456"), Commodity: "EUR"}}, {Account: "liabilities:test", Amount: ledger.Amount{Value: ledger.MustDecimal("-42.75"), Commodity: "USD"}}}}, ledger.Entry{UserID: p.UserID, ID: "future", Seq: 20011, Date: "2027-01-01", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("100"), Commodity: "EUR"}}}}, ledger.Entry{UserID: p.UserID, ID: "draft", Seq: 20012, Date: "2026-01-01", Status: "draft", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("500"), Commodity: "EUR"}}}}}
-	if _, err = db.Collection("journal").InsertMany(ctx, docs); err != nil {
+	docs := []ledger.Entry{ledger.Entry{UserID: p.UserID, ID: "later", Seq: 20010, Date: "2026-02-15", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("0.123456"), Commodity: "EUR"}}, {Account: "liabilities:test", Amount: ledger.Amount{Value: ledger.MustDecimal("-42.75"), Commodity: "USD"}}}}, ledger.Entry{UserID: p.UserID, ID: "future", Seq: 20011, Date: "2027-01-01", Status: "posted", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("100"), Commodity: "EUR"}}}}, ledger.Entry{UserID: p.UserID, ID: "draft", Seq: 20012, Date: "2026-01-01", Status: "draft", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("500"), Commodity: "EUR"}}}}}
+	if _, err = insertJournal(ctx, pgtest.New(t), docs...); err != nil {
 		t.Fatal(err)
 	}
 	dates := []string{"2025-12-31", "2026-01-01", "2026-02-28", "2026-03-31", "2026-04-30", "2026-05-31", "2026-06-30", "2026-07-31", "2026-08-31", "2026-09-30", "2026-10-31", "2026-12-31"}
@@ -312,20 +279,13 @@ func TestBalanceSeriesSharesCurrentBalance(t *testing.T) {
 
 func TestDashboardSharesAccountsAndBalanceHistory(t *testing.T) {
 	ctx, p, _, _ := postingsFixture(t)
-	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
 	var journalReads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "FROM journal") {
 			journalReads.Add(1)
 		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
-	book := ledger.NewService(ledger.NewMongoRepository(db), nil)
+	}))
+	book := ledger.NewService(ledger.NewPostgresRepository(pool), nil)
 	expr, err := expressions.New()
 	if err != nil {
 		t.Fatal(err)
@@ -430,16 +390,10 @@ func TestDashboardSharesJournalAndPostings(t *testing.T) {
 
 func TestPostedStreamLargeCacheFallback(t *testing.T) {
 	ctx, p, sources, reads := postingsFixture(t)
-	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
-	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
+	var err error
 	p.UserID = "01ARZ3NDEKTSV4RRFFQ69G5FAX"
 	text := strings.Repeat("x", 1<<20)
-	docs := make([]any, 33)
+	docs := make([]ledger.Entry, 33)
 	for i := range docs {
 		date := "2025-01-01"
 		if i == 0 {
@@ -447,7 +401,7 @@ func TestPostedStreamLargeCacheFallback(t *testing.T) {
 		}
 		docs[i] = ledger.Entry{ID: fmt.Sprintf("large-%d", i), UserID: p.UserID, Date: date, Seq: int64(i + 1), Status: "posted", Kind: "entry", Payee: text}
 	}
-	if _, err = db.Collection("journal").InsertMany(ctx, docs); err != nil {
+	if _, err = insertJournal(ctx, pgtest.New(t), docs...); err != nil {
 		t.Fatal(err)
 	}
 	shared := ledger.WithSharedPostedStream(reqcache.With(ctx))
@@ -473,10 +427,11 @@ func TestPostedStreamLargeCacheFallback(t *testing.T) {
 	reads.Store(0)
 	n := 0
 	err = sources.Ledger.PostedStream(combined, p, "2026-01-01", "2026-01-01", false, func(ledger.Entry) error { n++; return nil })
-	if err != nil || n != 1 || reads.Load() < 4 {
-		t.Fatal("oversized combined query did not fall back")
+	// PostgreSQL uses one tag read, one failed combined read and one fallback query.
+	if err != nil || n != 1 || reads.Load() != 3 {
+		t.Fatalf("oversized combined query did not fall back: %d rows, %d reads, %v", n, reads.Load(), err)
 	}
-	if _, err := db.Collection("journal").DeleteMany(ctx, bson.M{"user_id": p.UserID, "seq": bson.M{"$gt": 17}}); err != nil {
+	if _, err := pgtest.New(t).Exec(ctx, `DELETE FROM journal WHERE user_id=@user AND seq>17`, pgx.NamedArgs{"user": p.UserID}); err != nil {
 		t.Fatal(err)
 	}
 	combined = ledger.WithCombinedJournal(reqcache.With(ctx), dates)
@@ -495,23 +450,13 @@ func TestPostedStreamLargeCacheFallback(t *testing.T) {
 
 func TestDashboardSharesJournalAndBalances(t *testing.T) {
 	ctx, p, _, _ := postingsFixture(t)
-	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
 	var journalReads, journalOtherReads atomic.Int64
-	monitor := &event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "aggregate" && e.Command.Lookup("aggregate").StringValue() == "journal" {
+	pool := tracedPool(t, queryObserver(func(sql string) {
+		if strings.Contains(sql, "FROM journal") {
 			journalReads.Add(1)
 		}
-		if e.CommandName == "find" && e.Command.Lookup("find").StringValue() == "journal" || e.CommandName == "getMore" && e.Command.Lookup("collection").StringValue() == "journal" {
-			journalOtherReads.Add(1)
-		}
-	}}
-	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")).SetMonitor(monitor))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
-	book := ledger.NewService(ledger.NewMongoRepository(db), nil)
+	}))
+	book := ledger.NewService(ledger.NewPostgresRepository(pool), nil)
 	expr, err := expressions.New()
 	if err != nil {
 		t.Fatal(err)
@@ -526,18 +471,12 @@ func TestDashboardSharesJournalAndBalances(t *testing.T) {
 
 func TestCombinedJournalParity(t *testing.T) {
 	ctx, p, sources, reads := postingsFixture(t)
-	parsed, _ := url.Parse(os.Getenv("MONEYBAG_TEST_MONGO_URI"))
-	client, err := mongo.Connect(options.Client().ApplyURI(os.Getenv("MONEYBAG_TEST_MONGO_URI")))
+	var err error
+	_, err = insertJournal(ctx, pgtest.New(t), ledger.Entry{UserID: p.UserID, ID: "later", Seq: 20030, Date: "2026-02-15", Status: "posted", Kind: "entry", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("0.123456"), Commodity: "EUR"}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_postings")
-	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "later", Seq: 20030, Date: "2026-02-15", Status: "posted", Kind: "entry", Postings: []ledger.Posting{{Account: "assets:test", Amount: ledger.Amount{Value: ledger.MustDecimal("0.123456"), Commodity: "EUR"}}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "latest-draft", Seq: 30000, Date: "2026-03-01", Status: "draft", Kind: "entry"})
+	_, err = insertJournal(ctx, pgtest.New(t), ledger.Entry{UserID: p.UserID, ID: "latest-draft", Seq: 30000, Date: "2026-03-01", Status: "draft", Kind: "entry"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -628,22 +567,17 @@ func TestCombinedJournalParity(t *testing.T) {
 	if _, err := sources.Ledger.LatestSequence(shared, denied); err == nil {
 		t.Fatal("combined head bypassed authorization")
 	}
-	_, err = db.Collection("entry_tags").InsertOne(ctx, bson.M{"_id": p.UserID + ":later", "user_id": p.UserID, "tags": 123})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := sources.Ledger.LatestSequence(ctx, p); err == nil {
-		t.Fatal("malformed second head fixture did not fail")
+	// SQL rejects malformed scalar tags before they can poison either head path.
+	_, err = pgtest.New(t).Exec(ctx, `INSERT INTO entry_tags(id,user_id,entry_id,tags) VALUES (@key,@user,'later',@tags)`, pgx.NamedArgs{"key": p.UserID + ":later", "user": p.UserID, "tags": 123})
+	if err == nil {
+		t.Fatal("accepted malformed tags")
 	}
 	badCtx := ledger.WithCombinedHead(ledger.WithCombinedJournal(reqcache.With(ctx), dates))
-	if _, err := sources.Ledger.LatestSequence(badCtx, p); err == nil {
-		t.Fatal("combined head hid malformed overlay")
-	}
-	if _, err := db.Collection("entry_tags").DeleteOne(ctx, bson.M{"_id": p.UserID + ":later"}); err != nil {
-		t.Fatal(err)
+	if seq, err := sources.Ledger.LatestSequence(badCtx, p); err != nil || seq != 30000 {
+		t.Fatalf("rejected overlay changed head: %d %v", seq, err)
 	}
 
-	_, err = db.Collection("journal").InsertOne(ctx, ledger.Entry{UserID: p.UserID, ID: "duplicate-reversal", Seq: 20040, Date: "2026-01-01", Status: "posted", Kind: "reversal", Links: []ledger.Link{{Rel: "reverses", ID: "entry-00001"}}})
+	_, err = insertJournal(ctx, pgtest.New(t), ledger.Entry{UserID: p.UserID, ID: "duplicate-reversal", Seq: 20040, Date: "2026-01-01", Status: "posted", Kind: "reversal", Links: []ledger.Link{{Rel: "reverses", ID: "entry-00001"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

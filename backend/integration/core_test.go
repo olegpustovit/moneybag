@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"net/url"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -20,31 +18,11 @@ import (
 )
 
 func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI to a dedicated moneybag_test_ database on standalone MongoDB")
-	}
-	parsed, e := url.Parse(uri)
-	if e != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("integration tests require the dedicated moneybag_test_ database")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	client, e := mongodb.Connect(ctx, uri)
-	if e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() { _ = client.Disconnect(context.Background()) })
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/"))
-	if e = db.Drop(ctx); e != nil {
-		t.Fatal(e)
-	}
-	t.Cleanup(func() {
-		if e := db.Drop(context.Background()); e != nil {
-			t.Error(e)
-		}
-	})
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	db := pgtest.New(t)
+	var e error
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -86,8 +64,8 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if strings.Contains(string(encoded), raw) || strings.Contains(string(encoded), session.CSRF) {
 		t.Fatal("session secret leaked")
 	}
-	auditSvc := audit.NewService(audit.NewMongoRepository(db))
-	repo := ledger.NewMongoRepository(db)
+	auditSvc := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
+	repo := ledger.NewPostgresRepository(pgtest.New(t))
 	if e = repo.Init(ctx, pa); e != nil {
 		t.Fatal(e)
 	}
@@ -158,7 +136,7 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 		t.Fatal(e)
 	}
 	var stored ledger.Entry
-	if e = db.Collection("journal").FindOne(ctx, bson.M{"_id": ar.Entry.ID}).Decode(&stored); e != nil || stored.Status != "posted" || stored.Postings[0].Amount.Value.String() != "23.40" {
+	if e = pgtest.New(t).QueryRow(ctx, `SELECT status,postings FROM journal WHERE id=@id`, pgx.NamedArgs{"id": ar.Entry.ID}).Scan(&stored.Status, &stored.Postings); e != nil || stored.Status != "posted" || stored.Postings[0].Amount.Value.String() != "23.40" {
 		t.Fatal("original entry mutated", e)
 	}
 	readonly := pa
@@ -166,7 +144,7 @@ func TestSharedDatabaseLedgerIdentityOAuth(t *testing.T) {
 	if _, e = book.Post(ctx, readonly, in); !errors.Is(e, principal.ErrForbidden) {
 		t.Fatal("read-only write accepted", e)
 	}
-	oa := oauth.NewService(oauth.NewMongoRepository(db), ids, "http://localhost:6459")
+	oa := oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "http://localhost:6459")
 	if e = oa.Init(ctx); e != nil {
 		t.Fatal(e)
 	}

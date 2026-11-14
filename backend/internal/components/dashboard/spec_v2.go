@@ -267,7 +267,7 @@ func metricHint(e error) error {
 	return &EvalError{Field: "metric", Hint: "read metric ids with metric_list, or define one with metric_upsert", Err: e}
 }
 
-// renderMetric returns plain JSON values, because a shared snapshot stores them in Mongo, which would otherwise rename struct fields.
+// renderMetric returns plain JSON values, for storage in shared snapshots.
 func (x *execution) renderMetric(c Component) (map[string]any, error) {
 	if e := x.metricAllowed(c.Metric); e != nil {
 		return nil, metricHint(e)

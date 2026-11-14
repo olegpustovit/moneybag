@@ -3,9 +3,8 @@ package ledger
 import (
 	"context"
 	"errors"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // IsEffective shares the posted-stream reversal-chain semantics with ledger-aware tables.
@@ -31,9 +30,13 @@ func (s *Service) Reversal(ctx context.Context, p principal.Principal, id string
 	if e != nil {
 		return Entry{}, e
 	}
-	var v Entry
-	e = db.Collection("journal").FindOne(ctx, bson.M{"user_id": p.UserID, "status": "posted", "links": bson.M{"$elemMatch": bson.M{"rel": "reverses", "id": id}}}).Decode(&v)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	const reversalSQL = `SELECT ` + entryColumns + ` FROM journal j WHERE user_id=@user AND status='posted' AND links @> jsonb_build_array(jsonb_build_object('rel','reverses','id',@id::text)) LIMIT 1`
+	rows, e := db.Query(ctx, reversalSQL, pgx.NamedArgs{"user": p.UserID, "id": id})
+	if e != nil {
+		return Entry{}, e
+	}
+	v, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Entry])
+	if errors.Is(e, pgx.ErrNoRows) {
 		e = principal.ErrNotFound
 	}
 	return v, e

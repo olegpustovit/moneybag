@@ -2,24 +2,22 @@ package dashboard
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"strings"
 )
 
 // View is a named, per-user saved Query usable as the data source "view:<id>".
 type View struct {
-	Key    string `json:"-" bson:"_id"`
-	UserID string `json:"-" bson:"user_id"`
-	ID     string `json:"id" bson:"id"`
-	Query  Query  `json:"query" bson:"query"`
+	Key    string `json:"-" db:"storage_key"`
+	UserID string `json:"-" db:"user_id"`
+	ID     string `json:"id" db:"id"`
+	Query  Query  `json:"query" db:"query"`
 }
 type ViewInput struct {
 	ID    string `json:"id"`
@@ -35,8 +33,12 @@ func (s *Service) View(ctx context.Context, p principal.Principal, id string) (V
 		return View{}, e
 	}
 	var v View
-	e := s.repo.db.Collection("views").FindOne(ctx, bson.M{"user_id": p.UserID, "id": id}).Decode(&v)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.db.Query(ctx, `SELECT * FROM views WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": id})
+	if e != nil {
+		return v, e
+	}
+	v, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[View])
+	if postgres.IsNotFound(e) {
 		e = fmt.Errorf("view %q: %w", id, principal.ErrNotFound)
 	}
 	return v, e
@@ -45,14 +47,16 @@ func (s *Service) Views(ctx context.Context, p principal.Principal) ([]View, err
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("views").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}).SetLimit(501))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM views WHERE user_id=@user ORDER BY id LIMIT 501`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []View{}
-	if e = cur.All(ctx, &out); len(out) > 500 {
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByName[View])
+	if len(out) > 500 {
 		return nil, fmt.Errorf("view catalog exceeds 500")
+	}
+	if out == nil {
+		out = []View{}
 	}
 	return out, e
 }
@@ -90,7 +94,7 @@ func (s *Service) UpsertView(ctx context.Context, p principal.Principal, in View
 		old, _ := s.View(tx, p, in.ID)
 		v = View{Key: p.UserID + ":" + in.ID, UserID: p.UserID, ID: in.ID, Query: in.Query}
 		_, e := s.audit.Write(tx, p, "view_upsert", audit.Target{Collection: "views", ID: in.ID}, "", old, v, func(tx context.Context) error {
-			_, e := s.repo.db.Collection("views").ReplaceOne(tx, bson.M{"_id": v.Key}, v, options.Replace().SetUpsert(true))
+			_, e := s.repo.db.Exec(tx, `INSERT INTO views(storage_key,user_id,id,query) VALUES (@key,@user,@id,@query) ON CONFLICT(storage_key) DO UPDATE SET id=EXCLUDED.id,query=EXCLUDED.query WHERE views.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": v.Key, "user": p.UserID, "id": v.ID, "query": v.Query})
 			return e
 		})
 		return e

@@ -3,16 +3,15 @@ package classify
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
 	"slices"
 	"sort"
@@ -20,20 +19,20 @@ import (
 )
 
 type RuleSet struct {
-	Account string   `json:"account,omitempty" bson:"account,omitempty"`
-	Tags    []string `json:"tags,omitempty" bson:"tags,omitempty"`
-	Kind    string   `json:"kind,omitempty" bson:"kind,omitempty"`
+	Account string   `json:"account,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Kind    string   `json:"kind,omitempty"`
 }
 type Rule struct {
-	Key      string  `json:"-" bson:"_id"`
-	UserID   string  `json:"-" bson:"user_id"`
-	ID       string  `json:"id,omitempty" bson:"id"`
-	Priority int     `json:"priority" bson:"priority"`
-	Match    string  `json:"match" bson:"match"`
-	Set      RuleSet `json:"set" bson:"set"`
-	Note     string  `json:"note,omitempty" bson:"note,omitempty"`
-	Enabled  bool    `json:"enabled" bson:"enabled"`
-	Version  int     `json:"version" bson:"version"`
+	Key      string  `json:"-" db:"storage_key"`
+	UserID   string  `json:"-" db:"user_id"`
+	ID       string  `json:"id,omitempty" db:"id"`
+	Priority int     `json:"priority" db:"priority"`
+	Match    string  `json:"match" db:"match"`
+	Set      RuleSet `json:"set" db:"set"`
+	Note     string  `json:"note,omitempty" db:"note"`
+	Enabled  bool    `json:"enabled" db:"enabled"`
+	Version  int     `json:"version" db:"version"`
 }
 type RuleInput struct {
 	ID       string  `json:"id,omitempty"`
@@ -69,29 +68,30 @@ type PreviewResult struct {
 	WouldChange []Change `json:"would_change"`
 	Count       int      `json:"count"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	ledger *ledger.Service
 	audit  *audit.Service
 	expr   *expressions.Engine
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, l *ledger.Service, a *audit.Service, e *expressions.Engine) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, l *ledger.Service, a *audit.Service, e *expressions.Engine) *Service {
 	return &Service{r, l, a, e}
 }
 func (s *Service) Rules(ctx context.Context, p principal.Principal) ([]Rule, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("rules").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetSort(bson.D{{Key: "priority", Value: 1}, {Key: "id", Value: 1}}).SetLimit(501))
+	cur, e := s.repo.db.Query(ctx, `SELECT storage_key,user_id,id,priority,match,"set",note,enabled,version FROM rules WHERE user_id=@user ORDER BY priority,id LIMIT 501`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Rule{}
-	e = cur.All(ctx, &out)
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByName[Rule])
+	if out == nil {
+		out = []Rule{}
+	}
 	if len(out) > 500 {
 		return nil, fmt.Errorf("at most 500 rules")
 	}
@@ -120,7 +120,8 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, input RuleI
 		return Rule{}, fmt.Errorf("rule kind must be normal or transfer")
 	}
 	if in.Set.Account != "" {
-		n, e := s.repo.db.Collection("accounts").CountDocuments(ctx, bson.M{"user_id": p.UserID, "id": in.Set.Account, "type": "expense"})
+		var n int
+		e := s.repo.db.QueryRow(ctx, `SELECT count(*) FROM accounts WHERE user_id=@user AND id=@id AND type='expense'`, pgx.NamedArgs{"user": p.UserID, "id": in.Set.Account}).Scan(&n)
 		if e != nil {
 			return Rule{}, e
 		}
@@ -129,8 +130,12 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, input RuleI
 		}
 	}
 	var old Rule
-	e := s.repo.db.Collection("rules").FindOne(ctx, bson.M{"user_id": p.UserID, "id": in.ID}).Decode(&old)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.db.Query(ctx, `SELECT storage_key,user_id,id,priority,match,"set",note,enabled,version FROM rules WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": in.ID})
+	if e != nil {
+		return Rule{}, e
+	}
+	old, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[Rule])
+	if e != nil && !postgres.IsNotFound(e) {
 		return Rule{}, e
 	}
 	in.Key = p.UserID + ":" + in.ID
@@ -141,7 +146,7 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, input RuleI
 		in.Enabled = *input.Enabled
 	}
 	_, e = s.audit.Write(ctx, p, "rule_upsert", audit.Target{Collection: "rules", ID: in.ID}, in.Note, old, in, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("rules").ReplaceOne(tx, bson.M{"user_id": p.UserID, "id": in.ID}, in, options.Replace().SetUpsert(true))
+		_, e := s.repo.db.Exec(tx, `INSERT INTO rules (storage_key,user_id,id,priority,match,"set",note,enabled,version) VALUES (@key,@user,@id,@priority,@match,@set,@note,@enabled,@version) ON CONFLICT (user_id,id) DO UPDATE SET storage_key=EXCLUDED.storage_key,priority=EXCLUDED.priority,match=EXCLUDED.match,"set"=EXCLUDED."set",note=EXCLUDED.note,enabled=EXCLUDED.enabled,version=EXCLUDED.version`, pgx.NamedArgs{"key": in.Key, "user": p.UserID, "id": in.ID, "priority": in.Priority, "match": in.Match, "set": in.Set, "note": in.Note, "enabled": in.Enabled, "version": in.Version})
 		return e
 	})
 	return in, e
@@ -155,8 +160,12 @@ func (s *Service) resolveRule(ctx context.Context, p principal.Principal, in Pre
 		return Rule{ID: r.ID, Priority: r.Priority, Match: r.Match, Set: r.Set, Note: r.Note, Enabled: true}, nil
 	}
 	var rule Rule
-	e := s.repo.db.Collection("rules").FindOne(ctx, bson.M{"user_id": p.UserID, "id": in.RuleID}).Decode(&rule)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.db.Query(ctx, `SELECT storage_key,user_id,id,priority,match,"set",note,enabled,version FROM rules WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": in.RuleID})
+	if e != nil {
+		return Rule{}, e
+	}
+	rule, e = pgx.CollectOneRow(rows, pgx.RowToStructByName[Rule])
+	if postgres.IsNotFound(e) {
 		e = principal.ErrNotFound
 	}
 	return rule, e

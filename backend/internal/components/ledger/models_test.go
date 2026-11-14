@@ -3,7 +3,6 @@ package ledger
 import (
 	"encoding/json"
 	"fmt"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"math"
 	"math/big"
 	"math/rand"
@@ -15,7 +14,7 @@ func TestNegatePreservesDecimalRange(t *testing.T) {
 	for _, text := range []string{"0", "-0.00", "23.40", "-0.000001", "1" + strings.Repeat("0", 79)} {
 		d := MustDecimal(text)
 		neg := d.Negate()
-		if neg.Rat().Cmp(new(big.Rat).Neg(d.Rat())) != 0 || neg.Negate().Decimal128 != d.Decimal128 {
+		if neg.Rat().Cmp(new(big.Rat).Neg(d.Rat())) != 0 || neg.Negate() != d {
 			t.Fatalf("negate failed for %s", text)
 		}
 		if _, err := ParseDecimal(neg.String()); err != nil {
@@ -44,19 +43,11 @@ func TestExactBalanceAndSerialization(t *testing.T) {
 		t.Fatalf("JSON: %s %v", b, e)
 	}
 	var out Amount
-	raw, e := bson.Marshal(amount)
-	if e != nil {
-		t.Fatal(e)
-	}
-	if e = bson.Unmarshal(raw, &out); e != nil {
+	if e = json.Unmarshal(b, &out); e != nil {
 		t.Fatal(e)
 	}
 	if out.Value.Rat().Cmp(big.NewRat(234, 10)) != 0 {
 		t.Fatal(out)
-	}
-	var v bson.Raw = raw
-	if v.Lookup("v").Type != bson.TypeDecimal128 {
-		t.Fatal("money not stored as Decimal128")
 	}
 }
 
@@ -67,11 +58,8 @@ func TestDecimalFloatMatchesRational(t *testing.T) {
 		values = append(values, fmt.Sprintf("%dE%+d", rng.Int63()-rng.Int63(), rng.Intn(700)-350))
 	}
 	for _, value := range values {
-		v, err := bson.ParseDecimal128(value)
-		if err != nil {
-			t.Fatal(value, err)
-		}
-		d := Decimal{v}
+		// Exercise Float's full finite range and non-finite fallback independently of the public parser.
+		d := Decimal{s: value}
 		want, _ := d.Rat().Float64()
 		if got := d.Float(); math.Float64bits(got) != math.Float64bits(want) {
 			t.Fatalf("%s: got %g, want %g", value, got, want)

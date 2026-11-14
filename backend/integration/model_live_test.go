@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
@@ -12,36 +13,18 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"net/url"
-	"os"
 	"strings"
 	"testing"
 	"time"
 )
 
 func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, e := url.Parse(uri)
-	if e != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("integration tests require the dedicated moneybag_test_ database")
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	client, e := mongodb.Connect(ctx, uri)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_live")
-	_ = db.Drop(ctx)
-	defer db.Drop(context.Background())
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	var e error
+	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
 	if e = ids.Init(ctx); e != nil {
 		t.Fatal(e)
 	}
@@ -50,22 +33,22 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 		t.Fatal(e)
 	}
 	p := identity.Principal(u)
-	a := audit.NewService(audit.NewMongoRepository(db))
-	repo := ledger.NewMongoRepository(db)
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
+	repo := ledger.NewPostgresRepository(pgtest.New(t))
 	if e = repo.Init(ctx, p); e != nil {
 		t.Fatal(e)
 	}
 	book := ledger.NewService(repo, a)
 	expr, _ := expressions.New()
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
-	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
-	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
+	prices := rates.NewService(rates.NewPostgresRepository(pgtest.New(t)), a)
+	budgets := budget.NewService(budget.NewPostgresRepository(pgtest.New(t)), a, prices)
+	tab := tables.NewService(tables.NewPostgresRepository(pgtest.New(t)), a, expr)
+	models := model.NewService(model.NewPostgresRepository(pgtest.New(t)), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test"}); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = db.Collection("budgets").UpdateOne(ctx, bson.M{"user_id": p.UserID, "id": "revision-test"}, bson.M{"$unset": bson.M{"revision": ""}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `UPDATE budgets SET revision=0 WHERE user_id=@user AND id='revision-test'`, pgx.NamedArgs{"user": p.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	zeroBudget, newBudget := 0, -1
@@ -95,7 +78,7 @@ func TestScenarioLiveStartRefsAndIncomeReconcile(t *testing.T) {
 	if _, e = budgets.Set(ctx, p, budget.SetInput{ID: "revision-test", ExpectedRevision: &twoBudget}); !errors.Is(e, principal.ErrConflict) {
 		t.Fatal("archive did not invalidate budget revision", e)
 	}
-	if _, e = db.Collection("scenarios").InsertOne(ctx, bson.M{"_id": p.UserID + ":old", "user_id": p.UserID, "id": "old", "name": "Old", "overrides": bson.A{}}); e != nil {
+	if _, e = pgtest.New(t).Exec(ctx, `INSERT INTO scenarios(storage_key,user_id,id,name,overrides) VALUES (@key,@user,'old','Old','[]')`, pgx.NamedArgs{"key": p.UserID + ":old", "user": p.UserID}); e != nil {
 		t.Fatal(e)
 	}
 	zero, absent := 0, -1

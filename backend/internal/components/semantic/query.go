@@ -131,7 +131,7 @@ func (s *Service) book(ctx context.Context, p principal.Principal) (*book, error
 		if b.labels, e = s.Labels(ctx, p); e != nil {
 			return nil, e
 		}
-		aliases, e := list[PayeeAlias](ctx, s.repo.db.Collection("payee_aliases"), p.UserID, "pattern")
+		aliases, e := list[PayeeAlias](ctx, s.repo.db, `SELECT * FROM payee_aliases WHERE user_id=@user ORDER BY "pattern" LIMIT 1001`, "payee_aliases", p.UserID)
 		if e != nil {
 			return nil, e
 		}
@@ -1238,7 +1238,7 @@ func (s *Service) Annotations(ctx context.Context, p principal.Principal, rule, 
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	stored, e := list[Annotation](ctx, s.repo.db.Collection("annotations"), p.UserID, "id")
+	stored, e := list[Annotation](ctx, s.repo.db, `SELECT * FROM annotations WHERE user_id=@user ORDER BY "id" LIMIT 1001`, "annotations", p.UserID)
 	if e != nil {
 		return nil, e
 	}

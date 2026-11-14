@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"github.com/gofiber/fiber/v3"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/olegpustovit/moneybag/backend/cmd/api/handlers"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 	"net"
 	"net/http"
 	"os"
@@ -21,11 +22,11 @@ import (
 	"time"
 )
 
-func testHTTPAndStdio(t *testing.T, ctx context.Context, db *mongo.Database, p principal.Principal, s mcpserver.Services) {
+func testHTTPAndStdio(t *testing.T, ctx context.Context, db *pgxpool.Pool, p principal.Principal, s mcpserver.Services) {
 	t.Helper()
 	const issuer = "http://localhost:6459"
-	oa := oauth.NewService(oauth.NewMongoRepository(db), s.Identity, issuer)
-	web := handlers.New(handlers.Config{PublicURL: issuer, Version: "integration"}, s, oa, ledger.NewMongoRepository(db), db.Client())
+	oa := oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), s.Identity, issuer)
+	web := handlers.New(handlers.Config{PublicURL: issuer, Version: "integration"}, s, oa, ledger.NewPostgresRepository(pgtest.New(t)), db)
 	listener, e := net.Listen("tcp", "127.0.0.1:0")
 	if e != nil {
 		t.Fatal(e)

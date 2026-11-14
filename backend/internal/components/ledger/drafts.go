@@ -3,9 +3,9 @@ package ledger
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
 func (s *Service) UpdateDraft(ctx context.Context, p principal.Principal, in EntryInput) (EntryResult, error) {
@@ -46,14 +46,14 @@ func (s *Service) UpdateDraft(ctx context.Context, p principal.Principal, in Ent
 			return e
 		}
 		event, e := s.audit.Write(tx, p, "entry_update", audit.Target{Collection: "journal", ID: in.ID}, "", old, entry, func(tx context.Context) error {
-			r, e := db.Collection("journal").ReplaceOne(tx, bson.M{"_id": in.ID, "user_id": p.UserID, "status": "draft"}, entry)
+			r, e := db.Exec(tx, `UPDATE journal SET date=@date,payee=@payee,postings=@postings,tags=@tags,kind=@kind WHERE id=@id AND user_id=@user AND status='draft'`, pgx.NamedArgs{"date": entry.Date, "payee": entry.Payee, "postings": entry.Postings, "tags": entry.Tags, "kind": entry.Kind, "id": in.ID, "user": p.UserID})
 			if e != nil {
 				return e
 			}
-			if r.MatchedCount != 1 {
+			if r.RowsAffected() != 1 {
 				return principal.ErrConflict
 			}
-			_, e = db.Collection("entry_tags").UpdateOne(tx, bson.M{"_id": p.UserID + ":" + in.ID, "user_id": p.UserID}, bson.M{"$set": bson.M{"tags": in.Tags}})
+			_, e = db.Exec(tx, `UPDATE entry_tags SET tags=@tags WHERE id=@key AND user_id=@user`, pgx.NamedArgs{"tags": in.Tags, "key": p.UserID + ":" + in.ID, "user": p.UserID})
 			return e
 		})
 		out = EntryResult{entry, true, event}

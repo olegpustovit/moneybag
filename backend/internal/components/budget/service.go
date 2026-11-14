@@ -2,16 +2,16 @@ package budget
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math/big"
 	"slices"
 	"strings"
@@ -19,23 +19,23 @@ import (
 )
 
 type Line struct {
-	LiteralAccounts []string       `json:"-" bson:"-"`
-	Synthetic       bool           `json:"-" bson:"-"`
-	Archived        bool           `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key             string         `json:"-" bson:"_id"`
-	UserID          string         `json:"-" bson:"user_id"`
-	ID              string         `json:"id" bson:"id"`
-	Name            string         `json:"name" bson:"name"`
-	Revision        int            `json:"revision,omitempty" bson:"revision"`
-	Limit           ledger.Decimal `json:"limit" bson:"limit"`
-	Accounts        []string       `json:"accounts" bson:"accounts"`
+	LiteralAccounts []string       `json:"-" db:"-"`
+	Synthetic       bool           `json:"-" db:"-"`
+	Archived        bool           `json:"archived,omitempty" db:"archived"`
+	Key             string         `json:"-" db:"storage_key"`
+	UserID          string         `json:"-" db:"user_id"`
+	ID              string         `json:"id" db:"id"`
+	Name            string         `json:"name" db:"name"`
+	Revision        int            `json:"revision,omitempty" db:"revision"`
+	Limit           ledger.Decimal `json:"limit" db:"limit"`
+	Accounts        []string       `json:"accounts" db:"accounts"`
 	// GroupRef maps every expense account whose groups[dimension] equals value, resolved on read.
-	GroupRef *GroupRef `json:"group_ref,omitempty" bson:"group_ref,omitempty"`
-	Order    int       `json:"order" bson:"order"`
+	GroupRef *GroupRef `json:"group_ref,omitempty" db:"group_ref"`
+	Order    int       `json:"order" db:"order"`
 }
 type GroupRef struct {
-	Dimension string `json:"dimension" bson:"dimension"`
-	Value     string `json:"value" bson:"value"`
+	Dimension string `json:"dimension"`
+	Value     string `json:"value"`
 }
 type SetInput struct {
 	ID               string          `json:"id"`
@@ -87,15 +87,15 @@ type Month struct {
 	ByLine map[string]float64 `json:"byLine"`
 	Total  float64            `json:"total"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	audit  *audit.Service
 	valuer ledger.Valuer
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, a *audit.Service, v ledger.Valuer) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, a *audit.Service, v ledger.Valuer) *Service {
 	return &Service{r, a, v}
 }
 func (s *Service) Lines(ctx context.Context, p principal.Principal) ([]Line, error) {
@@ -121,13 +121,17 @@ func (s *Service) Lines(ctx context.Context, p principal.Principal) ([]Line, err
 }
 
 func (s *Service) lines(ctx context.Context, p principal.Principal) ([]Line, error) {
-	cur, e := s.repo.db.Collection("budgets").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "order", Value: 1}, {Key: "id", Value: 1}}).SetLimit(501))
+	cur, e := s.repo.db.Query(ctx, `SELECT `+lineColumns+` FROM budgets WHERE user_id=@user AND NOT archived ORDER BY "order",id LIMIT 501`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	defer cur.Close(ctx)
-	out := []Line{}
-	e = cur.All(ctx, &out)
+	out, e := pgx.CollectRows(cur, pgx.RowToStructByNameLax[Line])
+	if e != nil {
+		return nil, e
+	}
+	if out == nil {
+		out = []Line{}
+	}
 	if len(out) > 500 {
 		return nil, fmt.Errorf("too many budget lines")
 	}
@@ -145,8 +149,10 @@ func (s *Service) lines(ctx context.Context, p principal.Principal) ([]Line, err
 	return out, e
 }
 
+const lineColumns = `storage_key,user_id,id,name,revision,COALESCE(limit_lexeme,"limit"::text) AS "limit",accounts,group_ref,"order",archived`
+
 type accountID struct {
-	ID string `bson:"id"`
+	ID string `db:"id"`
 }
 
 func (s *Service) groupAccounts(ctx context.Context, p principal.Principal, ref GroupRef) ([]accountID, error) {
@@ -159,9 +165,9 @@ func (s *Service) groupAccounts(ctx context.Context, p principal.Principal, ref 
 		}
 		return found, err
 	}
-	c, err := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}, "groups." + ref.Dimension: ref.Value}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+	c, err := s.repo.db.Query(ctx, `SELECT id FROM accounts WHERE user_id=@user AND type='expense' AND closed_at IS NULL AND groups->>@dimension=@value ORDER BY id`, pgx.NamedArgs{"user": p.UserID, "dimension": ref.Dimension, "value": ref.Value})
 	if err == nil {
-		err = c.All(ctx, &found)
+		found, err = pgx.CollectRows(c, pgx.RowToStructByName[accountID])
 	}
 	return found, err
 }
@@ -191,8 +197,12 @@ func (s *Service) Set(ctx context.Context, p principal.Principal, in SetInput) (
 }
 func (s *Service) set(ctx context.Context, p principal.Principal, in SetInput) (SetResult, error) {
 	var old Line
-	e := s.repo.db.Collection("budgets").FindOne(ctx, bson.M{"user_id": p.UserID, "id": in.ID}).Decode(&old)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.db.Query(ctx, `SELECT `+lineColumns+` FROM budgets WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": in.ID})
+	if e != nil {
+		return SetResult{}, e
+	}
+	old, e = pgx.CollectOneRow(rows, pgx.RowToStructByNameLax[Line])
+	if e != nil && !postgres.IsNotFound(e) {
 		return SetResult{}, e
 	}
 	exists := e == nil
@@ -201,7 +211,7 @@ func (s *Service) set(ctx context.Context, p principal.Principal, in SetInput) (
 	}
 	line := old
 	line.Archived = false
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	if postgres.IsNotFound(e) {
 		line = Line{Key: p.UserID + ":" + in.ID, UserID: p.UserID, ID: in.ID, Name: in.ID, Limit: ledger.MustDecimal("0"), Accounts: []string{}}
 	}
 	if in.Limit != nil {
@@ -248,7 +258,8 @@ func (s *Service) set(ctx context.Context, p principal.Principal, in SetInput) (
 			return e
 		}
 		for _, a := range mine {
-			n, e := s.repo.db.Collection("accounts").CountDocuments(tx, bson.M{"user_id": p.UserID, "id": a, "type": "expense"})
+			var n int
+			e := s.repo.db.QueryRow(tx, `SELECT count(*) FROM accounts WHERE user_id=@user AND id=@id AND type='expense'`, pgx.NamedArgs{"user": p.UserID, "id": a}).Scan(&n)
 			if e != nil {
 				return e
 			}
@@ -261,22 +272,23 @@ func (s *Service) set(ctx context.Context, p principal.Principal, in SetInput) (
 				}
 			}
 		}
-		collection := s.repo.db.Collection("budgets")
+		var lexeme *string
+		// numeric normalizes negative zero; retain its original decimal spelling.
+		if line.Limit.Rat().Sign() == 0 && strings.HasPrefix(line.Limit.String(), "-") {
+			v := line.Limit.String()
+			lexeme = &v
+		}
+		args := pgx.NamedArgs{"key": line.Key, "user": p.UserID, "id": line.ID, "name": line.Name, "revision": line.Revision, "limit": line.Limit.String(), "lexeme": lexeme, "accounts": line.Accounts, "group": line.GroupRef, "order": line.Order, "archived": line.Archived, "old": old.Revision}
 		if !exists {
-			_, e = collection.InsertOne(tx, line)
-			if mongo.IsDuplicateKeyError(e) {
+			delete(args, "old")
+			_, e = s.repo.db.Exec(tx, `INSERT INTO budgets (storage_key,user_id,id,name,revision,"limit",limit_lexeme,accounts,group_ref,"order",archived) VALUES (@key,@user,@id,@name,@revision,@limit::numeric,@lexeme,@accounts,@group,@order,@archived)`, args)
+			if postgres.IsUniqueViolation(e) {
 				return principal.ErrConflict
 			}
 			return e
 		}
-		filter := bson.M{"user_id": p.UserID, "id": in.ID}
-		if old.Revision == 0 {
-			filter["$or"] = []bson.M{{"revision": 0}, {"revision": bson.M{"$exists": false}}}
-		} else {
-			filter["revision"] = old.Revision
-		}
-		result, e := collection.ReplaceOne(tx, filter, line)
-		if e == nil && result.MatchedCount == 0 {
+		result, e := s.repo.db.Exec(tx, `UPDATE budgets SET storage_key=@key,name=@name,revision=@revision,"limit"=@limit::numeric,limit_lexeme=@lexeme,accounts=@accounts,group_ref=@group,"order"=@order,archived=@archived WHERE user_id=@user AND id=@id AND revision=@old`, args)
+		if e == nil && result.RowsAffected() == 0 {
 			return principal.ErrConflict
 		}
 		return e
@@ -301,18 +313,35 @@ func MonthReadWindow(ctx context.Context) (string, string, bool) {
 type monthRow = ledger.JournalMonthRow
 
 func (s *Service) monthRows(ctx context.Context, p principal.Principal, from, to string) ([]monthRow, error) {
-	if rows, ok, err := ledger.NewMongoRepository(s.repo.db).CombinedMonthRows(ctx, p, from, to); ok || err != nil {
+	if rows, ok, err := ledger.NewPostgresRepository(s.repo.db).CombinedMonthRows(ctx, p, from, to); ok || err != nil {
 		return rows, err
 	}
-	match := bson.M{"user_id": p.UserID, "status": "posted", "date": bson.M{"$gte": from, "$lte": to}}
-	cur, err := s.repo.db.Collection("journal").Aggregate(ctx, bson.A{bson.M{"$match": match}, bson.M{"$unwind": "$postings"}, bson.M{"$match": bson.M{"postings.account": bson.M{"$regex": "^expenses:(?!estimated)"}}}, bson.M{"$group": bson.M{"_id": bson.M{"date": "$date", "account": "$postings.account", "commodity": "$postings.amount.c", "price": "$postings.price"}, "amount": bson.M{"$sum": "$postings.amount.v"}}}, bson.M{"$limit": 5001}})
+	cur, err := s.repo.db.Query(ctx, `SELECT j.date,p->>'account',p->'amount'->>'c',
+ CASE WHEN p->'price' IS NULL OR p->'price'='null'::jsonb THEN NULL ELSE jsonb_build_object('v',((p->'price'->>'v')::numeric)::text,'c',p->'price'->>'c') END,
+ SUM((p->'amount'->>'v')::numeric)::text
+ FROM journal j CROSS JOIN LATERAL jsonb_array_elements(COALESCE(NULLIF(j.postings,'null'::jsonb),'[]'::jsonb)) p
+ WHERE j.user_id=@user AND j.status='posted' AND j.date>=@from AND j.date<=@to
+ AND p->>'account' LIKE 'expenses:%' AND p->>'account' NOT LIKE 'expenses:estimated%'
+ GROUP BY j.date,p->>'account',p->'amount'->>'c',(p->'price'->>'v')::numeric,p->'price'->>'c',p->'price' IS NULL OR p->'price'='null'::jsonb LIMIT 5001`, pgx.NamedArgs{"user": p.UserID, "from": from, "to": to})
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+	defer cur.Close()
 	var rows []monthRow
-	err = cur.All(ctx, &rows)
-	return rows, err
+	for cur.Next() {
+		var row monthRow
+		var price json.RawMessage
+		if err = cur.Scan(&row.ID.Date, &row.ID.Account, &row.ID.Commodity, &price, &row.Amount); err != nil {
+			return nil, err
+		}
+		if len(price) > 0 {
+			if err = json.Unmarshal(price, &row.ID.Price); err != nil {
+				return nil, err
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, cur.Err()
 }
 
 func (s *Service) Months(ctx context.Context, p principal.Principal, from, to string) ([]Month, error) {
@@ -515,11 +544,12 @@ func (s *Service) GetWindow(ctx context.Context, p principal.Principal, month st
 			}
 		}
 	} else {
-		cur, e := s.repo.db.Collection("accounts").Find(ctx, bson.M{"user_id": p.UserID, "type": "expense", "closed_at": bson.M{"$exists": false}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}))
+		cur, e := s.repo.db.Query(ctx, `SELECT id FROM accounts WHERE user_id=@user AND type='expense' AND closed_at IS NULL ORDER BY id`, pgx.NamedArgs{"user": p.UserID})
 		if e != nil {
 			return Status{}, e
 		}
-		if e = cur.All(ctx, &expenses); e != nil {
+		expenses, e = pgx.CollectRows(cur, pgx.RowToStructByName[accountID])
+		if e != nil {
 			return Status{}, e
 		}
 	}

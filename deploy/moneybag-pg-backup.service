@@ -1,0 +1,6 @@
+[Unit]
+Description=Moneybag PostgreSQL off-VM backup
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/libexec/moneybag-backup-postgres

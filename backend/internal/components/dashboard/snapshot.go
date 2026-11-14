@@ -9,7 +9,7 @@ import (
 
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 )
 
@@ -99,7 +99,7 @@ func (s *Snapshots) read(ctx context.Context, p principal.Principal, kind, name 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if mongodb.InWorkflow(ctx) {
+	if postgres.InWorkflow(ctx) {
 		return build()
 	}
 	if err := p.Require("ledger:read"); err != nil {

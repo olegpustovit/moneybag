@@ -3,6 +3,10 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"sync"
 	"testing"
@@ -13,11 +17,10 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testTableConstraints(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testTableConstraints(t *testing.T, ctx context.Context, p principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
+	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("table constraints", func(t *testing.T) {
 		if _, err := s.Tables.CreateNamed(ctx, p, "row-checks", tables.CreateInput{Name: "Checks", Columns: []tables.Column{{ID: "ok", Type: "bool"}}, Checks: []tables.RowCheck{{Expr: "row.ok", Message: "Must be true"}}}); err != nil {
@@ -68,8 +71,20 @@ func testTableConstraints(t *testing.T, ctx context.Context, p principal.Princip
 		raw := rows.Rows[0]
 		raw.Key = p.UserID + ":unique-codes:raw-duplicate"
 		raw.ID = "raw-duplicate"
-		if _, err = db.Collection("rows").InsertOne(ctx, raw); !mongo.IsDuplicateKeyError(err) {
-			t.Fatalf("MongoDB unique index did not enforce the key: %v", err)
+		err = pgx.BeginFunc(ctx, pgdb, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO rows(storage_key,user_id,table_id,id,cells,key_hashes) VALUES (@key,@user,@table,@id,@cells,@hashes)`, pgx.NamedArgs{"key": raw.Key, "user": raw.UserID, "table": raw.TableID, "id": raw.ID, "cells": raw.Cells, "hashes": raw.KeyHashes})
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(ctx, `INSERT INTO row_keys(user_id,table_id,row_id,key_hash) SELECT @user,@table,@id,hash FROM unnest(@hashes::text[]) hash`, pgx.NamedArgs{"user": raw.UserID, "table": raw.TableID, "id": raw.ID, "hashes": raw.KeyHashes})
+			return err
+		})
+		if !postgres.IsUniqueViolation(err) {
+			t.Fatalf("PostgreSQL unique constraint did not enforce the key: %v", err)
+		}
+		var left int
+		if err = pgdb.QueryRow(ctx, `SELECT count(*) FROM rows WHERE storage_key=@key`, pgx.NamedArgs{"key": raw.Key}).Scan(&left); err != nil || left != 0 {
+			t.Fatalf("conflicting row escaped rollback: %d %v", left, err)
 		}
 		var workers sync.WaitGroup
 		failures := make(chan error, 2)
@@ -199,14 +214,17 @@ func testTableConstraints(t *testing.T, ctx context.Context, p principal.Princip
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := db.RunCommand(ctx, bson.D{{Key: "collMod", Value: "rows"}, {Key: "validator", Value: bson.M{"id": bson.M{"$ne": "partial-two"}}}}).Err(); err != nil {
+		if err := func() error {
+			_, e := pgdb.Exec(ctx, `ALTER TABLE rows ADD CONSTRAINT test_partial CHECK (id<>'partial-two')`)
+			return e
+		}(); err != nil {
 			t.Fatal(err)
 		}
 		partial, writeErr := s.Tables.Batch(ctx, p, tables.BatchInput{Ops: []tables.BatchOp{
 			{DB: "constraint-items", Upsert: &tables.RowUpsert{RowID: "partial-one", Cells: map[string]any{"entry": partialEntry.Entry.ID, "line": float64(1), "amount": "10"}}},
 			{DB: "constraint-items", Upsert: &tables.RowUpsert{RowID: "partial-two", Cells: map[string]any{"entry": partialEntry.Entry.ID, "line": float64(2), "amount": "2.50"}}},
 		}})
-		if err := db.RunCommand(ctx, bson.D{{Key: "collMod", Value: "rows"}, {Key: "validator", Value: bson.M{}}}).Err(); err != nil {
+		if err := func() error { _, e := pgdb.Exec(ctx, `ALTER TABLE rows DROP CONSTRAINT test_partial`); return e }(); err != nil {
 			t.Fatal(err)
 		}
 		if writeErr == nil || partial.RowsWritten != 1 || !partial.Partial || partial.EventID == "" {

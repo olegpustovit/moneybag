@@ -42,7 +42,10 @@ func (e *Engine) Functions() []Function {
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
 		}
-		return out[i].Signature < out[j].Signature
+		if out[i].Signature != out[j].Signature {
+			return out[i].Signature < out[j].Signature
+		}
+		return !out[i].Member && out[j].Member
 	})
 	return out
 }

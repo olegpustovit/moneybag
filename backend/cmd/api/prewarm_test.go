@@ -22,7 +22,7 @@ func (f warmFixture) Preview(_ context.Context, _ principal.Principal, id, _ str
 	return dashboard.Rendered{}, nil
 }
 func TestPrewarmDebouncesAndSkipsDrafts(t *testing.T) {
-	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewMongoRepository(nil)))
+	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewPostgresRepository(nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

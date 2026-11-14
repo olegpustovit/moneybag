@@ -3,6 +3,9 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
 
@@ -11,11 +14,10 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testTableReferences(t *testing.T, ctx context.Context, pa, pb principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testTableReferences(t *testing.T, ctx context.Context, pa, pb principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
+	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("table references", func(t *testing.T) {
 		own, err := s.Ledger.Entries(ctx, pa, ledger.EntriesInput{Limit: 1})
@@ -161,11 +163,11 @@ func testTableReferences(t *testing.T, ctx context.Context, pa, pb principal.Pri
 			t.Fatal(err)
 		}
 		orphan := tables.Row{Key: pa.UserID + ":ref-child:orphan", UserID: pa.UserID, TableID: "ref-child", ID: "orphan", Version: 1, Cells: map[string]any{"entry": "missing-entry", "account": "assets:missing_account", "target": "missing-row"}}
-		if _, err = db.Collection("rows").InsertOne(ctx, orphan); err != nil {
+		if _, err = insertRows(ctx, pgdb, orphan); err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(func() {
-			_, _ = db.Collection("rows").DeleteOne(context.Background(), bson.M{"_id": orphan.Key, "user_id": pa.UserID})
+			_, _ = pgdb.Exec(context.Background(), `DELETE FROM rows WHERE storage_key=@key AND user_id=@user`, pgx.NamedArgs{"key": orphan.Key, "user": pa.UserID})
 		})
 		broken, err := s.Tables.BrokenReferences(ctx, pa)
 		if err != nil || len(broken) != 3 {

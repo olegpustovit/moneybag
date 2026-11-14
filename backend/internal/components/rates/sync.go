@@ -9,14 +9,12 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/oklog/ulid/v2"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/safefetch"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 const (
@@ -41,16 +39,16 @@ func (s *Service) SetECBDataURL(base string) { s.urls.ecbData = base }
 
 // ProviderState is the persisted outcome of the latest sync for one user and provider.
 type ProviderState struct {
-	ID                  string `json:"-" bson:"_id"`
-	UserID              string `json:"-" bson:"user_id"`
-	Provider            string `json:"provider" bson:"provider"`
-	Status              string `json:"status" bson:"status"` // ok | error | skipped | never
-	LastAttempt         string `json:"last_attempt,omitempty" bson:"last_attempt,omitempty"`
-	LastSuccess         string `json:"last_success,omitempty" bson:"last_success,omitempty"`
-	Error               string `json:"error,omitempty" bson:"error,omitempty"`
-	ConsecutiveFailures int    `json:"consecutive_failures" bson:"consecutive_failures"`
-	NewestAt            string `json:"newest_at,omitempty" bson:"newest_at,omitempty"`
-	NewestValue         string `json:"newest_value,omitempty" bson:"newest_value,omitempty"`
+	ID                  string `json:"-" db:"id"`
+	UserID              string `json:"-" db:"user_id"`
+	Provider            string `json:"provider" db:"provider"`
+	Status              string `json:"status" db:"status"` // ok | error | skipped | never
+	LastAttempt         string `json:"last_attempt,omitempty" db:"last_attempt"`
+	LastSuccess         string `json:"last_success,omitempty" db:"last_success"`
+	Error               string `json:"error,omitempty" db:"error"`
+	ConsecutiveFailures int    `json:"consecutive_failures" db:"consecutive_failures"`
+	NewestAt            string `json:"newest_at,omitempty" db:"newest_at"`
+	NewestValue         string `json:"newest_value,omitempty" db:"newest_value"`
 }
 type SyncResult struct {
 	Written   []Quote         `json:"written"`
@@ -64,12 +62,13 @@ func (s *Service) SyncStatus(ctx context.Context, p principal.Principal) ([]Prov
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	cur, e := s.repo.db.Collection("rate_sync").Find(ctx, bson.M{"user_id": p.UserID})
+	const statusSQL = `SELECT * FROM rate_sync WHERE user_id=@user`
+	rows, e := s.repo.db.Query(ctx, statusSQL, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return nil, e
 	}
-	var have []ProviderState
-	if e = cur.All(ctx, &have); e != nil {
+	have, e := pgx.CollectRows(rows, pgx.RowToStructByName[ProviderState])
+	if e != nil {
 		return nil, e
 	}
 	out := []ProviderState{}
@@ -90,7 +89,9 @@ func (s *Service) track(ctx context.Context, p principal.Principal, provider str
 	now := time.Now().UTC().Format(time.RFC3339)
 	id := p.UserID + "|" + provider
 	st := ProviderState{ID: id, UserID: p.UserID, Provider: provider}
-	if e := s.repo.db.Collection("rate_sync").FindOne(ctx, bson.M{"_id": id}).Decode(&st); e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	if old, e := s.provState(ctx, p, provider); e == nil {
+		st = old
+	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
 	old := st
@@ -111,7 +112,12 @@ func (s *Service) track(ctx context.Context, p principal.Principal, provider str
 		}
 	}
 	write := func(tx context.Context) error {
-		_, err := s.repo.db.Collection("rate_sync").ReplaceOne(tx, bson.M{"_id": id}, st, options.Replace().SetUpsert(true))
+		const writeSQL = `INSERT INTO rate_sync (id,user_id,provider,status,last_attempt,last_success,error,consecutive_failures,newest_at,newest_value)
+ VALUES (@id,@user,@provider,@status,@attempt,@success,@error,@failures,@at,@value)
+ ON CONFLICT (id) DO UPDATE SET user_id=EXCLUDED.user_id, provider=EXCLUDED.provider,status=EXCLUDED.status,
+ last_attempt=EXCLUDED.last_attempt,last_success=EXCLUDED.last_success,error=EXCLUDED.error,
+ consecutive_failures=EXCLUDED.consecutive_failures,newest_at=EXCLUDED.newest_at,newest_value=EXCLUDED.newest_value`
+		_, err := s.repo.db.Exec(tx, writeSQL, pgx.NamedArgs{"id": st.ID, "user": st.UserID, "provider": st.Provider, "status": st.Status, "attempt": st.LastAttempt, "success": st.LastSuccess, "error": st.Error, "failures": st.ConsecutiveFailures, "at": st.NewestAt, "value": st.NewestValue})
 		return err
 	}
 	// shortcut: a rate_sync dashboard source shows attempt times up to a day old, upgrade if one needs them live.
@@ -159,33 +165,41 @@ func (s *Service) Sync(ctx context.Context, p principal.Principal, ecb, gold boo
 	return out, firstErr
 }
 func (s *Service) provState(ctx context.Context, p principal.Principal, provider string) (ProviderState, error) {
-	var st ProviderState
-	return st, s.repo.db.Collection("rate_sync").FindOne(ctx, bson.M{"_id": p.UserID + "|" + provider}).Decode(&st)
+	const stateSQL = `SELECT * FROM rate_sync WHERE id=@id`
+	rows, e := s.repo.db.Query(ctx, stateSQL, pgx.NamedArgs{"id": p.UserID + "|" + provider})
+	if e != nil {
+		return ProviderState{}, e
+	}
+	return pgx.CollectOneRow(rows, pgx.RowToStructByName[ProviderState])
 }
 func (s *Service) skip(ctx context.Context, p principal.Principal, provider string) error {
 	id := p.UserID + "|" + provider
 	if st, e := s.provState(ctx, p, provider); e == nil && st.Status == "skipped" {
 		return nil
-	} else if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	} else if e != nil && !errors.Is(e, pgx.ErrNoRows) {
 		return e
 	}
 	return s.audit.Workflow(ctx, func(tx context.Context) error {
 		return s.audit.Mutation(audit.RateOnly(tx), p, func(tx context.Context) error {
-			_, err := s.repo.db.Collection("rate_sync").UpdateOne(tx, bson.M{"_id": id}, bson.M{"$set": bson.M{"status": "skipped", "user_id": p.UserID, "provider": provider}}, options.UpdateOne().SetUpsert(true))
+			const skipSQL = `INSERT INTO rate_sync (id,user_id,provider,status) VALUES (@id,@user,@provider,'skipped')
+ ON CONFLICT (id) DO UPDATE SET status='skipped',user_id=EXCLUDED.user_id,provider=EXCLUDED.provider`
+			_, err := s.repo.db.Exec(tx, skipSQL, pgx.NamedArgs{"id": id, "user": p.UserID, "provider": provider})
 			return err
 		})
 	})
 }
 
 // existing indexes stored quotes by pair@at, whatever their source.
-func (s *Service) existing(ctx context.Context, p principal.Principal, filter bson.M) (map[string]Quote, error) {
-	filter["user_id"] = p.UserID
-	cur, e := s.repo.db.Collection("prices").Find(ctx, filter)
+func (s *Service) existing(ctx context.Context, p principal.Principal, from, at string, pairs []string) (map[string]Quote, error) {
+	const existingSQL = `SELECT ` + quoteColumns + ` FROM prices WHERE user_id=@user
+    AND (@from='' OR at>=NULLIF(@from,'')::timestamptz) AND (@at='' OR at=NULLIF(@at,'')::timestamptz)
+    AND (@pairs::text[] IS NULL OR pair=ANY(@pairs::text[]))`
+	rows, e := s.repo.db.Query(ctx, existingSQL, pgx.NamedArgs{"user": p.UserID, "from": from, "at": at, "pairs": pairs})
 	if e != nil {
 		return nil, e
 	}
-	var qs []Quote
-	if e = cur.All(ctx, &qs); e != nil {
+	qs, e := pgx.CollectRows(rows, pgx.RowToStructByName[Quote])
+	if e != nil {
 		return nil, e
 	}
 	have := map[string]Quote{}
@@ -224,7 +238,7 @@ func (s *Service) refreshECB(ctx context.Context, p principal.Principal) ([]Quot
 	for _, q := range quotes {
 		oldest = min(oldest, q.At)
 	}
-	have, e := s.existing(ctx, p, bson.M{"at": bson.M{"$gte": oldest}})
+	have, e := s.existing(ctx, p, oldest, "", nil)
 	if e != nil {
 		return nil, e
 	}
@@ -265,7 +279,7 @@ func (s *Service) refreshGold(ctx context.Context, p principal.Principal, url, s
 		return nil, fmt.Errorf("gold price not representable: %v %v", e1, e2)
 	}
 	ts := at.UTC().Format(time.RFC3339)
-	have, e := s.existing(ctx, p, bson.M{"at": ts, "pair": bson.M{"$in": []string{"XAU/USD", "XAU_g/USD"}}})
+	have, e := s.existing(ctx, p, "", ts, []string{"XAU/USD", "XAU_g/USD"})
 	if e != nil {
 		return nil, e
 	}
@@ -352,7 +366,7 @@ func (s *Service) Stale(ctx context.Context, p principal.Principal, now time.Tim
 		if n := weekdaysSince(t, now); n > 4 {
 			out = append(out, fmt.Sprintf("EUR/USD newest quote %s is %d weekdays old", q.At, n))
 		}
-	} else if !errors.Is(e, mongo.ErrNoDocuments) {
+	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
 	if q, e := s.quote(ctx, p, "XAU", "USD", at); e == nil {
@@ -360,7 +374,7 @@ func (s *Service) Stale(ctx context.Context, p principal.Principal, now time.Tim
 		if now.Sub(t) > 72*time.Hour {
 			out = append(out, fmt.Sprintf("XAU/USD newest quote %s is older than 3 days", q.At))
 		}
-	} else if !errors.Is(e, mongo.ErrNoDocuments) {
+	} else if !errors.Is(e, pgx.ErrNoRows) {
 		return nil, e
 	}
 	return out, nil

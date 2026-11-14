@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"net/http"
 	"net/url"
 	"strings"
@@ -20,11 +23,9 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
-func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.Principal, services mcpserver.Services, db *mongo.Database) {
+func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.Principal, services mcpserver.Services, db *pgxpool.Pool) {
 	t.Helper()
 	user, err := services.Identity.User(ctx, p.UserID)
 	if err != nil {
@@ -453,19 +454,23 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatal("revoked editor evaluate", code)
 		}
 	}
-	_, err = db.Collection("oauth_grants").InsertMany(ctx, []any{
-		bson.M{"_id": "activity-old", "user_id": p.UserID, "client_id": "activity-client", "client_name": "Old name", "created_at": time.Unix(1, 0), "revoked": true, "expires_at": time.Unix(2, 0)},
-		bson.M{"_id": "activity-new", "user_id": p.UserID, "client_id": "activity-client", "client_name": "Former agent", "created_at": time.Unix(3, 0), "revoked": true, "expires_at": time.Unix(4, 0)},
-		bson.M{"_id": "activity-blank", "user_id": p.UserID, "client_id": "activity-client", "client_name": "", "created_at": time.Unix(5, 0), "revoked": true, "expires_at": time.Unix(6, 0)},
-		bson.M{"_id": "activity-expired", "user_id": p.UserID, "client_id": "expired-client", "client_name": "Expired agent", "created_at": time.Unix(4, 0), "revoked": false, "expires_at": time.Unix(6, 0)},
-		bson.M{"_id": "activity-other", "user_id": "other-user", "client_id": "private-client", "client_name": "Private name", "created_at": time.Unix(7, 0)},
-		bson.M{"_id": "activity-overlap", "user_id": "other-user", "client_id": "activity-client", "client_name": "Other user's name", "created_at": time.Unix(8, 0)},
-	})
-	if err != nil {
-		t.Fatal(err)
+	pgdb := pgtest.New(t)
+	grants := []oauth.Grant{
+		{ID: "activity-old", UserID: p.UserID, ClientID: "activity-client", ClientName: "Old name", CreatedAt: time.Unix(1, 0), Revoked: true, ExpiresAt: time.Unix(2, 0)},
+		{ID: "activity-new", UserID: p.UserID, ClientID: "activity-client", ClientName: "Former agent", CreatedAt: time.Unix(3, 0), Revoked: true, ExpiresAt: time.Unix(4, 0)},
+		{ID: "activity-blank", UserID: p.UserID, ClientID: "activity-client", ClientName: "", CreatedAt: time.Unix(5, 0), Revoked: true, ExpiresAt: time.Unix(6, 0)},
+		{ID: "activity-expired", UserID: p.UserID, ClientID: "expired-client", ClientName: "Expired agent", CreatedAt: time.Unix(4, 0), Revoked: false, ExpiresAt: time.Unix(6, 0)},
+		{ID: "activity-other", UserID: "other-user", ClientID: "private-client", ClientName: "Private name", CreatedAt: time.Unix(7, 0)},
+		{ID: "activity-overlap", UserID: "other-user", ClientID: "activity-client", ClientName: "Other user's name", CreatedAt: time.Unix(8, 0)},
+	}
+	for _, g := range grants {
+		_, err = pgdb.Exec(ctx, `INSERT INTO oauth_grants(id,user_id,client_id,client_name,created_at,revoked,expires_at) VALUES (@id,@user,@client,@name,@created,@revoked,@expires)`, pgx.NamedArgs{"id": g.ID, "user": g.UserID, "client": g.ClientID, "name": g.ClientName, "created": g.CreatedAt, "revoked": g.Revoked, "expires": g.ExpiresAt})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() {
-		_, _ = db.Collection("oauth_grants").DeleteMany(context.Background(), bson.M{"_id": bson.M{"$in": []string{"activity-old", "activity-new", "activity-blank", "activity-expired", "activity-other", "activity-overlap"}}})
+		_, _ = pgdb.Exec(context.Background(), `DELETE FROM oauth_grants WHERE id=ANY(@ids::text[])`, pgx.NamedArgs{"ids": []string{"activity-old", "activity-new", "activity-blank", "activity-expired", "activity-other", "activity-overlap"}})
 	})
 	beforeImports, err := services.Imports.StagedCount(ctx, p)
 	if err != nil {
@@ -475,15 +480,13 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 	if err != nil {
 		t.Fatal(err)
 	}
-	batches := make([]any, 0, 105)
-	for i := 0; i < 102; i++ {
-		batches = append(batches, bson.M{"_id": fmt.Sprintf("navigation-count-%d", i), "user_id": p.UserID, "status": "ready"})
-	}
-	batches = append(batches, bson.M{"_id": "navigation-staging", "user_id": p.UserID, "status": "staging"}, bson.M{"_id": "navigation-committing", "user_id": p.UserID, "status": "committing"}, bson.M{"_id": "navigation-committed", "user_id": p.UserID, "status": "committed"}, bson.M{"_id": "navigation-other", "user_id": "other-user", "status": "ready"})
-	if _, err = db.Collection("import_batches").InsertMany(ctx, batches); err != nil {
+	if _, err = pgdb.Exec(ctx, `INSERT INTO import_batches(id,user_id,status) SELECT 'navigation-count-'||i,@user,'ready' FROM generate_series(0,101) i`, pgx.NamedArgs{"user": p.UserID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = db.Collection("discrepancies").InsertMany(ctx, []any{bson.M{"_id": "navigation-open", "user_id": p.UserID, "status": "open"}, bson.M{"_id": "navigation-archived", "user_id": p.UserID, "status": "open", "archived": true}, bson.M{"_id": "navigation-resolved", "user_id": p.UserID, "status": "resolved"}, bson.M{"_id": "navigation-other", "user_id": "other-user", "status": "open"}}); err != nil {
+	if _, err = pgdb.Exec(ctx, `INSERT INTO import_batches(id,user_id,status) VALUES ('navigation-staging',@user,'staging'),('navigation-committing',@user,'committing'),('navigation-committed',@user,'committed'),('navigation-other','other-user','ready')`, pgx.NamedArgs{"user": p.UserID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pgdb.Exec(ctx, `INSERT INTO discrepancies(id,user_id,status,archived) VALUES ('navigation-open',@user,'open',false),('navigation-archived',@user,'open',true),('navigation-resolved',@user,'resolved',false),('navigation-other','other-user','open',false)`, pgx.NamedArgs{"user": p.UserID}); err != nil {
 		t.Fatal(err)
 	}
 	for path, want := range map[string]int64{"/api/imports/count": beforeImports + 104, "/api/reconcile/count": beforeDiscrepancies + 1} {
@@ -492,10 +495,11 @@ func testSPAAPI(t *testing.T, ctx context.Context, endpoint string, p principal.
 			t.Fatalf("%s: %d %v, want %d", path, status, body, want)
 		}
 	}
-	for _, collection := range []string{"import_batches", "discrepancies"} {
-		if _, err = db.Collection(collection).DeleteMany(ctx, bson.M{"_id": bson.M{"$regex": "^navigation-"}}); err != nil {
-			t.Fatal(err)
-		}
+	if _, err = pgdb.Exec(ctx, `DELETE FROM discrepancies WHERE id LIKE 'navigation-%'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pgdb.Exec(ctx, `DELETE FROM import_batches WHERE id LIKE 'navigation-%'`); err != nil {
+		t.Fatal(err)
 	}
 	for _, path := range []string{"/api/session", "/api/imports", "/api/imports/count", "/api/reconcile/count", "/api/settings", "/api/activity/agents", "/api/expr/catalog"} {
 		status, _, headers := request("GET", path, nil, false, false, true)

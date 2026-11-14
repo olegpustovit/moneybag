@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"regexp"
 	"slices"
 	"strings"
@@ -21,21 +21,21 @@ import (
 )
 
 type Metric struct {
-	Key         string   `json:"-" bson:"_id"`
-	UserID      string   `json:"-" bson:"user_id"`
-	ID          string   `json:"id" bson:"id" jsonschema:"lowercase letters, digits, _ or -"`
-	Label       string   `json:"label" bson:"label" jsonschema:"human name for sentences and titles"`
-	Description string   `json:"description,omitempty" bson:"description,omitempty"`
-	Unit        string   `json:"unit" bson:"unit" jsonschema:"eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)"`
-	Kind        string   `json:"kind" bson:"kind" jsonschema:"flow (period sum), balance (holdings at period end) or rate (flow per month, or per)"`
-	Additivity  string   `json:"additivity" bson:"additivity" jsonschema:"sum, last, avg or none; how the total folds over time"`
-	Per         string   `json:"per,omitempty" bson:"per,omitempty" jsonschema:"day, week or month (default); unit a rate or avg averages over"`
-	Estimates   string   `json:"estimates" bson:"estimates" jsonschema:"include, exclude or split; how estimated accounts count"`
-	Accounts    []string `json:"accounts,omitempty" bson:"accounts,omitempty" jsonschema:"account id prefixes, such as expenses:"`
-	Exclude     []string `json:"exclude,omitempty" bson:"exclude,omitempty" jsonschema:"account id prefixes to leave out"`
-	Sign        int      `json:"sign,omitempty" bson:"sign,omitempty" jsonschema:"1 or -1; -1 shows income, stored as negative postings, as positive"`
-	Where       string   `json:"where,omitempty" bson:"where,omitempty" jsonschema:"escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)"`
-	Dimensions  []string `json:"dimensions,omitempty" bson:"dimensions,omitempty" jsonschema:"dimensions it splits by; the first is the default"`
+	Key         string   `json:"-" db:"storage_key"`
+	UserID      string   `json:"-" db:"user_id"`
+	ID          string   `json:"id" db:"id" jsonschema:"lowercase letters, digits, _ or -"`
+	Label       string   `json:"label" db:"label" jsonschema:"human name for sentences and titles"`
+	Description string   `json:"description,omitempty" db:"description"`
+	Unit        string   `json:"unit" db:"unit" jsonschema:"eur, usd (at each entry's date), int (count of postings), pct, mo or days (native sum)"`
+	Kind        string   `json:"kind" db:"kind" jsonschema:"flow (period sum), balance (holdings at period end) or rate (flow per month, or per)"`
+	Additivity  string   `json:"additivity" db:"additivity" jsonschema:"sum, last, avg or none; how the total folds over time"`
+	Per         string   `json:"per,omitempty" db:"per" jsonschema:"day, week or month (default); unit a rate or avg averages over"`
+	Estimates   string   `json:"estimates" db:"estimates" jsonschema:"include, exclude or split; how estimated accounts count"`
+	Accounts    []string `json:"accounts,omitempty" db:"accounts" jsonschema:"account id prefixes, such as expenses:"`
+	Exclude     []string `json:"exclude,omitempty" db:"exclude" jsonschema:"account id prefixes to leave out"`
+	Sign        int      `json:"sign,omitempty" db:"sign" jsonschema:"1 or -1; -1 shows income, stored as negative postings, as positive"`
+	Where       string   `json:"where,omitempty" db:"where" jsonschema:"escape hatch: boolean CEL over row (date, payee, tags, account, class, groups, commodity, amount, value_eur, value_usd, estimated)"`
+	Dimensions  []string `json:"dimensions,omitempty" db:"dimensions" jsonschema:"dimensions it splits by; the first is the default"`
 }
 type LabelInput struct {
 	Kind  string `json:"kind" jsonschema:"account, category, pot, tag, dimension or series"`
@@ -43,52 +43,52 @@ type LabelInput struct {
 	Label string `json:"label"`
 }
 type Label struct {
-	Doc   string `json:"-" bson:"_id"`
-	User  string `json:"-" bson:"user_id"`
-	Kind  string `json:"kind" bson:"kind"`
-	Key   string `json:"key" bson:"key"`
-	Label string `json:"label" bson:"label"`
+	Doc   string `json:"-" db:"storage_key"`
+	User  string `json:"-" db:"user_id"`
+	Kind  string `json:"kind" db:"kind"`
+	Key   string `json:"key" db:"key"`
+	Label string `json:"label" db:"label"`
 }
 type PayeeAlias struct {
-	Key     string `json:"-" bson:"_id"`
-	UserID  string `json:"-" bson:"user_id"`
-	Pattern string `json:"pattern" bson:"pattern" jsonschema:"case-insensitive RE2 regular expression over the bank's payee text"`
-	Name    string `json:"name" bson:"name"`
-	Note    string `json:"note,omitempty" bson:"note,omitempty"`
+	Key     string `json:"-" db:"storage_key"`
+	UserID  string `json:"-" db:"user_id"`
+	Pattern string `json:"pattern" db:"pattern" jsonschema:"case-insensitive RE2 regular expression over the bank's payee text"`
+	Name    string `json:"name" db:"name"`
+	Note    string `json:"note,omitempty" db:"note"`
 }
 type Annotation struct {
-	Key     string `json:"-" bson:"_id"`
-	UserID  string `json:"-" bson:"user_id"`
-	ID      string `json:"id" bson:"id"`
-	Label   string `json:"label" bson:"label"`
-	From    string `json:"from,omitempty" bson:"from,omitempty" jsonschema:"YYYY-MM-DD; may be omitted when tag_rule supplies the dates"`
-	To      string `json:"to,omitempty" bson:"to,omitempty"`
-	TagRule string `json:"tag_rule,omitempty" bson:"tag_rule,omitempty" jsonschema:"tag, or tag prefix ending in *, such as trip:*; its entries give the dates"`
-	Kind    string `json:"kind,omitempty" bson:"kind,omitempty" jsonschema:"note, trip or event"`
+	Key     string `json:"-" db:"storage_key"`
+	UserID  string `json:"-" db:"user_id"`
+	ID      string `json:"id" db:"id"`
+	Label   string `json:"label" db:"label"`
+	From    string `json:"from,omitempty" db:"from" jsonschema:"YYYY-MM-DD; may be omitted when tag_rule supplies the dates"`
+	To      string `json:"to,omitempty" db:"to"`
+	TagRule string `json:"tag_rule,omitempty" db:"tag_rule" jsonschema:"tag, or tag prefix ending in *, such as trip:*; its entries give the dates"`
+	Kind    string `json:"kind,omitempty" db:"kind" jsonschema:"note, trip or event"`
 }
 type NavItem struct {
-	ID        string `json:"id" bson:"id"`
-	Label     string `json:"label" bson:"label"`
-	Icon      string `json:"icon,omitempty" bson:"icon,omitempty"`
-	Dashboard string `json:"dashboard,omitempty" bson:"dashboard,omitempty" jsonschema:"dashboard id this item opens; give this or route"`
-	Route     string `json:"route,omitempty" bson:"route,omitempty" jsonschema:"app path this item opens, such as /ledger; give this or dashboard"`
+	ID        string `json:"id"`
+	Label     string `json:"label"`
+	Icon      string `json:"icon,omitempty"`
+	Dashboard string `json:"dashboard,omitempty" jsonschema:"dashboard id this item opens; give this or route"`
+	Route     string `json:"route,omitempty" jsonschema:"app path this item opens, such as /ledger; give this or dashboard"`
 }
 type navDoc struct {
-	Key    string    `json:"-" bson:"_id"`
-	UserID string    `json:"-" bson:"user_id"`
-	Items  []NavItem `json:"items" bson:"items"`
+	Key    string    `json:"-" db:"storage_key"`
+	UserID string    `json:"-" db:"user_id"`
+	Items  []NavItem `json:"items" db:"items"`
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	audit  *audit.Service
 	ledger *ledger.Service
 	rates  *rates.Service
 	expr   *expressions.Engine
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, l *ledger.Service, q *rates.Service, a *audit.Service, e *expressions.Engine) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, l *ledger.Service, q *rates.Service, a *audit.Service, e *expressions.Engine) *Service {
 	return &Service{r, a, l, q, e}
 }
 
@@ -154,29 +154,34 @@ func (s *Service) validate(m *Metric) error {
 	return nil
 }
 
-func read[T any](ctx context.Context, c *mongo.Collection, key string) (*T, error) {
-	var out T
-	e := c.FindOne(ctx, bson.M{"_id": key}).Decode(&out)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+func read[T any](ctx context.Context, db *pgxpool.Pool, query, key string) (*T, error) {
+	rows, err := db.Query(ctx, query, pgx.NamedArgs{"key": key})
+	if err != nil {
+		return nil, err
+	}
+	out, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[T])
+	if postgres.IsNotFound(err) {
 		return nil, nil
 	}
-	if e != nil {
-		return nil, e
+	if err != nil {
+		return nil, err
 	}
 	return &out, nil
 }
-
-func list[T any](ctx context.Context, c *mongo.Collection, user, sort string) ([]T, error) {
-	cur, e := c.Find(ctx, bson.M{"user_id": user}, options.Find().SetSort(bson.D{{Key: sort, Value: 1}}).SetLimit(1001))
-	if e != nil {
-		return nil, e
+func list[T any](ctx context.Context, db *pgxpool.Pool, query, coll, user string) ([]T, error) {
+	rows, err := db.Query(ctx, query, pgx.NamedArgs{"user": user})
+	if err != nil {
+		return nil, err
 	}
-	out := []T{}
-	if e = cur.All(ctx, &out); e != nil {
-		return nil, e
+	out, err := pgx.CollectRows(rows, pgx.RowToStructByName[T])
+	if err != nil {
+		return nil, err
 	}
 	if len(out) > 1000 {
-		return nil, fmt.Errorf("%s exceeds 1000 records", c.Name())
+		return nil, fmt.Errorf("%s exceeds 1000 records", coll)
+	}
+	if out == nil {
+		out = []T{}
 	}
 	return out, nil
 }
@@ -184,7 +189,26 @@ func list[T any](ctx context.Context, c *mongo.Collection, user, sort string) ([
 // put replaces one owned document; its _id already embeds the owner, so a key can never reach another user's record.
 func (s *Service) put(ctx context.Context, p principal.Principal, tool, coll, target, key, summary string, before, next any) error {
 	_, e := s.audit.Write(audit.WithSummary(ctx, summary), p, tool, audit.Target{Collection: coll, ID: target}, "", before, next, func(tx context.Context) error {
-		_, e := s.repo.db.Collection(coll).ReplaceOne(tx, bson.M{"_id": key, "user_id": p.UserID}, next, options.Replace().SetUpsert(true))
+		var e error
+		switch coll {
+		case "metrics":
+			v := next.(Metric)
+			_, e = s.repo.db.Exec(tx, `INSERT INTO metrics(storage_key,user_id,id,label,description,unit,kind,additivity,per,estimates,accounts,exclude,sign,"where",dimensions) VALUES (@key,@user,@id,@label,@description,@unit,@kind,@additivity,@per,@estimates,@accounts,@exclude,@sign,@where,@dimensions) ON CONFLICT(storage_key) DO UPDATE SET id=EXCLUDED.id,label=EXCLUDED.label,description=EXCLUDED.description,unit=EXCLUDED.unit,kind=EXCLUDED.kind,additivity=EXCLUDED.additivity,per=EXCLUDED.per,estimates=EXCLUDED.estimates,accounts=EXCLUDED.accounts,exclude=EXCLUDED.exclude,sign=EXCLUDED.sign,"where"=EXCLUDED."where",dimensions=EXCLUDED.dimensions WHERE metrics.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": key, "user": p.UserID, "id": v.ID, "label": v.Label, "description": v.Description, "unit": v.Unit, "kind": v.Kind, "additivity": v.Additivity, "per": v.Per, "estimates": v.Estimates, "accounts": v.Accounts, "exclude": v.Exclude, "sign": v.Sign, "where": v.Where, "dimensions": v.Dimensions})
+		case "labels":
+			v := next.(Label)
+			_, e = s.repo.db.Exec(tx, `INSERT INTO labels(storage_key,user_id,kind,key,label) VALUES (@key,@user,@kind,@logical,@label) ON CONFLICT(storage_key) DO UPDATE SET kind=EXCLUDED.kind,key=EXCLUDED.key,label=EXCLUDED.label WHERE labels.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": key, "user": p.UserID, "kind": v.Kind, "logical": v.Key, "label": v.Label})
+		case "payee_aliases":
+			v := next.(PayeeAlias)
+			_, e = s.repo.db.Exec(tx, `INSERT INTO payee_aliases(storage_key,user_id,pattern,name,note) VALUES (@key,@user,@pattern,@name,@note) ON CONFLICT(storage_key) DO UPDATE SET pattern=EXCLUDED.pattern,name=EXCLUDED.name,note=EXCLUDED.note WHERE payee_aliases.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": key, "user": p.UserID, "pattern": v.Pattern, "name": v.Name, "note": v.Note})
+		case "annotations":
+			v := next.(Annotation)
+			_, e = s.repo.db.Exec(tx, `INSERT INTO annotations(storage_key,user_id,id,label,"from","to",tag_rule,kind) VALUES (@key,@user,@id,@label,@from,@to,@rule,@kind) ON CONFLICT(storage_key) DO UPDATE SET id=EXCLUDED.id,label=EXCLUDED.label,"from"=EXCLUDED."from","to"=EXCLUDED."to",tag_rule=EXCLUDED.tag_rule,kind=EXCLUDED.kind WHERE annotations.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": key, "user": p.UserID, "id": v.ID, "label": v.Label, "from": v.From, "to": v.To, "rule": v.TagRule, "kind": v.Kind})
+		case "nav":
+			v := next.(navDoc)
+			_, e = s.repo.db.Exec(tx, `INSERT INTO nav(storage_key,user_id,items) VALUES (@key,@user,COALESCE(@items::jsonb,'null'::jsonb)) ON CONFLICT(storage_key) DO UPDATE SET items=EXCLUDED.items WHERE nav.user_id=EXCLUDED.user_id`, pgx.NamedArgs{"key": key, "user": p.UserID, "items": v.Items})
+		default:
+			return fmt.Errorf("unknown semantic collection %q", coll)
+		}
 		return e
 	})
 	return e
@@ -192,7 +216,22 @@ func (s *Service) put(ctx context.Context, p principal.Principal, tool, coll, ta
 
 func (s *Service) drop(ctx context.Context, p principal.Principal, tool, coll, target, key, summary string, before any) error {
 	_, e := s.audit.Write(audit.WithSummary(ctx, summary), p, tool, audit.Target{Collection: coll, ID: target}, "", before, nil, func(tx context.Context) error {
-		_, e := s.repo.db.Collection(coll).DeleteOne(tx, bson.M{"_id": key, "user_id": p.UserID})
+		var query string
+		switch coll {
+		case "metrics":
+			query = `DELETE FROM metrics WHERE storage_key=@key AND user_id=@user`
+		case "labels":
+			query = `DELETE FROM labels WHERE storage_key=@key AND user_id=@user`
+		case "payee_aliases":
+			query = `DELETE FROM payee_aliases WHERE storage_key=@key AND user_id=@user`
+		case "annotations":
+			query = `DELETE FROM annotations WHERE storage_key=@key AND user_id=@user`
+		case "nav":
+			query = `DELETE FROM nav WHERE storage_key=@key AND user_id=@user`
+		default:
+			return fmt.Errorf("unknown semantic collection %q", coll)
+		}
+		_, e := s.repo.db.Exec(tx, query, pgx.NamedArgs{"key": key, "user": p.UserID})
 		return e
 	})
 	return e
@@ -208,7 +247,7 @@ func (s *Service) UpsertMetric(ctx context.Context, p principal.Principal, m Met
 	m.UserID, m.Key = p.UserID, p.UserID+":"+m.ID
 	summary := "Defined the " + m.Label + " metric"
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		old, e := read[Metric](tx, s.repo.db.Collection("metrics"), m.Key)
+		old, e := read[Metric](tx, s.repo.db, `SELECT * FROM metrics WHERE storage_key=@key`, m.Key)
 		if e != nil {
 			return e
 		}
@@ -224,14 +263,14 @@ func (s *Service) Metrics(ctx context.Context, p principal.Principal) ([]Metric,
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	return list[Metric](ctx, s.repo.db.Collection("metrics"), p.UserID, "id")
+	return list[Metric](ctx, s.repo.db, `SELECT * FROM metrics WHERE user_id=@user ORDER BY "id" LIMIT 1001`, "metrics", p.UserID)
 }
 
 func (s *Service) Metric(ctx context.Context, p principal.Principal, id string) (Metric, error) {
 	if e := p.Require("ledger:read"); e != nil {
 		return Metric{}, e
 	}
-	m, e := read[Metric](ctx, s.repo.db.Collection("metrics"), p.UserID+":"+id)
+	m, e := read[Metric](ctx, s.repo.db, `SELECT * FROM metrics WHERE storage_key=@key`, p.UserID+":"+id)
 	if e != nil {
 		return Metric{}, e
 	}
@@ -253,7 +292,7 @@ func (s *Service) SetLabel(ctx context.Context, p principal.Principal, in LabelI
 	}
 	l := Label{Doc: p.UserID + ":" + in.Kind + ":" + in.Key, User: p.UserID, Kind: in.Kind, Key: in.Key, Label: in.Label}
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		old, e := read[Label](tx, s.repo.db.Collection("labels"), l.Doc)
+		old, e := read[Label](tx, s.repo.db, `SELECT * FROM labels WHERE storage_key=@key`, l.Doc)
 		if e != nil {
 			return e
 		}
@@ -267,7 +306,7 @@ func (s *Service) Labels(ctx context.Context, p principal.Principal) (map[string
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	rows, e := list[Label](ctx, s.repo.db.Collection("labels"), p.UserID, "key")
+	rows, e := list[Label](ctx, s.repo.db, `SELECT * FROM labels WHERE user_id=@user ORDER BY "key" LIMIT 1001`, "labels", p.UserID)
 	if e != nil {
 		return nil, e
 	}
@@ -290,7 +329,7 @@ func (s *Service) UpsertAlias(ctx context.Context, p principal.Principal, a Paye
 	}
 	a.UserID, a.Key = p.UserID, p.UserID+":"+a.Pattern
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		old, e := read[PayeeAlias](tx, s.repo.db.Collection("payee_aliases"), a.Key)
+		old, e := read[PayeeAlias](tx, s.repo.db, `SELECT * FROM payee_aliases WHERE storage_key=@key`, a.Key)
 		if e != nil {
 			return e
 		}
@@ -320,7 +359,7 @@ func (s *Service) UpsertAnnotation(ctx context.Context, p principal.Principal, a
 	}
 	a.UserID, a.Key = p.UserID, p.UserID+":"+a.ID
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		old, e := read[Annotation](tx, s.repo.db.Collection("annotations"), a.Key)
+		old, e := read[Annotation](tx, s.repo.db, `SELECT * FROM annotations WHERE storage_key=@key`, a.Key)
 		if e != nil {
 			return e
 		}
@@ -351,7 +390,7 @@ func (s *Service) SetNav(ctx context.Context, p principal.Principal, items []Nav
 	}
 	doc := navDoc{Key: p.UserID, UserID: p.UserID, Items: items}
 	e := s.audit.Workflow(ctx, func(tx context.Context) error {
-		old, e := read[navDoc](tx, s.repo.db.Collection("nav"), doc.Key)
+		old, e := read[navDoc](tx, s.repo.db, `SELECT * FROM nav WHERE storage_key=@key`, doc.Key)
 		if e != nil {
 			return e
 		}
@@ -365,7 +404,7 @@ func (s *Service) Nav(ctx context.Context, p principal.Principal) ([]NavItem, er
 	if e := p.Require("ledger:read"); e != nil {
 		return nil, e
 	}
-	doc, e := read[navDoc](ctx, s.repo.db.Collection("nav"), p.UserID)
+	doc, e := read[navDoc](ctx, s.repo.db, `SELECT * FROM nav WHERE storage_key=@key`, p.UserID)
 	if e != nil || doc == nil {
 		return nil, e
 	}

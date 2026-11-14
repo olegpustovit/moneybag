@@ -3,60 +3,42 @@ package integration
 import (
 	"context"
 	"errors"
-	"net/url"
-	"os"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
+	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"reflect"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
-	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/event"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestBearerOneRead(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
+	db := pgtest.New(t)
+	ctx := context.Background()
 	var reads atomic.Int64
-	client, err := mongo.Connect(options.Client().ApplyURI(uri).SetMonitor(&event.CommandMonitor{Started: func(_ context.Context, e *event.CommandStartedEvent) {
-		if e.CommandName == "find" || e.CommandName == "aggregate" || e.CommandName == "getMore" || e.CommandName == "killCursors" {
-			reads.Add(1)
-		}
-	}}))
+	config := db.Config().Copy()
+	config.ConnConfig.Tracer = sqlQueryCounter{reads: &reads}
+	traced, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx := context.Background()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_bearer")
-	if err := db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(context.Background()); _ = client.Disconnect(context.Background()) })
+	t.Cleanup(traced.Close)
 	const user = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	const resource = "https://example.test/mcp"
-	future, past := time.Now().Add(time.Hour), time.Now().Add(-time.Hour)
-	if _, err := db.Collection("users").InsertOne(ctx, bson.M{"_id": user}); err != nil {
-		t.Fatal(err)
+	future, past := time.Now().Add(time.Hour).UTC().Truncate(time.Millisecond), time.Now().Add(-time.Hour).UTC().Truncate(time.Millisecond)
+	exec := func(query string, args pgx.NamedArgs) {
+		t.Helper()
+		if _, err := db.Exec(ctx, query, args); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := db.Collection("oauth_grants").InsertOne(ctx, bson.M{"_id": "grant", "user_id": user, "client_id": "agent", "resource": resource, "scopes": bson.A{"ledger:read"}, "revoked": false, "expires_at": future}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Collection("oauth_tokens").InsertOne(ctx, bson.M{"_id": identity.Hash("token"), "grant_id": "grant", "access_expires_at": future}); err != nil {
-		t.Fatal(err)
-	}
-	service := oauth.NewService(oauth.NewMongoRepository(db), identity.NewService(identity.NewMongoRepository(db)), "https://example.test")
+	exec(`INSERT INTO users(id) VALUES (@user)`, pgx.NamedArgs{"user": user})
+	exec(`INSERT INTO oauth_grants(id,user_id,client_id,resource,scopes,revoked,expires_at) VALUES ('grant',@user,'agent',@resource,ARRAY['ledger:read'],false,@future)`, pgx.NamedArgs{"user": user, "resource": resource, "future": future})
+	exec(`INSERT INTO oauth_tokens(id,grant_id,access_expires_at) VALUES (@hash,'grant',@future)`, pgx.NamedArgs{"hash": identity.Hash("token"), "future": future})
+	service := oauth.NewService(oauth.NewPostgresRepository(traced), identity.NewService(identity.NewPostgresRepository(db)), "https://example.test")
 	check := func(raw, audience string, want error) principal.Principal {
 		t.Helper()
 		reads.Store(0)
@@ -79,45 +61,38 @@ func TestBearerOneRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	check("token", resource, oauth.ErrAgentsSuspended)
-	check("wrong", resource, principal.ErrForbidden) // A bad token learns nothing about the stop.
+	check("wrong", resource, principal.ErrForbidden)
 	if err := service.SetSuspended(ctx, user, false); err != nil {
 		t.Fatal(err)
 	}
 	check("token", resource, nil)
-	update := func(collection string, filter bson.M, update bson.M) {
-		t.Helper()
-		if _, err := db.Collection(collection).UpdateOne(ctx, filter, update); err != nil {
-			t.Fatal(err)
+	exec(`UPDATE oauth_grants SET revoked=true WHERE id='grant'`, nil)
+	check("token", resource, principal.ErrForbidden)
+	exec(`UPDATE oauth_grants SET revoked=false,expires_at=@past WHERE id='grant'`, pgx.NamedArgs{"past": past})
+	check("token", resource, principal.ErrForbidden)
+	exec(`UPDATE oauth_grants SET expires_at=@future WHERE id='grant'`, pgx.NamedArgs{"future": future})
+	exec(`UPDATE oauth_tokens SET access_expires_at=@past WHERE id=@hash`, pgx.NamedArgs{"past": past, "hash": identity.Hash("token")})
+	check("token", resource, principal.ErrForbidden)
+	exec(`UPDATE oauth_tokens SET access_expires_at=@future,grant_id='missing' WHERE id=@hash`, pgx.NamedArgs{"future": future, "hash": identity.Hash("token")})
+	check("token", resource, principal.ErrForbidden)
+	exec(`UPDATE oauth_tokens SET grant_id='grant' WHERE id=@hash`, pgx.NamedArgs{"hash": identity.Hash("token")})
+	// The old BSON malformed-field fixtures are refused at the SQL write boundary.
+	for _, tc := range []struct {
+		query string
+		args  pgx.NamedArgs
+	}{
+		{`UPDATE oauth_grants SET revoked=NULL WHERE id='grant'`, nil},
+		{`UPDATE oauth_tokens SET grant_id=@value WHERE id=@hash`, pgx.NamedArgs{"value": []string{"grant"}, "hash": identity.Hash("token")}},
+		{`UPDATE oauth_tokens SET access_expires_at=@value WHERE id=@hash`, pgx.NamedArgs{"value": []time.Time{future}, "hash": identity.Hash("token")}},
+		{`UPDATE oauth_tokens SET used=@value WHERE id=@hash`, pgx.NamedArgs{"value": []bool{false}, "hash": identity.Hash("token")}},
+	} {
+		if _, err := db.Exec(ctx, tc.query, tc.args); err == nil {
+			t.Fatalf("malformed authentication fixture accepted: %s", tc.query)
 		}
+		check("token", resource, nil)
 	}
-	grant := bson.M{"_id": "grant"}
-	tok := bson.M{"_id": identity.Hash("token")}
-	update("oauth_grants", grant, bson.M{"$set": bson.M{"revoked": true}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_grants", grant, bson.M{"$set": bson.M{"revoked": false, "expires_at": past}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_grants", grant, bson.M{"$set": bson.M{"expires_at": future}, "$unset": bson.M{"revoked": ""}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_grants", grant, bson.M{"$set": bson.M{"revoked": false}})
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"access_expires_at": past}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"access_expires_at": future, "grant_id": "missing"}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"grant_id": "grant"}})
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"grant_id": bson.A{"grant"}}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"grant_id": "grant", "access_expires_at": bson.A{future}}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"access_expires_at": future}})
-	update("oauth_tokens", tok, bson.M{"$set": bson.M{"used": bson.A{false}}})
-	check("token", resource, principal.ErrForbidden)
-	update("oauth_tokens", tok, bson.M{"$unset": bson.M{"used": ""}})
-	if _, err := db.Collection("users").DeleteOne(ctx, bson.M{"_id": user}); err != nil {
-		t.Fatal(err)
-	}
+	exec(`DELETE FROM users WHERE id=@user`, pgx.NamedArgs{"user": user})
 	check("token", resource, principal.ErrNotFound)
-	if _, err := db.Collection("users").InsertOne(ctx, bson.M{"_id": user}); err != nil {
-		t.Fatal(err)
-	}
+	exec(`INSERT INTO users(id) VALUES (@user)`, pgx.NamedArgs{"user": user})
 	check("token", resource, nil)
 }

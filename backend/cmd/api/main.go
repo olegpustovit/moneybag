@@ -26,7 +26,7 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/sharing"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/screenshot"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
@@ -75,23 +75,25 @@ func run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer cancel()
 	connectCtx, stop := context.WithTimeout(ctx, 10*time.Second)
-	client, e := mongodb.Connect(connectCtx, cfg.MongoURI)
+	pool, e := postgres.Open(connectCtx, cfg.DatabaseURL)
 	stop()
 	if e != nil {
 		return e
 	}
-	defer client.Disconnect(context.Background())
-	db := client.Database(cfg.MongoDB)
-	ids := identity.NewService(identity.NewMongoRepository(db))
+	defer pool.Close()
+	if e := postgres.Migrate(ctx, pool); e != nil {
+		return e
+	}
+	ids := identity.NewService(identity.NewPostgresRepository(pool))
 	if e = ids.Init(ctx); e != nil {
 		return fmt.Errorf("initialize identity: %w", e)
 	}
-	auth := oauth.NewService(oauth.NewMongoRepository(db), ids, cfg.PublicURL)
+	auth := oauth.NewService(oauth.NewPostgresRepository(pool), ids, cfg.PublicURL)
 	if e = auth.Init(ctx); e != nil {
 		return fmt.Errorf("initialize OAuth: %w", e)
 	}
-	a := audit.NewService(audit.NewMongoRepository(db))
-	bookRepo := ledger.NewMongoRepository(db)
+	a := audit.NewService(audit.NewPostgresRepository(pool))
+	bookRepo := ledger.NewPostgresRepository(pool)
 	if e = ids.EachUser(ctx, func(p principal.Principal) error { return bookRepo.Init(ctx, p) }); e != nil {
 		return fmt.Errorf("initialize ledger indexes: %w", e)
 	}
@@ -101,30 +103,30 @@ func run() error {
 		return e
 	}
 	book.Expr = expr
-	prices := rates.NewService(rates.NewMongoRepository(db), a)
-	budgets := budget.NewService(budget.NewMongoRepository(db), a, prices)
-	tab := tables.NewService(tables.NewMongoRepository(db), a, expr)
+	prices := rates.NewService(rates.NewPostgresRepository(pool), a)
+	budgets := budget.NewService(budget.NewPostgresRepository(pool), a, prices)
+	tab := tables.NewService(tables.NewPostgresRepository(pool), a, expr)
 	tab.Ledger = book
 	tab.Rates = prices
-	models := model.NewService(model.NewMongoRepository(db), tab, a, expr)
+	models := model.NewService(model.NewPostgresRepository(pool), tab, a, expr)
 	models.Ledger, models.Rates, models.Budget = book, prices, budgets
 	sources := &dashboard.Sources{Ledger: book, Budget: budgets, Model: models, Tables: tab, Valuer: prices, Rates: prices}
 	models.Views = func(ctx context.Context, p principal.Principal, id string) ([]map[string]any, error) {
 		return sources.Rows(ctx, p, "view:"+id)
 	}
-	meaning := semantic.NewService(semantic.NewMongoRepository(db), book, prices, a, expr)
-	dash := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
+	meaning := semantic.NewService(semantic.NewPostgresRepository(pool), book, prices, a, expr)
+	dash := dashboard.NewService(dashboard.NewPostgresRepository(pool), &dashboard.Engine{Expr: expr, Reader: sources, Metrics: meaning}, a)
 	sources.Views, sources.Expr = dash, expr
-	classes := classify.NewService(classify.NewMongoRepository(db), book, a, expr)
-	rec := reconcile.NewService(reconcile.NewMongoRepository(db), book, a)
-	imp := imports.NewService(imports.NewMongoRepository(db), book, classes, rec, a)
+	classes := classify.NewService(classify.NewPostgresRepository(pool), book, a, expr)
+	rec := reconcile.NewService(reconcile.NewPostgresRepository(pool), book, a)
+	imp := imports.NewService(imports.NewPostgresRepository(pool), book, classes, rec, a)
 	imp.SetSecretKey(cfg.SecretKey)
-	shares := sharing.NewService(sharing.NewMongoRepository(db), ids, dash, sources, expr, a)
+	shares := sharing.NewService(sharing.NewPostgresRepository(pool), ids, dash, sources, expr, a)
 	services := mcpserver.Services{Identity: ids, Ledger: book, Audit: a, Rates: prices, Budget: budgets, Tables: tab, Model: models, Dashboard: dash, Expr: expr, Sources: sources, Logger: log}
 	services.Classify = classes
 	services.Semantic, services.PublicURL = meaning, cfg.PublicURL
-	services.Feedback = feedback.NewService(feedback.NewMongoRepository(db), a)
-	services.Admin = admin.NewService(admin.NewMongoRepository(db), ids, auth, a, cfg.PublicURL)
+	services.Feedback = feedback.NewService(feedback.NewPostgresRepository(pool), a)
+	services.Admin = admin.NewService(admin.NewPostgresRepository(pool), ids, auth, a, cfg.PublicURL)
 	if e = services.Admin.Init(ctx); e != nil {
 		return fmt.Errorf("initialize admin: %w", e)
 	}
@@ -173,9 +175,9 @@ func run() error {
 	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log)
 	a.OnChange = onChange
 	defer stopPrewarm()
-	stopJobs := startJobs(ctx, services, log)
+	stopJobs := startJobs(ctx, services, pool, log)
 	defer stopJobs()
-	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, client)
+	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, pool)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
 	compress, e := handlers.Compression()
 	if e != nil {

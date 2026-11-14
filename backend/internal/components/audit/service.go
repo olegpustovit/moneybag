@@ -8,58 +8,57 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/oklog/ulid/v2"
-	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/mongodb"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"time"
 )
 
 type Target struct {
-	Collection string `json:"coll" bson:"coll"`
-	ID         string `json:"id" bson:"id"`
+	Collection string `json:"coll" db:"coll"`
+	ID         string `json:"id" db:"id"`
 }
 type Event struct {
-	UserID    string          `json:"-" bson:"user_id"`
-	ID        string          `json:"id" bson:"_id"`
-	Seq       int64           `json:"seq" bson:"seq"`
-	At        time.Time       `json:"at" bson:"at"`
-	Actor     principal.Actor `json:"actor" bson:"actor"`
-	Tool      string          `json:"tool" bson:"tool"`
-	Target    Target          `json:"target" bson:"target"`
-	Before    json.RawMessage `json:"before,omitempty" bson:"before,omitempty"`
-	After     json.RawMessage `json:"after,omitempty" bson:"after,omitempty"`
-	Reason    string          `json:"reason,omitempty" bson:"reason,omitempty"`
-	GrantID   string          `json:"grant_id,omitempty" bson:"grant_id,omitempty"`
-	GrantHash string          `json:"grant_hash,omitempty" bson:"grant_hash,omitempty"`
+	UserID    string          `json:"-" db:"user_id"`
+	ID        string          `json:"id" db:"id"`
+	Seq       int64           `json:"seq" db:"seq"`
+	At        time.Time       `json:"at" db:"at"`
+	Actor     principal.Actor `json:"actor" db:"actor"`
+	Tool      string          `json:"tool" db:"tool"`
+	Target    Target          `json:"target" db:"target"`
+	Before    json.RawMessage `json:"before,omitempty" db:"before"`
+	After     json.RawMessage `json:"after,omitempty" db:"after"`
+	Reason    string          `json:"reason,omitempty" db:"reason"`
+	GrantID   string          `json:"grant_id,omitempty" db:"grant_id"`
+	GrantHash string          `json:"grant_hash,omitempty" db:"grant_hash"`
 	// Summary, BatchID and Routine stay out of the hash when empty, so events written before they existed still verify.
-	Summary  string   `json:"summary,omitempty" bson:"summary,omitempty"`
-	BatchID  string   `json:"batch_id,omitempty" bson:"batch_id,omitempty"`
-	Routine  bool     `json:"routine,omitempty" bson:"routine,omitempty"`
-	PrevHash string   `json:"prev_hash" bson:"prev_hash"`
-	Hash     string   `json:"hash" bson:"hash"`
-	Outcome  *Outcome `json:"outcome,omitempty" bson:"-"`
+	Summary  string   `json:"summary,omitempty" db:"summary"`
+	BatchID  string   `json:"batch_id,omitempty" db:"batch_id"`
+	Routine  bool     `json:"routine,omitempty" db:"routine"`
+	PrevHash string   `json:"prev_hash" db:"prev_hash"`
+	Hash     string   `json:"hash" db:"hash"`
+	Outcome  *Outcome `json:"outcome,omitempty" db:"-"`
 }
 type Outcome struct {
-	Hash   string          `json:"hash" bson:"hash"`
-	ID     string          `json:"event_id" bson:"_id"`
-	UserID string          `json:"-" bson:"user_id"`
-	Status string          `json:"status" bson:"status"`
-	Before json.RawMessage `json:"before,omitempty" bson:"before,omitempty"`
-	After  json.RawMessage `json:"after,omitempty" bson:"after,omitempty"`
-	At     time.Time       `json:"at" bson:"at"`
+	Hash   string          `json:"hash" db:"hash"`
+	ID     string          `json:"event_id" db:"id"`
+	UserID string          `json:"-" db:"user_id"`
+	Status string          `json:"status" db:"status"`
+	Before json.RawMessage `json:"before,omitempty" db:"before"`
+	After  json.RawMessage `json:"after,omitempty" db:"after"`
+	At     time.Time       `json:"at" db:"at"`
 }
-type MongoRepository struct{ DB *mongo.Database }
+type PostgresRepository struct{ DB *pgxpool.Pool }
 type Service struct {
-	repo *MongoRepository
+	repo *PostgresRepository
 	// OnChange is configured before serving requests; false starts a write, true finishes it.
 	OnChange func(userID string, finished bool)
 }
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository) *Service                 { return &Service{repo: r} }
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository) *Service                  { return &Service{repo: r} }
 
 type grantContextKey struct{}
 type grantContext struct{ id, hash string }
@@ -98,12 +97,15 @@ func WithRoutine(ctx context.Context) context.Context {
 	return context.WithValue(ctx, noteContextKey{}, note)
 }
 
+const eventColumns = `events.user_id,events.id,events.seq,events.at,events.actor,events.tool,events.target,
+ events.before,events.after,events.reason,events.grant_id,events.grant_hash,events.summary,events.batch_id,events.routine,events.prev_hash,events.hash`
+
 func (s *Service) Workflow(ctx context.Context, fn func(context.Context) error) error {
-	return mongodb.Workflow(ctx, fn)
+	return postgres.Workflow(ctx, fn)
 }
 func (s *Service) Write(ctx context.Context, p principal.Principal, tool string, target Target, reason string, before, after any, fn func(context.Context) error) (string, error) {
-	db, err := mongodb.Shared(s.repo.DB, p)
-	if err != nil {
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
 		return "", err
 	}
 	event := Event{UserID: p.UserID, ID: ulid.Make().String(), At: time.Now().UTC().Truncate(time.Millisecond), Actor: p.Actor, Tool: tool, Target: target, Reason: reason}
@@ -112,7 +114,7 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 	}
 	note, _ := ctx.Value(noteContextKey{}).(Note)
 	event.Summary, event.BatchID, event.Routine = note.Summary, note.BatchID, note.Routine
-	err = mongodb.Workflow(ctx, func(tx context.Context) error {
+	err := postgres.Workflow(ctx, func(tx context.Context) error {
 		b, err := json.Marshal(before)
 		if err != nil {
 			return err
@@ -126,19 +128,22 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		if event.Summary == "" {
 			event.Summary = Summarize(event)
 		}
-		seq, err := mongodb.Next(tx, db, p.UserID+":audit")
+		seq, err := postgres.Next(tx, db, p.UserID+":audit")
 		if err != nil {
 			return err
 		}
 		event.Seq = seq
+		const previousSQL = `SELECT hash FROM events WHERE user_id=@user ORDER BY seq DESC LIMIT 1`
 		var prev Event
-		err = db.Collection("events").FindOne(tx, bson.M{"user_id": p.UserID}, options.FindOne().SetSort(bson.D{{Key: "seq", Value: -1}})).Decode(&prev)
-		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		err = db.QueryRow(tx, previousSQL, pgx.NamedArgs{"user": p.UserID}).Scan(&prev.Hash)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		event.PrevHash = prev.Hash
 		event.Hash = Digest(event)
-		_, err = db.Collection("events").InsertOne(tx, event)
+		const insertSQL = `INSERT INTO events (user_id,id,seq,at,actor,actor_id,tool,target,target_id,before,after,reason,grant_id,grant_hash,summary,batch_id,routine,prev_hash,hash)
+ VALUES (@user,@id,@seq,@at,@actor,@actor_id,@tool,@target,@target_id,@before,@after,@reason,@grant,@grant_hash,@summary,@batch,@routine,@prev,@hash)`
+		_, err = db.Exec(tx, insertSQL, pgx.NamedArgs{"user": event.UserID, "id": event.ID, "seq": event.Seq, "at": event.At, "actor": event.Actor, "actor_id": event.Actor.ID, "tool": event.Tool, "target": event.Target, "target_id": event.Target.ID, "before": []byte(event.Before), "after": []byte(event.After), "reason": event.Reason, "grant": event.GrantID, "grant_hash": event.GrantHash, "summary": event.Summary, "batch": event.BatchID, "routine": event.Routine, "prev": event.PrevHash, "hash": event.Hash})
 		if err != nil {
 			return err
 		}
@@ -168,7 +173,8 @@ func (s *Service) Write(ctx context.Context, p principal.Principal, tool string,
 		}
 		outcome.Hash = OutcomeDigest(event.Hash, outcome)
 		finish, stop := context.WithTimeout(context.WithoutCancel(tx), 5*time.Second)
-		_, err = db.Collection("audit_outcomes").InsertOne(finish, outcome)
+		const outcomeSQL = `INSERT INTO audit_outcomes (hash,id,user_id,status,before,after,at) VALUES (@hash,@id,@user,@status,@before,@after,@at)`
+		_, err = db.Exec(finish, outcomeSQL, pgx.NamedArgs{"hash": outcome.Hash, "id": outcome.ID, "user": outcome.UserID, "status": outcome.Status, "before": []byte(outcome.Before), "after": []byte(outcome.After), "at": outcome.At})
 		stop()
 		if err != nil {
 			return fmt.Errorf("audit outcome missing for %s; inspect history before retrying: %w", event.ID, err)
@@ -221,40 +227,26 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 	if err := p.Require("ledger:read"); err != nil {
 		return Page{}, err
 	}
-	db, err := mongodb.Shared(s.repo.DB, p)
-	if err != nil {
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
 		return Page{}, err
 	}
-	f := bson.M{"user_id": p.UserID}
-	if in.Cursor > 0 {
-		f["seq"] = bson.M{"$lt": in.Cursor}
-	}
-	if in.Tool != "" {
-		f["tool"] = in.Tool
-	}
-	if in.Target != "" {
-		f["target.id"] = in.Target
-	}
-	if in.Actor != "" {
-		f["actor.id"] = in.Actor
-	}
-	dates := bson.M{}
+	var from, to *time.Time
 	if in.From != "" {
 		d, e := time.Parse(time.RFC3339, in.From)
 		if e != nil {
 			return Page{}, fmt.Errorf("from must be RFC3339")
 		}
-		dates["$gte"] = d
+		d = d.UTC().Truncate(time.Millisecond)
+		from = &d
 	}
 	if in.To != "" {
 		d, e := time.Parse(time.RFC3339, in.To)
 		if e != nil {
 			return Page{}, fmt.Errorf("to must be RFC3339")
 		}
-		dates["$lte"] = d
-	}
-	if len(dates) > 0 {
-		f["at"] = dates
+		d = d.UTC().Truncate(time.Millisecond)
+		to = &d
 	}
 	limit := in.Limit
 	if limit == 0 {
@@ -263,15 +255,18 @@ func (s *Service) List(ctx context.Context, p principal.Principal, in ListInput)
 	if limit < 1 || limit > 200 {
 		return Page{}, fmt.Errorf("limit must be 1..200")
 	}
-	cur, err := db.Collection("events").Find(ctx, f, options.Find().SetSort(bson.D{{Key: "seq", Value: -1}}).SetLimit(int64(limit+1)).SetBatchSize(int32(limit+1)))
+	const listSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND (@cursor::bigint<=0 OR seq<@cursor)
+ AND (@tool='' OR tool=@tool) AND (@target='' OR target_id=@target) AND (@actor='' OR actor_id=@actor)
+ AND (@from::timestamptz IS NULL OR at>=@from) AND (@to::timestamptz IS NULL OR at<=@to) ORDER BY seq DESC LIMIT @limit`
+	rows, err := db.Query(ctx, listSQL, pgx.NamedArgs{"user": p.UserID, "cursor": in.Cursor, "tool": in.Tool, "target": in.Target, "actor": in.Actor, "from": from, "to": to, "limit": limit + 1})
 	if err != nil {
 		return Page{}, err
 	}
-	defer cur.Close(ctx)
-	out := Page{Events: []Event{}}
-	if err = cur.All(ctx, &out.Events); err != nil {
+	events, err := pgx.CollectRows(rows, pgx.RowToStructByName[Event])
+	if err != nil {
 		return Page{}, err
 	}
+	out := Page{Events: events}
 	if len(out.Events) > limit {
 		out.Events = out.Events[:limit]
 		out.NextCursor = out.Events[limit-1].Seq
@@ -291,12 +286,13 @@ func (s *Service) attachOutcomes(ctx context.Context, p principal.Principal, eve
 	for i := range events {
 		ids[i] = events[i].ID
 	}
-	cur, err := s.repo.DB.Collection("audit_outcomes").Find(ctx, bson.M{"_id": bson.M{"$in": ids}, "user_id": p.UserID}, options.Find().SetBatchSize(int32(len(ids)+1)))
+	const outcomesSQL = `SELECT * FROM audit_outcomes WHERE id=ANY(@ids::text[]) AND user_id=@user`
+	rows, err := s.repo.DB.Query(ctx, outcomesSQL, pgx.NamedArgs{"ids": ids, "user": p.UserID})
 	if err != nil {
 		return err
 	}
-	var outcomes []Outcome
-	if err = cur.All(ctx, &outcomes); err != nil {
+	outcomes, err := pgx.CollectRows(rows, pgx.RowToStructByName[Outcome])
+	if err != nil {
 		return err
 	}
 	byID := make(map[string]*Outcome, len(outcomes))
@@ -325,35 +321,32 @@ func (s *Service) LatestCompleted(ctx context.Context, p principal.Principal, to
 	if err := p.Require("ledger:read"); err != nil {
 		return nil, err
 	}
-	db, err := mongodb.Shared(s.repo.DB, p)
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
+		return nil, err
+	}
+	const latestSQL = `SELECT ` + eventColumns + `,o.hash,o.id,o.user_id,o.status,o.before,o.after,o.at
+ FROM events JOIN audit_outcomes o ON o.id=events.id AND o.user_id=events.user_id
+ WHERE events.user_id=@user AND events.tool=@tool AND events.target->>'coll'=@collection AND events.target_id=@target
+ AND o.status='completed' ORDER BY events.seq DESC LIMIT 1`
+	rows, err := db.Query(ctx, latestSQL, pgx.NamedArgs{"user": p.UserID, "tool": tool, "collection": target.Collection, "target": target.ID})
 	if err != nil {
 		return nil, err
 	}
-	pipeline := mongo.Pipeline{
-		{{Key: "$match", Value: bson.M{"user_id": p.UserID, "tool": tool, "target.coll": target.Collection, "target.id": target.ID}}},
-		{{Key: "$sort", Value: bson.D{{Key: "seq", Value: -1}}}},
-		{{Key: "$lookup", Value: bson.M{"from": "audit_outcomes", "localField": "_id", "foreignField": "_id", "as": "result"}}},
-		{{Key: "$unwind", Value: "$result"}},
-		{{Key: "$match", Value: bson.M{"result.user_id": p.UserID, "result.status": "completed"}}},
-		{{Key: "$limit", Value: 1}},
+	defer rows.Close()
+	if !rows.Next() {
+		return nil, rows.Err()
 	}
-	cursor, err := db.Collection("events").Aggregate(ctx, pipeline, options.Aggregate().SetBatchSize(2))
+	var event Event
+	var outcome Outcome
+	err = rows.Scan(&event.UserID, &event.ID, &event.Seq, &event.At, &event.Actor, &event.Tool, &event.Target,
+		&event.Before, &event.After, &event.Reason, &event.GrantID, &event.GrantHash, &event.Summary, &event.BatchID, &event.Routine, &event.PrevHash, &event.Hash,
+		&outcome.Hash, &outcome.ID, &outcome.UserID, &outcome.Status, &outcome.Before, &outcome.After, &outcome.At)
 	if err != nil {
 		return nil, err
 	}
-	defer cursor.Close(ctx)
-	if !cursor.Next(ctx) {
-		return nil, cursor.Err()
-	}
-	var row struct {
-		Event  `bson:",inline"`
-		Result Outcome `bson:"result"`
-	}
-	if err := cursor.Decode(&row); err != nil {
-		return nil, err
-	}
-	row.Event.Outcome = &row.Result
-	return &row.Event, nil
+	event.Outcome = &outcome
+	return &event, nil
 }
 
 // shortcut: failed or interrupted attempts also block undo, upgrade when outcomes can be checked efficiently.
@@ -361,18 +354,17 @@ func (s *Service) HasLaterTarget(ctx context.Context, p principal.Principal, tar
 	if err := p.Require("ledger:read"); err != nil {
 		return false, err
 	}
-	db, err := mongodb.Shared(s.repo.DB, p)
-	if err != nil {
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
 		return false, err
 	}
-	err = db.Collection("events").FindOne(ctx, bson.M{"user_id": p.UserID, "target.coll": target.Collection, "target.id": target.ID, "seq": bson.M{"$gt": seq}}).Err()
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return false, nil
-	}
+	const laterSQL = `SELECT EXISTS(SELECT 1 FROM events WHERE user_id=@user AND target->>'coll'=@collection AND target_id=@id AND seq>@seq)`
+	var later bool
+	err := db.QueryRow(ctx, laterSQL, pgx.NamedArgs{"user": p.UserID, "collection": target.Collection, "id": target.ID, "seq": seq}).Scan(&later)
 	if err != nil {
 		return false, fmt.Errorf("check later target events: %w", err)
 	}
-	return true, nil
+	return later, nil
 }
 
 // HasLaterGrantChange detects reissued or changed grants, even when their IDs are reused.
@@ -380,31 +372,34 @@ func (s *Service) HasLaterGrantChange(ctx context.Context, p principal.Principal
 	if err := p.Require("ledger:read"); err != nil {
 		return false, err
 	}
-	db, err := mongodb.Shared(s.repo.DB, p)
-	if err != nil {
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
 		return false, err
 	}
-	err = db.Collection("events").FindOne(ctx, bson.M{"user_id": p.UserID, "target.coll": "shares", "target.id": id, "seq": bson.M{"$gt": seq}, "tool": bson.M{"$in": []string{"dashboard_share", "dashboard_unshare"}}}).Err()
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return false, nil
-	}
+	const laterSQL = `SELECT EXISTS(SELECT 1 FROM events WHERE user_id=@user AND target->>'coll'='shares' AND target_id=@id AND seq>@seq AND tool=ANY(@tools::text[]))`
+	var later bool
+	err := db.QueryRow(ctx, laterSQL, pgx.NamedArgs{"user": p.UserID, "id": id, "seq": seq, "tools": []string{"dashboard_share", "dashboard_unshare"}}).Scan(&later)
 	if err != nil {
 		return false, fmt.Errorf("check later grant changes: %w", err)
 	}
-	return true, nil
+	return later, nil
 }
 
 func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Event, error) {
 	if err := p.Require("ledger:read"); err != nil {
 		return Event{}, err
 	}
-	db, err := mongodb.Shared(s.repo.DB, p)
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
+		return Event{}, err
+	}
+	const getSQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user AND id=@id`
+	rows, err := db.Query(ctx, getSQL, pgx.NamedArgs{"user": p.UserID, "id": id})
 	if err != nil {
 		return Event{}, err
 	}
-	var e Event
-	err = db.Collection("events").FindOne(ctx, bson.M{"user_id": p.UserID, "_id": id}).Decode(&e)
-	if errors.Is(err, mongo.ErrNoDocuments) {
+	e, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[Event])
+	if errors.Is(err, pgx.ErrNoRows) {
 		err = principal.ErrNotFound
 	}
 	if err == nil {
@@ -413,28 +408,32 @@ func (s *Service) Get(ctx context.Context, p principal.Principal, id string) (Ev
 	return e, err
 }
 func (s *Service) outcome(ctx context.Context, p principal.Principal, id string) (*Outcome, error) {
-	var o Outcome
-	e := s.repo.DB.Collection("audit_outcomes").FindOne(ctx, bson.M{"_id": id, "user_id": p.UserID}).Decode(&o)
-	if errors.Is(e, mongo.ErrNoDocuments) {
+	rows, e := s.repo.DB.Query(ctx, `SELECT * FROM audit_outcomes WHERE id=@id AND user_id=@user`, pgx.NamedArgs{"id": id, "user": p.UserID})
+	if e != nil {
+		return nil, e
+	}
+	o, e := pgx.CollectOneRow(rows, pgx.RowToStructByName[Outcome])
+	if errors.Is(e, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	return &o, e
 }
 func (s *Service) Verify(ctx context.Context, p principal.Principal) error {
-	db, err := mongodb.Shared(s.repo.DB, p)
+	db := s.repo.DB
+	if err := p.Valid(); err != nil {
+		return err
+	}
+	const verifySQL = `SELECT ` + eventColumns + ` FROM events WHERE user_id=@user ORDER BY seq`
+	rows, err := db.Query(ctx, verifySQL, pgx.NamedArgs{"user": p.UserID})
 	if err != nil {
 		return err
 	}
-	cur, err := db.Collection("events").Find(ctx, bson.M{"user_id": p.UserID}, options.Find().SetSort(bson.D{{Key: "seq", Value: 1}}))
-	if err != nil {
-		return err
-	}
-	defer cur.Close(ctx)
+	defer rows.Close()
 	var hash string
 	var seq int64
-	for cur.Next(ctx) {
-		var e Event
-		if err = cur.Decode(&e); err != nil {
+	for rows.Next() {
+		e, err := pgx.RowToStructByName[Event](rows)
+		if err != nil {
 			return err
 		}
 		if e.PrevHash != hash || e.Hash != Digest(e) || e.Seq <= seq {
@@ -453,7 +452,7 @@ func (s *Service) Verify(ctx context.Context, p principal.Principal) error {
 		hash = e.Hash
 		seq = e.Seq
 	}
-	return cur.Err()
+	return rows.Err()
 }
 
 func OutcomeDigest(eventHash string, o Outcome) string {

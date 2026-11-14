@@ -1,18 +1,18 @@
 # Architecture and data model
 
-The Fiber transport and browser handlers live in `backend/cmd/api`. Domain services and Mongo repositories belong to `internal/components`. Both HTTP MCP transports use `internal/mcpserver`; `cmd/mcp` forwards stdio to the same API through the official SDK.
+The Fiber transport and browser handlers live in `backend/cmd/api`. Domain services and PostgreSQL repositories belong to `internal/components`. Both HTTP MCP transports use `internal/mcpserver`; `cmd/mcp` forwards stdio to the same API through the official SDK.
 
 ```mermaid
 flowchart LR
   Browser --> API[Go API · port 6459]
   Agent[MCP / OAuth agent] --> API
   Stdio[Local stdio adapter] --> API
-  API --> DB[(Existing standalone MongoDB\none shared moneybag database)]
+  API --> DB[(PostgreSQL 18\none shared moneybag database)]
 ```
 
-Every financial collection includes `user_id`. Logical IDs such as `assets:bank`, `assumptions` or `base` may collide between users. Their physical key or unique index includes the owner. Journal and audit sequences come from per-user atomic counters. There are no per-user databases or collection names.
+Financial records are scoped by `user_id`; sharing uses explicit owner/grantee fields. Logical IDs such as `assets:bank`, `assumptions` or `base` may collide between users. Their physical key or unique index includes the owner. Journal and audit sequences come from per-user atomic counters. There are no per-user databases or SQL table names.
 
-| Collection group | Ownership and behavior |
+| Table group | Ownership and behavior |
 |---|---|
 | `users`, sessions, invites, OAuth | Global identity keys; sessions and bearer credentials resolve the principal before financial access |
 | `accounts`, `journal`, `entry_tags` | Scoped accounts; exact per-commodity balanced journal documents; posted journal immutable; tags stored as metadata |
@@ -27,6 +27,9 @@ Sharing fixes the owner principal and permits only the declared source set and o
 
 CEL has no network or filesystem access. Expressions are compiled and cached with length, recursion, cost, row, byte and wall-time limits. The server computes and formats values; the SPA is the only renderer. `dashboard_render` runs Chromium against the app's own loopback listener with a read-only token that expires after 60 seconds and is bound to one dashboard, version, set of parameters, principal and any grant.
 
-Money is encoded as decimal strings in public JSON and Decimal128 in MongoDB. Journal balance validation uses exact rational arithmetic. Valuation and forecast outputs are reporting values; forecasts never post journal entries.
+Money is encoded as decimal strings in public JSON, PostgreSQL numeric in scalar columns and decimal strings inside JSONB. Journal balance validation uses exact rational arithmetic. Valuation and forecast outputs are reporting values; forecasts never post journal entries.
 
 `balances_get` with `include_lots: true` returns asset positions grouped by account, commodity and explicit per-unit `cost`. Set the same cost on acquisitions, disposals, transfers and corrections to select the lot. Missing costs remain unknown rather than being inferred. With `value_in`, each lot includes historical market value, known cost basis and unrealized profit/loss. Reports are bounded to 10,000 entries, 5,000 lots and 16 MiB; narrow by accounts for larger histories.
+
+
+A five-connection pgx pool serves the API. Embedded, forward-only Goose migrations apply at startup under an advisory lock; the database uses C collation. Nested postings, cells and specs remain JSONB; audit before/after bytes and retained import files use bytea. Each dynamic row and its unique `row_keys` records share one transaction. Audited multi-row workflows retain ordered partial writes and the existing process-local lock. No ORM or alternative runtime datastore exists; the temporary `cmd/migrate-mongo` command is isolated from the application.

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
 	"log/slog"
@@ -37,7 +39,7 @@ func daily(ctx context.Context, hour int, loc *time.Location, onStart bool, fn f
 		}
 	}()
 }
-func startJobs(parent context.Context, s mcpserver.Services, log *slog.Logger) func() {
+func startJobs(parent context.Context, s mcpserver.Services, pool *pgxpool.Pool, log *slog.Logger) func() {
 	ctx, cancel := context.WithCancel(parent)
 	var wg sync.WaitGroup
 	users := func(name string, fn func(context.Context, principal.Principal) error) {
@@ -90,6 +92,9 @@ func startJobs(parent context.Context, s mcpserver.Services, log *slog.Logger) f
 				return
 			case <-ticker.C:
 				job, stop := context.WithTimeout(ctx, 5*time.Minute)
+				if e := sweepExpired(job, pool); e != nil {
+					log.Error("expiry sweep failed", "error", e)
+				}
 				e := s.Sharing.RefreshDue(job)
 				stop()
 				if e != nil {
@@ -109,4 +114,19 @@ func startJobs(parent context.Context, s mcpserver.Services, log *slog.Logger) f
 		}
 	}
 
+}
+
+func sweepExpired(ctx context.Context, pool *pgxpool.Pool) error {
+	for _, query := range []string{
+		`DELETE FROM sessions WHERE expires_at<now()`,
+		`DELETE FROM invites WHERE expires_at<now()`,
+		`DELETE FROM oauth_codes WHERE expires_at<now()`,
+		`DELETE FROM oauth_tokens WHERE expires_at<now()`,
+		`DELETE FROM admin_confirmations WHERE expires_at<now()`,
+	} {
+		if _, err := pool.Exec(ctx, query); err != nil {
+			return fmt.Errorf("delete expired records: %w", err)
+		}
+	}
+	return nil
 }

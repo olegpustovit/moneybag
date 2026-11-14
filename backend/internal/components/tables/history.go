@@ -3,9 +3,9 @@ package tables
 import (
 	"context"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"maps"
 )
 
@@ -23,15 +23,14 @@ func (s *Service) Archive(ctx context.Context, p principal.Principal, id string,
 				return err
 			}
 		}
-		var table Table
-		filter := bson.M{"user_id": p.UserID, "id": id}
-		if err := s.repo.db.Collection("tables").FindOne(tx, filter).Decode(&table); err != nil {
+		table, err := s.repo.table(tx, p.UserID, id, true)
+		if err != nil {
 			return err
 		}
 		old := table
 		table.Archived = archived
 		_, e := s.audit.Write(tx, p, "db_archive", audit.Target{Collection: "tables", ID: id}, reason, old, table, func(tx context.Context) error {
-			_, err := s.repo.db.Collection("tables").UpdateOne(tx, filter, bson.M{"$set": bson.M{"archived": archived}})
+			_, err := s.repo.db.Exec(tx, `UPDATE tables SET archived=@archived WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"archived": archived, "user": p.UserID, "id": id})
 			return err
 		})
 		return e
@@ -61,8 +60,7 @@ func (s *Service) restoreRows(ctx context.Context, p principal.Principal, tableI
 			before = []Row{}
 			after = []Row{}
 			for _, old := range rows {
-				var current Row
-				e := s.repo.db.Collection("rows").FindOne(tx, bson.M{"user_id": p.UserID, "table_id": tableID, "id": old.ID}).Decode(&current)
+				current, e := s.repo.row(tx, p.UserID, table, old.ID)
 				if e != nil {
 					return e
 				}
@@ -232,12 +230,6 @@ func (s *Service) setDefinition(ctx context.Context, p principal.Principal, tabl
 	if err = s.referenceSchemas(ctx, p, table.ID, table.Columns); err != nil {
 		return err
 	}
-	if err = s.columnIndexes(ctx, table.Columns, table.Keys...); err != nil {
-		return err
-	}
-	if err := s.uniqueIndex(ctx); err != nil {
-		return err
-	}
 	oldTypes := map[string]string{}
 	for _, column := range old.Columns {
 		oldTypes[column.ID] = column.Type
@@ -250,15 +242,15 @@ func (s *Service) setDefinition(ctx context.Context, p principal.Principal, tabl
 	migrate := len(old.Keys) > 0 || len(table.Keys) > 0 || len(table.Checks) > 0 || table.Ledger != nil
 	_, err = s.audit.Write(ctx, p, "db_alter", audit.Target{Collection: "tables", ID: table.ID}, reason, schemaState(old), schemaState(table), func(tx context.Context) error {
 		return s.audit.Workflow(tx, func(snapshot context.Context) error {
-			cursor, err := s.repo.db.Collection("rows").Find(snapshot, bson.M{"user_id": p.UserID, "table_id": table.ID, "archived": bson.M{"$ne": true}})
+			cursor, err := s.repo.db.Query(snapshot, `SELECT * FROM rows WHERE user_id=@user AND table_id=@table AND NOT archived`, pgx.NamedArgs{"user": p.UserID, "table": table.ID})
 			if err != nil {
 				return err
 			}
 			before, after := BatchState{Tables: map[string][]Row{}}, BatchState{Tables: map[string][]Row{}}
 			violations := []Violation{}
-			for cursor.Next(snapshot) {
+			for cursor.Next() {
 				var row Row
-				if err = cursor.Decode(&row); err != nil {
+				if row, err = rowFrom(cursor, table); err != nil {
 					break
 				}
 				prior := row
@@ -278,7 +270,7 @@ func (s *Service) setDefinition(ctx context.Context, p principal.Principal, tabl
 				after.Tables[table.ID] = append(after.Tables[table.ID], row)
 			}
 			cursorErr := cursor.Err()
-			_ = cursor.Close(snapshot)
+			cursor.Close()
 			if err != nil {
 				return err
 			}
@@ -297,7 +289,7 @@ func (s *Service) setDefinition(ctx context.Context, p principal.Principal, tabl
 					return err
 				}
 			}
-			_, err = s.repo.db.Collection("tables").UpdateOne(snapshot, bson.M{"user_id": p.UserID, "id": table.ID}, bson.M{"$set": bson.M{"columns": table.Columns, "description": table.Description, "keys": table.Keys, "checks": table.Checks, "ledger": table.Ledger}})
+			_, err = s.repo.db.Exec(snapshot, `UPDATE tables SET columns=@columns,description=@description,keys=@keys,checks=@checks,ledger=@ledger WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"columns": table.Columns, "description": table.Description, "keys": table.Keys, "checks": table.Checks, "ledger": table.Ledger, "user": p.UserID, "id": table.ID})
 			return err
 		})
 	})

@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
 
@@ -13,12 +16,11 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 // These synthetic receipts exercise country-specific metadata without claiming OCR accuracy.
-func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner principal.Principal, s mcpserver.Services, db *mongo.Database) {
+func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner principal.Principal, s mcpserver.Services, db *pgxpool.Pool) {
+	pgdb := pgtest.New(t)
 	t.Helper()
 	t.Run("receipt template", func(t *testing.T) {
 		client := mcpSession(t, ctx, p, s, false)
@@ -56,15 +58,14 @@ func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner pr
 		if _, err := s.Tables.Get(ctx, collisionOwner, "merchants"); err == nil {
 			t.Fatal("failed template creation left its first table")
 		}
-		if _, err := db.Collection("tables").DeleteOne(ctx, bson.M{"user_id": collisionOwner.UserID, "id": "stores"}); err != nil {
+		if _, err := pgdb.Exec(ctx, `DELETE FROM tables WHERE user_id=@user AND id='stores'`, pgx.NamedArgs{"user": collisionOwner.UserID}); err != nil {
 			t.Fatal(err)
 		}
-		validator := bson.D{{Key: "collMod", Value: "tables"}, {Key: "validator", Value: bson.M{"$nor": bson.A{bson.M{"user_id": collisionOwner.UserID, "id": "stores"}}}}}
-		if err := db.RunCommand(ctx, validator).Err(); err != nil {
+		if _, err := pgdb.Exec(ctx, `ALTER TABLE tables ADD CONSTRAINT test_template CHECK (NOT (user_id=`+"'"+collisionOwner.UserID+"'"+` AND id='stores'))`); err != nil {
 			t.Fatal(err)
 		}
 		_, storageErr := s.Tables.CreateDatabase(ctx, collisionOwner, tables.CreateInput{Template: "receipts"})
-		if err := db.RunCommand(ctx, bson.D{{Key: "collMod", Value: "tables"}, {Key: "validator", Value: bson.M{}}}).Err(); err != nil {
+		if err := func() error { _, e := pgdb.Exec(ctx, `ALTER TABLE tables DROP CONSTRAINT test_template`); return e }(); err != nil {
 			t.Fatal(err)
 		}
 		if storageErr == nil {
@@ -197,7 +198,7 @@ func testReceiptTemplate(t *testing.T, ctx context.Context, p, collisionOwner pr
 			t.Fatalf("reversed join: %#v %v", reversed, err)
 		}
 		orphan := tables.Row{Key: p.UserID + ":receipts:orphan", UserID: p.UserID, TableID: "receipts", ID: "orphan", Version: 1, Cells: map[string]any{"entry": "missing-entry", "store": "HR:synthetic-tax:001", "total": ledger.MustDecimal("1")}}
-		if _, err := db.Collection("rows").InsertOne(ctx, orphan); err != nil {
+		if _, err := insertRows(ctx, pgdb, orphan); err != nil {
 			t.Fatal(err)
 		}
 		all, err := s.Tables.Query(ctx, p, tables.QueryInput{DB: "receipts", JoinEntry: true})

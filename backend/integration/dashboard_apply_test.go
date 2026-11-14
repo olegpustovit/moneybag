@@ -3,8 +3,7 @@ package integration
 import (
 	"context"
 	"encoding/json"
-	"net/url"
-	"os"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"strings"
 	"testing"
 
@@ -12,42 +11,24 @@ import (
 	"github.com/olegpustovit/moneybag/backend/internal/components/dashboard"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 func TestDashboardPatchPreviewWritesNothing(t *testing.T) {
-	uri := os.Getenv("MONEYBAG_TEST_MONGO_URI")
-	if uri == "" {
-		t.Skip("set MONEYBAG_TEST_MONGO_URI")
-	}
-	parsed, err := url.Parse(uri)
-	if err != nil || !strings.HasPrefix(parsed.Path, "/moneybag_test_") {
-		t.Fatal("dedicated test database required")
-	}
-	client, err := mongo.Connect(options.Client().ApplyURI(uri))
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx := context.Background()
-	db := client.Database(strings.TrimPrefix(parsed.Path, "/") + "_preview_apply")
-	if err := db.Drop(ctx); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Drop(ctx); _ = client.Disconnect(ctx) })
+	var err error
 	p := principal.Principal{UserID: "01ARZ3NDEKTSV4RRFFQ69G5FAV", Scopes: []string{"ledger:read", "dash:write"}}
-	a := audit.NewService(audit.NewMongoRepository(db))
+	a := audit.NewService(audit.NewPostgresRepository(pgtest.New(t)))
 	expr, err := expressions.New()
 	if err != nil {
 		t.Fatal(err)
 	}
-	service := dashboard.NewService(dashboard.NewMongoRepository(db), &dashboard.Engine{Expr: expr, Reader: &snapshotReader{}}, a)
+	service := dashboard.NewService(dashboard.NewPostgresRepository(pgtest.New(t)), &dashboard.Engine{Expr: expr, Reader: &snapshotReader{}}, a)
 	spec := dashboard.Spec{ID: "apply", Title: "Draft", Version: 2, Pages: []dashboard.Page{{ID: "main", Layout: []dashboard.Row{{Cols: []dashboard.Placement{{Span: 12, Component: "value"}}}}}}, Components: []dashboard.Component{{ID: "value", Type: "kpi", Value: "1"}}}
 	head := dashboard.Head{Key: p.UserID + ":apply", UserID: p.UserID, ID: "apply", Title: "Draft", DraftVersion: 2, Revision: 2}
-	if _, err := db.Collection("dashboards").InsertOne(ctx, head); err != nil {
+	if _, err := insertHeads(ctx, pgtest.New(t), head); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Collection("dashboard_versions").InsertOne(ctx, dashboard.Version{Key: p.UserID + ":apply:2", UserID: p.UserID, DashboardID: "apply", Version: 2, Spec: spec}); err != nil {
+	if _, err := insertVersions(ctx, pgtest.New(t), dashboard.Version{Key: p.UserID + ":apply:2", UserID: p.UserID, DashboardID: "apply", Version: 2, Spec: spec}); err != nil {
 		t.Fatal(err)
 	}
 	ops, _ := json.Marshal([]map[string]any{{"op": "replace", "path": "/title", "value": "Previewed"}})

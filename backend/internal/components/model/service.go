@@ -4,81 +4,81 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/olegpustovit/moneybag/backend/internal/components/audit"
 	"github.com/olegpustovit/moneybag/backend/internal/components/budget"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/components/tables"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/expressions"
+	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/principal"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/reqcache"
-	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"math"
 	"strings"
 	"time"
 )
 
 type Override struct {
-	Assumption string   `json:"assumption" bson:"assumption"`
-	Value      *float64 `json:"value,omitempty" bson:"value,omitempty"`
-	Expr       string   `json:"expr,omitempty" bson:"expr,omitempty"`
+	Assumption string   `json:"assumption"`
+	Value      *float64 `json:"value,omitempty"`
+	Expr       string   `json:"expr,omitempty"`
 	// Ref resolves a model input at forecast time: budget_line:<id>, budget_lines.total or income_stream:<id>. The assumption name must end in _usd or _eur; the value is converted to that currency with the live EUR/USD rate.
-	Ref    string   `json:"ref,omitempty" bson:"ref,omitempty" jsonschema:"model input: budget_line:<id> (limit), budget_lines.total or income_stream:<id> (monthly amount); assumption must end in _usd or _eur, converted with the live EUR/USD rate"`
-	Factor *float64 `json:"factor,omitempty" bson:"factor,omitempty" jsonschema:"multiplier applied to the resolved ref value"`
+	Ref    string   `json:"ref,omitempty" jsonschema:"model input: budget_line:<id> (limit), budget_lines.total or income_stream:<id> (monthly amount); assumption must end in _usd or _eur, converted with the live EUR/USD rate"`
+	Factor *float64 `json:"factor,omitempty" jsonschema:"multiplier applied to the resolved ref value"`
 }
 type Event struct {
-	Month   int     `json:"month" bson:"month"`
-	Amount  float64 `json:"amount" bson:"amount"`
-	Account string  `json:"account,omitempty" bson:"account,omitempty"`
+	Month   int     `json:"month"`
+	Amount  float64 `json:"amount"`
+	Account string  `json:"account,omitempty"`
 }
 type SpendLine struct {
-	Name     string  `json:"name" bson:"name"`
-	Amount   float64 `json:"amount" bson:"amount"`
-	Currency string  `json:"currency" bson:"currency"`
-	USD      float64 `json:"usd" bson:"usd"`
+	Name     string  `json:"name" db:"name"`
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
+	USD      float64 `json:"usd"`
 }
 type LegacyInputs struct {
-	Spend                    []SpendLine `json:"spend" bson:"spend"`
-	SalaryBiweeklyUSD        float64     `json:"salaryBiweeklyUsd" bson:"salary_biweekly_usd"`
-	ReimbursementBiweeklyUSD float64     `json:"reimbursementBiweeklyUsd" bson:"reimbursement_biweekly_usd"`
-	SideIncomeMonthlyUSD     float64     `json:"sideIncomeMonthlyUsd" bson:"side_income_monthly_usd"`
-	KyivExtraDrainMonthlyUSD float64     `json:"kyivExtraDrainMonthlyUsd" bson:"kyiv_extra_drain_monthly_usd"`
-	BufferUSD                float64     `json:"bufferUsd" bson:"buffer_usd"`
-	YieldPct                 float64     `json:"yieldPct" bson:"yield_pct"`
+	Spend                    []SpendLine `json:"spend"`
+	SalaryBiweeklyUSD        float64     `json:"salaryBiweeklyUsd"`
+	ReimbursementBiweeklyUSD float64     `json:"reimbursementBiweeklyUsd"`
+	SideIncomeMonthlyUSD     float64     `json:"sideIncomeMonthlyUsd"`
+	KyivExtraDrainMonthlyUSD float64     `json:"kyivExtraDrainMonthlyUsd"`
+	BufferUSD                float64     `json:"bufferUsd"`
+	YieldPct                 float64     `json:"yieldPct"`
 }
 type Scenario struct {
-	Archived         bool          `json:"archived,omitempty" bson:"archived,omitempty"`
-	Key              string        `json:"-" bson:"_id"`
-	UserID           string        `json:"-" bson:"user_id"`
-	ID               string        `json:"id" bson:"id"`
-	Name             string        `json:"name" bson:"name"`
-	Revision         int           `json:"revision,omitempty" bson:"revision"`
-	ExpectedRevision *int          `json:"expected_revision,omitempty" bson:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
-	Overrides        []Override    `json:"overrides" bson:"overrides"`
-	Events           []Event       `json:"events,omitempty" bson:"events,omitempty"`
-	Legacy           *LegacyInputs `json:"legacy,omitempty" bson:"legacy,omitempty"`
+	Archived         bool          `json:"archived,omitempty" db:"archived"`
+	Key              string        `json:"-" db:"storage_key"`
+	UserID           string        `json:"-" db:"user_id"`
+	ID               string        `json:"id" db:"id"`
+	Name             string        `json:"name" db:"name"`
+	Revision         int           `json:"revision,omitempty" db:"revision"`
+	ExpectedRevision *int          `json:"expected_revision,omitempty" db:"-" jsonschema:"optional revision from model_get; -1 requires a new scenario"`
+	Overrides        []Override    `json:"overrides" db:"overrides"`
+	Events           []Event       `json:"events,omitempty" db:"events"`
+	Legacy           *LegacyInputs `json:"legacy,omitempty" db:"legacy"`
 	// DropLegacy removes a stored legacy block; omitting legacy otherwise keeps it.
-	DropLegacy bool `json:"drop_legacy,omitempty" bson:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
+	DropLegacy bool `json:"drop_legacy,omitempty" db:"-" jsonschema:"true removes the stored legacy block; the scenario then uses assumptions and income streams"`
 }
 type Income struct {
-	ID        string  `json:"id" bson:"id"`
-	Amount    float64 `json:"amount" bson:"amount"`
-	Currency  string  `json:"currency" bson:"currency"`
-	Frequency string  `json:"frequency" bson:"frequency"`
-	Start     string  `json:"start,omitempty" bson:"start,omitempty"`
-	End       string  `json:"end,omitempty" bson:"end,omitempty"`
-	GrowthPct float64 `json:"growth_pct,omitempty" bson:"growth_pct,omitempty"`
+	ID        string  `json:"id" db:"id"`
+	Amount    float64 `json:"amount"`
+	Currency  string  `json:"currency"`
+	Frequency string  `json:"frequency"`
+	Start     string  `json:"start,omitempty"`
+	End       string  `json:"end,omitempty"`
+	GrowthPct float64 `json:"growth_pct,omitempty"`
 	// Deprecated: use Kind "reimbursement". Still read so stored streams keep working.
-	Reimbursement bool `json:"reimbursement,omitempty" bson:"reimbursement,omitempty" jsonschema:"deprecated; use kind reimbursement"`
+	Reimbursement bool `json:"reimbursement,omitempty" jsonschema:"deprecated; use kind reimbursement"`
 	// Kind is salary, side or reimbursement. Reimbursement streams repay spend already paid from Kyiv cash, so they net against Kyiv instead of adding wealth.
-	Kind string `json:"kind,omitempty" bson:"kind,omitempty" jsonschema:"salary, side or reimbursement; reimbursement is never counted as income"`
+	Kind string `json:"kind,omitempty" jsonschema:"salary, side or reimbursement; reimbursement is never counted as income"`
 	// PayerMatch is a CEL expression over row.payee and row.tags selecting the entries that pay this stream.
-	PayerMatch string `json:"payer_match,omitempty" bson:"payer_match,omitempty" jsonschema:"CEL over row.payee and row.tags selecting entries that pay this stream, e.g. row.payee == \"Acme\""`
+	PayerMatch string `json:"payer_match,omitempty" jsonschema:"CEL over row.payee and row.tags selecting entries that pay this stream, e.g. row.payee == \"Acme\""`
 	// LandsIn is the account id receiving the money; without it actuals are read from income-type accounts.
-	LandsIn    string `json:"lands_in,omitempty" bson:"lands_in,omitempty" jsonschema:"account id receiving the money; empty reads income-type accounts"`
-	GrossOrNet string `json:"gross_or_net,omitempty" bson:"gross_or_net,omitempty" jsonschema:"gross or net"`
+	LandsIn    string `json:"lands_in,omitempty" jsonschema:"account id receiving the money; empty reads income-type accounts"`
+	GrossOrNet string `json:"gross_or_net,omitempty" jsonschema:"gross or net"`
 }
 
 func (v Income) IsReimbursement() bool { return v.Kind == "reimbursement" || v.Reimbursement }
@@ -118,9 +118,9 @@ type Projection struct {
 	RunwayExGold   *float64 `json:"runway_ex_gold"`
 	Provenance
 }
-type MongoRepository struct{ db *mongo.Database }
+type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
-	repo   *MongoRepository
+	repo   *PostgresRepository
 	tables *tables.Service
 	audit  *audit.Service
 	expr   *expressions.Engine
@@ -135,8 +135,8 @@ type Service struct {
 // EngineAssumptions are the names Project reads; scenarios may override them without a stored row.
 var EngineAssumptions = []string{"start_net_usd", "wise_usd", "kyiv_usd", "gold_g", "gold_usd_g", "eurusd", "income_usd", "spend_eur", "kyiv_extra_drain_usd", "yield_pct", "buffer_usd", "gold_shock_pct", "horizon"}
 
-func NewMongoRepository(db *mongo.Database) *MongoRepository { return &MongoRepository{db} }
-func NewService(r *MongoRepository, t *tables.Service, a *audit.Service, e *expressions.Engine) *Service {
+func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }
+func NewService(r *PostgresRepository, t *tables.Service, a *audit.Service, e *expressions.Engine) *Service {
 	return &Service{repo: r, tables: t, audit: a, expr: e}
 }
 func (s *Service) Get(ctx context.Context, p principal.Principal) (State, error) {
@@ -153,24 +153,27 @@ func (s *Service) load(ctx context.Context, p principal.Principal) (State, error
 	} else if !errors.Is(e, principal.ErrNotFound) {
 		return out, e
 	}
-	cur, e := s.repo.db.Collection("scenarios").Find(ctx, bson.M{"user_id": p.UserID, "archived": bson.M{"$ne": true}}, options.Find().SetSort(bson.D{{Key: "id", Value: 1}}).SetLimit(101))
+	cur, e := s.repo.db.Query(ctx, `SELECT * FROM scenarios WHERE user_id=@user AND NOT archived ORDER BY id LIMIT 101`, pgx.NamedArgs{"user": p.UserID})
 	if e != nil {
 		return out, e
 	}
-	defer cur.Close(ctx)
-	if e = cur.All(ctx, &out.Scenarios); e != nil {
+	out.Scenarios, e = pgx.CollectRows(cur, pgx.RowToStructByName[Scenario])
+	if e != nil {
 		return out, e
+	}
+	if out.Scenarios == nil {
+		out.Scenarios = []Scenario{}
 	}
 	if len(out.Scenarios) > 100 {
 		return out, fmt.Errorf("at most 100 scenarios")
 	}
 	var streams struct {
-		Streams []Income `bson:"streams"`
+		Streams []Income ``
 	}
-	e = s.repo.db.Collection("income_models").FindOne(ctx, bson.M{"_id": p.UserID}).Decode(&streams)
+	e = s.repo.db.QueryRow(ctx, `SELECT streams FROM income_models WHERE id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&streams.Streams)
 	if e == nil {
 		out.Streams = streams.Streams
-	} else if !errors.Is(e, mongo.ErrNoDocuments) {
+	} else if !postgres.IsNotFound(e) {
 		return out, e
 	}
 	return out, nil
@@ -220,12 +223,13 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 	in.UserID = p.UserID
 	in.Key = p.UserID + ":" + in.ID
 	err := s.audit.Workflow(ctx, func(tx context.Context) error {
-		collection := s.repo.db.Collection("scenarios")
-		filter := bson.M{"user_id": p.UserID, "id": in.ID}
-		var before Scenario
-		err := collection.FindOne(tx, filter).Decode(&before)
+		rows, err := s.repo.db.Query(tx, `SELECT * FROM scenarios WHERE user_id=@user AND id=@id`, pgx.NamedArgs{"user": p.UserID, "id": in.ID})
+		if err != nil {
+			return err
+		}
+		before, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[Scenario])
 		exists := err == nil
-		if err != nil && !errors.Is(err, mongo.ErrNoDocuments) {
+		if err != nil && !postgres.IsNotFound(err) {
 			return err
 		}
 		if in.ExpectedRevision != nil && ((!exists && *in.ExpectedRevision != -1) || (exists && *in.ExpectedRevision != before.Revision)) {
@@ -238,20 +242,17 @@ func (s *Service) Upsert(ctx context.Context, p principal.Principal, in Scenario
 		in.ExpectedRevision = nil
 		in.Revision = before.Revision + 1
 		_, err = s.audit.Write(tx, p, "scenario_upsert", audit.Target{Collection: "scenarios", ID: in.ID}, "", before, in, func(tx context.Context) error {
+			args := pgx.NamedArgs{"key": in.Key, "user": p.UserID, "id": in.ID, "name": in.Name, "revision": in.Revision, "overrides": in.Overrides, "events": in.Events, "legacy": in.Legacy, "old": before.Revision}
 			if !exists {
-				_, err := collection.InsertOne(tx, in)
-				if mongo.IsDuplicateKeyError(err) {
+				delete(args, "old")
+				_, err := s.repo.db.Exec(tx, `INSERT INTO scenarios(storage_key,user_id,id,name,revision,overrides,events,legacy) VALUES (@key,@user,@id,@name,@revision,COALESCE(@overrides::jsonb,'null'::jsonb),@events,@legacy)`, args)
+				if postgres.IsUniqueViolation(err) {
 					return principal.ErrConflict
 				}
 				return err
 			}
-			if before.Revision == 0 {
-				filter["$or"] = []bson.M{{"revision": 0}, {"revision": bson.M{"$exists": false}}}
-			} else {
-				filter["revision"] = before.Revision
-			}
-			result, err := collection.ReplaceOne(tx, filter, in)
-			if err == nil && result.MatchedCount == 0 {
+			result, err := s.repo.db.Exec(tx, `UPDATE scenarios SET storage_key=@key,name=@name,revision=@revision,overrides=COALESCE(@overrides::jsonb,'null'::jsonb),events=@events,legacy=@legacy,archived=false WHERE user_id=@user AND id=@id AND revision=@old`, args)
+			if err == nil && result.RowsAffected() == 0 {
 				return principal.ErrConflict
 			}
 			return err
@@ -297,14 +298,14 @@ func (s *Service) SetIncome(ctx context.Context, p principal.Principal, streams 
 		}
 	}
 	var before struct {
-		Streams []Income `bson:"streams"`
+		Streams []Income ``
 	}
-	e := s.repo.db.Collection("income_models").FindOne(ctx, bson.M{"_id": p.UserID}).Decode(&before)
-	if e != nil && !errors.Is(e, mongo.ErrNoDocuments) {
+	e := s.repo.db.QueryRow(ctx, `SELECT streams FROM income_models WHERE id=@user`, pgx.NamedArgs{"user": p.UserID}).Scan(&before.Streams)
+	if e != nil && !postgres.IsNotFound(e) {
 		return nil, e
 	}
 	_, e = s.audit.Write(ctx, p, "income_model_set", audit.Target{Collection: "income_models", ID: p.UserID}, "", before.Streams, streams, func(tx context.Context) error {
-		_, e := s.repo.db.Collection("income_models").ReplaceOne(tx, bson.M{"_id": p.UserID}, bson.M{"_id": p.UserID, "user_id": p.UserID, "streams": streams}, options.Replace().SetUpsert(true))
+		_, e := s.repo.db.Exec(tx, `INSERT INTO income_models(id,user_id,streams) VALUES (@user,@user,COALESCE(@streams::jsonb,'null'::jsonb)) ON CONFLICT(id) DO UPDATE SET user_id=EXCLUDED.user_id,streams=EXCLUDED.streams`, pgx.NamedArgs{"user": p.UserID, "streams": streams})
 		return e
 	})
 	return streams, e
