@@ -20,7 +20,7 @@ The screenshot is from the running application. Every amount, account and transa
 
 ## Run
 
-Go 1.26.10 and PostgreSQL 18 are required. No frontend build is needed.
+Go 1.26.11 and PostgreSQL 18 are required. No frontend build is needed.
 
 ```sh
 cd backend
