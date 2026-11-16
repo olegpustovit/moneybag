@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	idclient "github.com/olegpustovit/identity/idclient-go"
 	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
 	"github.com/olegpustovit/moneybag/backend/internal/components/ledger"
 	"github.com/olegpustovit/moneybag/backend/internal/components/oauth"
@@ -53,14 +54,17 @@ type Config struct {
 	Toolsets   map[string]bool
 }
 type Handler struct {
-	authLimit      authLimiter
-	cfg            Config
-	services       mcpserver.Services
-	oauth          *oauth.Service
-	ledgerRepo     *ledger.PostgresRepository
-	pool           *pgxpool.Pool
-	templates      *template.Template
-	full, readonly *mcp.Server
+	identityClients map[string]*idclient.Client
+	identityOrigins map[string]bool
+	identityFlowKey [32]byte
+	authLimit       authLimiter
+	cfg             Config
+	services        mcpserver.Services
+	oauth           *oauth.Service
+	ledgerRepo      *ledger.PostgresRepository
+	pool            *pgxpool.Pool
+	templates       *template.Template
+	full, readonly  *mcp.Server
 }
 
 func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.PostgresRepository, pool *pgxpool.Pool) *Handler {
@@ -132,6 +136,11 @@ func (h *Handler) security(w http.ResponseWriter) {
 }
 func (h *Handler) Handler() http.Handler {
 	mux := http.NewServeMux()
+	if len(h.identityClients) > 0 {
+		mux.HandleFunc("GET /api/auth/id/login", h.identityLogin)
+		mux.HandleFunc("GET /api/auth/id/callback", h.identityCallback)
+		mux.HandleFunc("POST /api/auth/id/logout", h.identityLogout)
+	}
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer cancel()
@@ -296,7 +305,7 @@ func (h *Handler) renderCookie(r *http.Request) (string, preview.Session, bool) 
 	return c.Value, session, e == nil && session.Target.Route != "" && session.GrantHash == ""
 }
 func (h *Handler) csrf(r *http.Request, session identity.Session) bool {
-	if h.cfg.IdentityMode && r.Header.Get("Origin") != h.cfg.PublicURL {
+	if h.cfg.IdentityMode && !h.identityOrigin(r.Header.Get("Origin")) {
 		return false
 	}
 	if origin := r.Header.Get("Origin"); origin != "" && !h.browserOrigin(origin) {

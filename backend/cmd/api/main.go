@@ -172,12 +172,15 @@ func run() error {
 	}
 	sources.Snapshots = snapshots
 	dash.UseSnapshots(snapshots)
+	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, pool)
+	if e := web.ConfigureIdentity(ctx, cfg.Identity); e != nil {
+		return fmt.Errorf("configure Identity: %w", e)
+	}
 	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log)
 	a.OnChange = onChange
 	defer stopPrewarm()
 	stopJobs := startJobs(ctx, services, pool, log)
 	defer stopJobs()
-	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, pool)
 	app := fiber.New(fiber.Config{BodyLimit: 12 * 1024 * 1024, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second})
 	compress, e := handlers.Compression()
 	if e != nil {

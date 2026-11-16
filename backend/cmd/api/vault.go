@@ -61,7 +61,7 @@ func vaultValues() (map[string]string, error) {
 	if e != nil || secret == nil {
 		return nil, fmt.Errorf("Vault configuration read failed")
 	}
-	allowed := map[string]string{"listen": "LISTEN", "public_url": "PUBLIC_URL", "database_url": "DATABASE_URL", "setup_token": "SETUP_TOKEN", "log_format": "LOG_FORMAT", "toolsets": "TOOLSETS", "secret_key": "SECRET_KEY", "chromium_bin": "CHROMIUM_BIN"}
+	allowed := map[string]string{"listen": "LISTEN", "public_url": "PUBLIC_URL", "database_url": "DATABASE_URL", "setup_token": "SETUP_TOKEN", "log_format": "LOG_FORMAT", "toolsets": "TOOLSETS", "secret_key": "SECRET_KEY", "chromium_bin": "CHROMIUM_BIN", "id_enabled": "ID_ENABLED", "id_issuer": "ID_ISSUER", "id_client_id": "ID_CLIENT_ID", "id_client_secret": "ID_CLIENT_SECRET", "id_cookie_key": "ID_COOKIE_KEY"}
 	out := map[string]string{}
 	for key, value := range secret.Data {
 		name, ok := allowed[key]

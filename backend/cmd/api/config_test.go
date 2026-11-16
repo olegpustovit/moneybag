@@ -10,9 +10,10 @@ import (
 )
 
 func TestConfigVaultPrecedenceAndSecretValidation(t *testing.T) {
-	for _, key := range []string{"LISTEN", "PUBLIC_URL", "DATABASE_URL", "SETUP_TOKEN", "LOG_FORMAT", "TOOLSETS", "SECRET_KEY"} {
+	for _, key := range []string{"LISTEN", "PUBLIC_URL", "DATABASE_URL", "SETUP_TOKEN", "LOG_FORMAT", "TOOLSETS", "SECRET_KEY", "ID_ENABLED", "ID_ISSUER", "ID_CLIENT_ID", "ID_CLIENT_SECRET", "ID_COOKIE_KEY"} {
 		t.Setenv("MONEYBAG_"+key, "")
 	}
+	t.Setenv("MONEYBAG_ID_ENABLED", "false")
 	t.Setenv("MONEYBAG_PUBLIC_URL", "http://127.0.0.1:6459")
 	t.Setenv("MONEYBAG_DATABASE_URL", "postgres://localhost/test")
 	t.Setenv("MONEYBAG_LOG_FORMAT", "text")

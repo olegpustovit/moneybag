@@ -21,3 +21,13 @@ func (h *Handler) localCredentialsUnavailable(w http.ResponseWriter) bool {
 	http.Error(w, "Local credentials are unavailable while Identity sign-in is enabled.", http.StatusForbidden)
 	return true
 }
+
+func (h *Handler) identityOrigin(origin string) bool {
+	if origin == "" {
+		return false
+	}
+	if len(h.identityOrigins) > 0 {
+		return h.identityOrigins[origin]
+	}
+	return origin == h.cfg.PublicURL
+}

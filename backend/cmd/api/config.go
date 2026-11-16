@@ -1,16 +1,20 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/olegpustovit/moneybag/backend/cmd/api/handlers"
 	"net"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 )
 
 type config struct {
+	Identity                                                                    handlers.IdentityConfig
 	Listen, PublicURL, TailnetURL, DatabaseURL, SetupToken, LogFormat, Chromium string
 	Toolsets                                                                    map[string]bool
 	SecretKey                                                                   []byte
@@ -63,6 +67,25 @@ func loadConfig() (config, error) {
 		c.SecretKey, e = base64.StdEncoding.DecodeString(key)
 		if e != nil || len(c.SecretKey) != 32 {
 			return c, fmt.Errorf("MONEYBAG_SECRET_KEY must be base64 encoding of 32 bytes")
+		}
+	}
+
+	enabled, e := strconv.ParseBool(env("ID_ENABLED", "false"))
+	if e != nil {
+		return c, fmt.Errorf("MONEYBAG_ID_ENABLED must be true or false")
+	}
+	c.Identity = handlers.IdentityConfig{Enabled: enabled, Issuer: env("ID_ISSUER", "https://id.microapps.space"), ClientID: env("ID_CLIENT_ID", ""), ClientSecret: env("ID_CLIENT_SECRET", "")}
+	if enabled {
+		key, err := base64.StdEncoding.DecodeString(env("ID_COOKIE_KEY", ""))
+		if err != nil || len(key) != 32 {
+			return c, fmt.Errorf("MONEYBAG_ID_COOKIE_KEY must be base64 encoding of an independent 32-byte key")
+		}
+		copy(c.Identity.CookieKey[:], key)
+		if bytes.Equal(key, c.SecretKey) {
+			return c, fmt.Errorf("MONEYBAG_ID_COOKIE_KEY must be independent of MONEYBAG_SECRET_KEY")
+		}
+		if err := c.Identity.Validate(c.PublicURL, c.TailnetURL); err != nil {
+			return c, err
 		}
 	}
 	allowed := map[string]bool{"account": true, "ledger": true, "rates": true, "budget": true, "tables": true, "model": true, "dashboard": true, "audit": true, "classify": true, "import": true, "reconcile": true, "admin": true}

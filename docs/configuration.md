@@ -13,6 +13,11 @@ Settings are read once at startup: typed defaults, optional Vault values, then e
 | `MONEYBAG_TAILNET_URL` | Empty; optional second browser origin such as `https://host.tailnet.ts.net:8443`. Sign-in and CSRF checks accept it. OAuth, connectors and share links always use `MONEYBAG_PUBLIC_URL` |
 | `MONEYBAG_CHROMIUM_BIN` | Chromium executable for `dashboard_render`, which opens the app on its own loopback listener; blank returns validation without an image |
 | `MONEYBAG_TOOLSETS` | Empty enables all; comma-separated `account,ledger,rates,budget,tables,model,dashboard,audit,classify,import,reconcile` |
+| `MONEYBAG_ID_ENABLED` | `false`; opt-in shared Identity SDK (draft rollout; UI/provider qualification still pending) |
+| `MONEYBAG_ID_ISSUER` | `https://id.microapps.space`; HTTPS or exact loopback HTTP, no credentials/query/fragment |
+| `MONEYBAG_ID_CLIENT_ID` | Required when ID is enabled |
+| `MONEYBAG_ID_CLIENT_SECRET` | Optional confidential-client secret, never printed |
+| `MONEYBAG_ID_COOKIE_KEY` | Independent nonzero 32-byte base64 flow key, required when enabled; cannot equal the feed secret key |
 
 `bootstrap` is an optional noninteractive first-owner command using `MONEYBAG_OWNER_EMAIL`, `MONEYBAG_OWNER_NAME` and `MONEYBAG_OWNER_PASSWORD`. It refuses a second owner bootstrap. Never put passwords in command arguments or commit an environment file.
 
@@ -22,7 +27,7 @@ Disabled by default. Set `MONEYBAG_VAULT_ENABLED=true`, `MONEYBAG_VAULT_ADDR`, `
 
 The default auth method is AppRole, using `MONEYBAG_VAULT_ROLE_ID` and `MONEYBAG_VAULT_SECRET_ID`. For an intentional token integration, set `MONEYBAG_VAULT_AUTH_METHOD=token` and `MONEYBAG_VAULT_TOKEN`. TLS verification remains enabled. A configured Vault failure aborts startup. AppRole tokens are revoked after the one-time static configuration read; no runtime lease is retained.
 
-KV v2 string keys are `listen`, `public_url`, `database_url`, `log_format`, `setup_token`, `secret_key`, `chromium_bin` and `toolsets`. Unknown keys are rejected. The implementation uses the [official Vault client and AppRole API](https://developer.hashicorp.com/vault/docs/auth/approle).
+KV v2 string keys are `listen`, `public_url`, `database_url`, `log_format`, `setup_token`, `secret_key`, `chromium_bin`, `toolsets`, `id_enabled`, `id_issuer`, `id_client_id`, `id_client_secret` and `id_cookie_key`. Unknown keys are rejected. The implementation uses the [official Vault client and AppRole API](https://developer.hashicorp.com/vault/docs/auth/approle).
 
 ## Clients and feeds
 
@@ -34,3 +39,12 @@ The ECB daily reference feed is built in. Manual historical quotes accept curren
 
 
 The API ignores legacy `MONEYBAG_MONGO_*` environment entries. Preserve them during the 30-day rollback window because the previous MongoDB release needs them. The isolated copy command uses `MONEYBAG_MIGRATE_MONGO_URI`; see [its runbook](../backend/cmd/migrate-mongo/README.md). Keep both database URLs in private mode-0600 environment files.
+
+
+## Identity callbacks
+
+Enabled startup validates configuration and discovers the issuer before listening. Register each exact callback: `MONEYBAG_PUBLIC_URL` plus `/api/auth/id/callback`, and the optional `MONEYBAG_TAILNET_URL` plus that same path. Callback origins must be canonical (lowercase hosts, no default :443/:80 port, path, query or fragment), with distinct hosts/ports. The app selects only those hosts; unknown Host values cannot choose a callback. Each SDK client binds its flow cookie to its own callback origin. ID cookie mutations accept only the exact configured callback origins; logout additionally uses the selected SDK client's exact origin. Legacy mode retains its existing origin behavior.
+
+The backend mounts GET `/api/auth/id/login`, GET `/api/auth/id/callback` and POST `/api/auth/id/logout`. Local invitation intent is signed, HttpOnly and bound to SDK state. Existing users retain profiles and credentials; newly invited ID users stay pending until their default ledger/model setup succeeds. A failed partial setup can finish on a fresh normal ID sign-in without reusing the consumed invitation or resetting existing assumptions.
+
+Keep ID disabled until UI, real-provider/persistent eval qualification and the per-app production gate are complete. The draft uses a local sibling SDK replacement until the shared module has a reproducible published pin. No secrets belong in the repository or command arguments.

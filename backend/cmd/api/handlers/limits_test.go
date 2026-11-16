@@ -34,3 +34,29 @@ func TestAuthenticationBoundaries(t *testing.T) {
 		t.Fatal("own origin rejected")
 	}
 }
+
+func TestIdentitySDKRoutesShareTheExistingAuthenticationBudget(t *testing.T) {
+	h := &Handler{cfg: Config{IdentityMode: true}}
+	for i := 0; i < 60; i++ {
+		path := "/api/auth/id/login"
+		if i%2 == 1 {
+			path = "/api/auth/id/callback"
+		}
+		request := httptest.NewRequest("GET", path, nil)
+		request.RemoteAddr = "127.0.0.1:1234"
+		if h.limited(httptest.NewRecorder(), request) {
+			t.Fatal("SDK request limited before existing budget")
+		}
+	}
+	request := httptest.NewRequest("GET", "/api/auth/id/callback", nil)
+	request.RemoteAddr = "127.0.0.1:5678"
+	out := httptest.NewRecorder()
+	if !h.limited(out, request) || out.Code != 429 || out.Header().Get("Retry-After") != "60" {
+		t.Fatal("SDK callback bypassed authentication budget")
+	}
+	logout := httptest.NewRequest("POST", "/api/auth/id/logout", nil)
+	logout.RemoteAddr = request.RemoteAddr
+	if h.limited(httptest.NewRecorder(), logout) {
+		t.Fatal("authentication attempts prevented app signout")
+	}
+}

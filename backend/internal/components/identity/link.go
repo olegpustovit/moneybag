@@ -97,7 +97,7 @@ func linkIdentityTx(ctx context.Context, tx pgx.Tx, subject, email string) (User
 }
 
 // RegisterIdentity requires a live, matching local invite, even on an empty
-// server. Created tells the transport whether this user needs first-time defaults.
+// server. Created reports account creation; pending initialization is persisted for retry.
 // Invite consumption, account creation and subject binding commit together.
 func (s *Service) RegisterIdentity(ctx context.Context, subject, email, name, token string) (User, bool, error) {
 	email, err := verifiedIdentity(subject, email)
@@ -132,7 +132,7 @@ func (s *Service) RegisterIdentity(ctx context.Context, subject, email, name, to
 			if _, err = tx.Exec(ctx, insertUserSQL, pgx.NamedArgs{"id": user.ID, "email": user.Email, "name": user.Name, "admin": false, "at": now, "disabled": false}); err != nil {
 				return err
 			}
-			if _, err = tx.Exec(ctx, insertIdentitySQL, pgx.NamedArgs{"subject": subject, "user": user.ID}); err != nil {
+			if _, err = tx.Exec(ctx, `INSERT INTO user_identities(subject,user_id,needs_initialization) VALUES(@subject,@user,true)`, pgx.NamedArgs{"subject": subject, "user": user.ID}); err != nil {
 				return err
 			}
 			created = true

@@ -16,7 +16,11 @@ func (s *Service) StartIdentitySession(ctx context.Context, user User) (string, 
 	if err != nil {
 		return "", Session{}, err
 	}
-	if current.Disabled {
+	pending, err := s.IdentityNeedsInitialization(ctx, user.ID)
+	if err != nil {
+		return "", Session{}, err
+	}
+	if current.Disabled || pending {
 		return "", Session{}, principal.ErrForbidden
 	}
 	return s.startSession(ctx, current, true)
