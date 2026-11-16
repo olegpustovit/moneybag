@@ -40,6 +40,7 @@ func (h *Handler) ConfigureIdentity(ctx context.Context, cfg IdentityConfig) err
 		origins[origin] = true
 	}
 	h.identityClients, h.identityOrigins, h.identityFlowKey = clients, origins, cfg.CookieKey
+	h.identityAccountURL = strings.TrimRight(cfg.Issuer, "/") + "/account"
 	h.cfg.IdentityMode = true
 	return nil
 }
@@ -167,4 +168,13 @@ func (s identitySessions) Clear(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.h.writeSessionCookie(w, "", -1)
 	return nil
+}
+
+func (h *Handler) sessionData(user identity.User, session identity.Session) map[string]any {
+	data := map[string]any{"user": user, "csrf": session.CSRF, "version": h.cfg.Version, "mcp_url": "/api/mcp"}
+	if h.cfg.IdentityMode {
+		data["identity_enabled"] = true
+		data["identity_account_url"] = h.identityAccountURL
+	}
+	return data
 }

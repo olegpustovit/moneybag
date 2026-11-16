@@ -1,6 +1,6 @@
 # Identity rollout preparation
 
-This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. The sign-in UI and actual-provider/persistent smoke qualification remain unfinished, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
+This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. Actual-provider/persistent smoke qualification remains unfinished, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
 
 ## Persistence and account rules
 
@@ -50,3 +50,11 @@ The shared module is temporarily replaced with `../../identity/idclient-go`; the
 SDK login/callback routes share the existing 60-per-minute authentication budget; exhaustion never prevents app logout. Password rollback remains available only for users with pre-existing local credentials; new ID-only accounts deliberately have no local password. The API dependency scan reports zero reachable vulnerabilities, while retaining one uncalled imported-package and one module-only finding in its report.
 
 Final backend SDK checks: complete backend tests on owned PostgreSQL 18 passed (integration package 21.92 s), focused identity/handler/integration race suites passed (3.92 s integration), vet/API build passed, and the API vulnerability scan reported zero reachable findings. No frontend or production behavior is qualified by these backend-only results.
+
+## Sign-in and account UI
+
+Configured ID mode renders the existing sign-in and invitation page with a native GET Continue with ID form, retaining the requested local destination and invitation token. Unknown callback hosts remain rejected and local credential POST routes remain closed. With the flag off, the original password forms and account settings remain available.
+
+Both session and bootstrap responses expose only the enabled flag and configured issuer account URL for this UI. Settings hides local password changes in ID mode, links to ID account management and submits sign-out to the SDK endpoint after clearing the cached ledger. Legacy sign-out keeps its original route and spacing.
+
+The complete owned-PostgreSQL backend suite passes (integration 23.77 s), focused SDK/page/metadata race checks pass, and API vet/build pass. UI tests pass (38 component cases plus existing utility checks); production build, type check and size budgets pass. Lint reports the existing unrelated no-useless-spread warning in ledger accounts. Twenty browser captures cover 1440/390 px and light/dark sign-in, invitation and settings in both modes, checking keyboard focus, hidden password controls, correct sign-out route and no overflow. Native auth renders use the real templates/built stylesheet; settings uses the built SPA with fixture API responses. These checks do not substitute for successful actual-provider sign-in or persistent eval deployment smokes, which remain pending.

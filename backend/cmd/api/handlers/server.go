@@ -54,17 +54,18 @@ type Config struct {
 	Toolsets   map[string]bool
 }
 type Handler struct {
-	identityClients map[string]*idclient.Client
-	identityOrigins map[string]bool
-	identityFlowKey [32]byte
-	authLimit       authLimiter
-	cfg             Config
-	services        mcpserver.Services
-	oauth           *oauth.Service
-	ledgerRepo      *ledger.PostgresRepository
-	pool            *pgxpool.Pool
-	templates       *template.Template
-	full, readonly  *mcp.Server
+	identityClients    map[string]*idclient.Client
+	identityOrigins    map[string]bool
+	identityFlowKey    [32]byte
+	identityAccountURL string
+	authLimit          authLimiter
+	cfg                Config
+	services           mcpserver.Services
+	oauth              *oauth.Service
+	ledgerRepo         *ledger.PostgresRepository
+	pool               *pgxpool.Pool
+	templates          *template.Template
+	full, readonly     *mcp.Server
 }
 
 func New(cfg Config, s mcpserver.Services, oa *oauth.Service, repo *ledger.PostgresRepository, pool *pgxpool.Pool) *Handler {

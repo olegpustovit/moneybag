@@ -15,7 +15,7 @@ import (
 
 type authPage struct {
 	Title, Action, Error, Token, Next, CSRF string
-	Setup, Register, Consent                bool
+	Setup, Register, Consent, Identity      bool
 	ClientName                              string
 	Scopes                                  []string
 	Authorization                           oauth.Authorization
@@ -42,6 +42,13 @@ func (h *Handler) authOrigin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.IdentityMode && len(h.identityClients) > 0 {
+		if h.identityClient(w, r) == nil {
+			return
+		}
+		h.authRender(w, 200, authPage{Title: "Sign in to Moneybag", Action: "/api/auth/id/login", Identity: true, Next: localNext(r.URL.Query().Get("next"))})
+		return
+	}
 	if h.localCredentialsUnavailable(w) {
 		return
 	}
@@ -120,6 +127,13 @@ func (h *Handler) setup(w http.ResponseWriter, r *http.Request) {
 	h.startSession(w, r, u, "/")
 }
 func (h *Handler) registerPage(w http.ResponseWriter, r *http.Request) {
+	if h.cfg.IdentityMode && len(h.identityClients) > 0 {
+		if h.identityClient(w, r) == nil {
+			return
+		}
+		h.authRender(w, 200, authPage{Title: "Join Moneybag", Action: "/api/auth/id/login", Identity: true, Register: true, Token: r.URL.Query().Get("token"), Next: "/"})
+		return
+	}
 	if h.localCredentialsUnavailable(w) {
 		return
 	}

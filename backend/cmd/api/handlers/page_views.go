@@ -213,7 +213,7 @@ func (h *Handler) bootstrap(ctx context.Context, p principal.Principal, session 
 		return dashboard.Encoded{}, err
 	}
 	out := map[string]any{
-		"session":    map[string]any{"user": user, "csrf": session.CSRF, "version": h.cfg.Version, "mcp_url": "/api/mcp"},
+		"session":    h.sessionData(user, session),
 		"nav":        nav,
 		"dashboards": dashboards,
 		"tables":     tables,

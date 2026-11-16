@@ -72,7 +72,7 @@ func (h *Handler) apiSession(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusServiceUnavailable, map[string]string{"error": "account unavailable"})
 		return
 	}
-	respond(w, http.StatusOK, map[string]any{"user": user, "csrf": session.CSRF, "version": h.cfg.Version, "mcp_url": "/api/mcp"})
+	respond(w, http.StatusOK, h.sessionData(user, session))
 }
 
 func (h *Handler) apiImports(w http.ResponseWriter, r *http.Request) {

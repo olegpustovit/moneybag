@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import type { MoneybagTools } from './tools'
 
-export interface Session { user: { id: string; name: string; email: string; is_admin: boolean }; csrf: string; version: string; mcp_url: string }
+export interface Session { user: { id: string; name: string; email: string; is_admin: boolean }; csrf: string; version: string; mcp_url: string; identity_enabled?: boolean; identity_account_url?: string }
 export class ApiError extends Error { readonly status: number; constructor(message: string, status: number) { super(message); this.status = status } }
 export type NavItem = { id:string; label:string; icon:string; dashboard?:string; route?:string }
 export type DashboardHead = { id:string; title:string; published_version:number; draft_version:number; revision:number; home?:boolean; published_at?:string; published_by?:{id:string;kind:string} }

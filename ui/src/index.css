@@ -138,7 +138,7 @@ th { color:var(--text2); font-weight:600; }
 .settings-form [data-slot="field-group"] { gap:12px; }
 .settings-section .form-message { margin-top:10px; font-size:13px; }
 .settings-section .error { color:var(--neg); }
-.settings-section form[action="/logout"] { margin-top:8px; }
+.settings-section form[action="/logout"], .settings-section form[action="/api/auth/id/logout"] { margin-top:8px; }
 .invitation { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
 .invitation input { max-width:32rem; }
 @media (max-width:600px) { .setting-inline, .endpoint { align-items:flex-start; flex-direction:column; } .settings-form { align-items:stretch; flex-direction:column; } }
