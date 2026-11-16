@@ -167,7 +167,7 @@ func (h *Handler) apiBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := reqcache.With(r.Context())
 	renderToken, _, rendering := h.renderCookie(r)
-	if _, e := r.Cookie("moneybag_session"); e == nil {
+	if _, e := r.Cookie(h.sessionCookieName()); e == nil {
 		renderToken, rendering = "", false // a normal session always wins
 	}
 	build := func() (dashboard.Encoded, error) { return h.bootstrap(ctx, p, session, renderToken) }

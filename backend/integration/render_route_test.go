@@ -54,7 +54,7 @@ func (h *readHarness) docCounts(t *testing.T) map[string]int64 {
 	t.Helper()
 	out := map[string]int64{}
 	pool := pgtest.New(t)
-	for _, name := range []string{"counters", "prices", "rate_sync", "feedback", "saved_views", "usage", "users", "credentials", "sessions", "invites", "settings", "oauth_clients", "oauth_codes", "oauth_grants", "oauth_tokens", "admin_confirmations", "shares", "dashboard_snapshots", "events", "audit_outcomes", "accounts", "journal", "entry_tags", "balances", "budgets", "rules", "balance_assertions", "discrepancies", "scenarios", "income_models", "tables", "rows", "row_keys", "import_batches", "import_rows", "import_files", "feeds", "dashboards", "dashboard_versions", "views", "metrics", "labels", "payee_aliases", "annotations", "nav"} {
+	for _, name := range []string{"counters", "prices", "rate_sync", "feedback", "saved_views", "usage", "users", "user_identities", "credentials", "sessions", "invites", "settings", "oauth_clients", "oauth_codes", "oauth_grants", "oauth_tokens", "admin_confirmations", "shares", "dashboard_snapshots", "events", "audit_outcomes", "accounts", "journal", "entry_tags", "balances", "budgets", "rules", "balance_assertions", "discrepancies", "scenarios", "income_models", "tables", "rows", "row_keys", "import_batches", "import_rows", "import_files", "feeds", "dashboards", "dashboard_versions", "views", "metrics", "labels", "payee_aliases", "annotations", "nav"} {
 		var count int64
 		if err := pool.QueryRow(h.ctx, "SELECT count(*) FROM "+pgx.Identifier{name}.Sanitize()).Scan(&count); err != nil {
 			t.Fatal(err)
@@ -65,7 +65,20 @@ func (h *readHarness) docCounts(t *testing.T) map[string]int64 {
 }
 
 func TestRouteRenderIsReadOnly(t *testing.T) {
-	h := newReadHarness(t, "_route_render", nil)
+	for _, mode := range []bool{false, true} {
+		name := "legacy"
+		if mode {
+			name = "identity"
+		}
+		t.Run(name, func(t *testing.T) { testRouteRenderIsReadOnly(t, mode) })
+	}
+}
+func testRouteRenderIsReadOnly(t *testing.T, identityMode bool) {
+	h := newReadHarnessMode(t, "_route_render", nil, identityMode)
+	sessionName := "moneybag_session"
+	if identityMode {
+		sessionName = "__Host-moneybag_session"
+	}
 	ctx := context.Background()
 	token, err := h.services.Previews.Issue(h.owner, "", preview.Target{Route: "/budget", Theme: "dark"})
 	if err != nil {
@@ -85,13 +98,13 @@ func TestRouteRenderIsReadOnly(t *testing.T) {
 	if status != 200 || !strings.Contains(body, `"render_token":"`+token+`"`) {
 		t.Fatal("render bootstrap", status, body)
 	}
-	if status, body, _ = h.renderReq(t, "GET", "/api/bootstrap", "", &http.Cookie{Name: "moneybag_session", Value: h.cookie}); status != 200 || strings.Contains(body, "render_token") || !strings.Contains(body, h.csrf) {
+	if status, body, _ = h.renderReq(t, "GET", "/api/bootstrap", "", &http.Cookie{Name: sessionName, Value: h.cookie}); status != 200 || strings.Contains(body, "render_token") || !strings.Contains(body, h.csrf) {
 		t.Fatal("normal bootstrap", status, body)
 	}
 	if status, body, _ = h.renderReq(t, "GET", "/api/bootstrap", "", cookie); !strings.Contains(body, "render_token") {
 		t.Fatal("render bootstrap after a normal one was cached", status, body)
 	}
-	if status, body, _ = h.renderReq(t, "GET", "/api/bootstrap", "", cookie, &http.Cookie{Name: "moneybag_session", Value: h.cookie}); strings.Contains(body, "render_token") {
+	if status, body, _ = h.renderReq(t, "GET", "/api/bootstrap", "", cookie, &http.Cookie{Name: sessionName, Value: h.cookie}); strings.Contains(body, "render_token") {
 		t.Fatal("a normal session must win", status)
 	}
 	if status, body, _ = h.renderReq(t, "POST", "/api/mcp", mcpCall("whoami"), cookie); status != 200 || strings.Contains(body, `"isError":true`) || !strings.Contains(body, "ledger:read") || strings.Contains(body, "ledger:write") {

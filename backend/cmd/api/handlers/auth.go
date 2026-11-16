@@ -42,9 +42,15 @@ func (h *Handler) authOrigin(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 func (h *Handler) loginPage(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	h.authRender(w, 200, authPage{Title: "Sign in to Moneybag", Action: "/login", Next: localNext(r.URL.Query().Get("next"))})
 }
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	if !h.authOrigin(w, r) {
 		return
 	}
@@ -56,15 +62,24 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	h.startSession(w, r, u, localNext(r.FormValue("next")))
 }
 func (h *Handler) startSession(w http.ResponseWriter, r *http.Request, u identity.User, next string) {
-	raw, _, e := h.services.Identity.StartSession(r.Context(), u)
+	var raw string
+	var e error
+	if h.cfg.IdentityMode {
+		raw, _, e = h.services.Identity.StartIdentitySession(r.Context(), u)
+	} else {
+		raw, _, e = h.services.Identity.StartSession(r.Context(), u)
+	}
 	if e != nil {
 		http.Error(w, "could not start session; try again", 500)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "moneybag_session", Value: raw, Path: "/", HttpOnly: true, Secure: strings.HasPrefix(h.cfg.PublicURL, "https://"), SameSite: http.SameSiteLaxMode, MaxAge: 7 * 24 * 60 * 60})
+	h.writeSessionCookie(w, raw, 7*24*60*60)
 	http.Redirect(w, r, next, http.StatusSeeOther)
 }
 func (h *Handler) setupPage(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	needed, e := h.services.Identity.NeedsSetup(r.Context())
 	if e != nil {
 		http.Error(w, "storage unavailable", 503)
@@ -77,6 +92,9 @@ func (h *Handler) setupPage(w http.ResponseWriter, r *http.Request) {
 	h.authRender(w, 200, authPage{Title: "Set up Moneybag", Action: "/setup", Setup: true})
 }
 func (h *Handler) setup(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	if !h.authOrigin(w, r) {
 		return
 	}
@@ -102,9 +120,15 @@ func (h *Handler) setup(w http.ResponseWriter, r *http.Request) {
 	h.startSession(w, r, u, "/")
 }
 func (h *Handler) registerPage(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	h.authRender(w, 200, authPage{Title: "Join Moneybag", Action: "/register", Register: true, Token: r.URL.Query().Get("token")})
 }
 func (h *Handler) registerUser(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	if !h.authOrigin(w, r) {
 		return
 	}
@@ -130,12 +154,17 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "reload and retry", 403)
 		return
 	}
-	cookie, _ := r.Cookie("moneybag_session")
-	if e = h.services.Identity.Logout(r.Context(), cookie.Value); e != nil {
+	cookie, _ := r.Cookie(h.sessionCookieName())
+	if h.cfg.IdentityMode {
+		e = h.services.Identity.LogoutIdentity(r.Context(), cookie.Value)
+	} else {
+		e = h.services.Identity.Logout(r.Context(), cookie.Value)
+	}
+	if e != nil {
 		http.Error(w, "could not sign out; retry", 500)
 		return
 	}
-	http.SetCookie(w, &http.Cookie{Name: "moneybag_session", Value: "", Path: "/", MaxAge: -1, HttpOnly: true, Secure: strings.HasPrefix(h.cfg.PublicURL, "https://"), SameSite: http.SameSiteLaxMode})
+	h.writeSessionCookie(w, "", -1)
 	http.Redirect(w, r, "/login", 303)
 }
 func (h *Handler) registerClient(w http.ResponseWriter, r *http.Request) {

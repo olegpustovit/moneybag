@@ -174,16 +174,26 @@ func (s *Service) Login(ctx context.Context, email, password string) (User, erro
 	return u, nil
 }
 func (s *Service) StartSession(ctx context.Context, u User) (string, Session, error) {
+	return s.startSession(ctx, u, false)
+}
+func (s *Service) startSession(ctx context.Context, u User, identityMode bool) (string, Session, error) {
 	raw := Random()
-	session := Session{Hash: Hash(raw), UserID: u.ID, CSRF: Random(), ExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Millisecond)}
+	hash := Hash(raw)
+	if identityMode {
+		hash = identitySessionHash(raw)
+	}
+	session := Session{Hash: hash, UserID: u.ID, CSRF: Random(), ExpiresAt: time.Now().UTC().Add(7 * 24 * time.Hour).Truncate(time.Millisecond)}
 	const sessionSQL = `INSERT INTO sessions (id,user_id,csrf,expires_at) VALUES (@id,@user,@csrf,@expires)`
 	_, e := s.repo.db.Exec(ctx, sessionSQL, pgx.NamedArgs{"id": session.Hash, "user": session.UserID, "csrf": session.CSRF, "expires": session.ExpiresAt})
 	return raw, session, e
 }
 func (s *Service) Session(ctx context.Context, raw string) (principal.Principal, Session, error) {
+	return s.session(ctx, Hash(raw))
+}
+func (s *Service) session(ctx context.Context, hash string) (principal.Principal, Session, error) {
 	var session Session
 	const sessionSQL = `SELECT id,user_id,csrf,expires_at FROM sessions WHERE id=@id AND expires_at>@now`
-	e := s.repo.db.QueryRow(ctx, sessionSQL, pgx.NamedArgs{"id": Hash(raw), "now": time.Now().UTC().Truncate(time.Millisecond)}).Scan(&session.Hash, &session.UserID, &session.CSRF, &session.ExpiresAt)
+	e := s.repo.db.QueryRow(ctx, sessionSQL, pgx.NamedArgs{"id": hash, "now": time.Now().UTC().Truncate(time.Millisecond)}).Scan(&session.Hash, &session.UserID, &session.CSRF, &session.ExpiresAt)
 	if e != nil {
 		if errors.Is(e, pgx.ErrNoRows) {
 			e = principal.ErrForbidden
@@ -204,7 +214,10 @@ func Principal(u User) principal.Principal {
 	return principal.Principal{UserID: u.ID, Scopes: scopes, Actor: principal.Actor{Kind: "human", ID: u.ID}, Admin: u.Admin}
 }
 func (s *Service) Logout(ctx context.Context, raw string) error {
-	_, e := s.repo.db.Exec(ctx, `DELETE FROM sessions WHERE id=@id`, pgx.NamedArgs{"id": Hash(raw)})
+	return s.logout(ctx, Hash(raw))
+}
+func (s *Service) logout(ctx context.Context, hash string) error {
+	_, e := s.repo.db.Exec(ctx, `DELETE FROM sessions WHERE id=@id`, pgx.NamedArgs{"id": hash})
 	return e
 }
 func (s *Service) Invite(ctx context.Context, p principal.Principal, email string) (string, error) {

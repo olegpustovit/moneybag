@@ -72,6 +72,9 @@ func (h *Handler) settingsRevoke(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/settings", 303)
 }
 func (h *Handler) settingsPassword(w http.ResponseWriter, r *http.Request) {
+	if h.localCredentialsUnavailable(w) {
+		return
+	}
 	p, ok := h.settingsPrincipal(w, r)
 	if !ok {
 		return

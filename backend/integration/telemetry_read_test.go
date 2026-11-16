@@ -65,6 +65,9 @@ func testDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
 
 // newReadHarness runs the real handlers, snapshots, sharing and ledger behind the real compression wrapper.
 func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHarness {
+	return newReadHarnessMode(t, suffix, extra, false)
+}
+func newReadHarnessMode(t *testing.T, suffix string, extra dashboard.Reader, identityMode bool) *readHarness {
 	t.Helper()
 	db, ctx := testDatabase(t)
 	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
@@ -114,12 +117,16 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 	h.services.Previews = preview.New(h.endpoint, func(ctx context.Context, target string, width, height int) ([]byte, error) {
 		return (*h.capture.Load())(ctx, target, width, height)
 	})
-	web := handlers.New(handlers.Config{PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db)
+	web := handlers.New(handlers.Config{IdentityMode: identityMode, PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db)
 	compress, err := handlers.Compression()
 	if err != nil {
 		t.Fatal(err)
 	}
 	app := fiber.New()
+	if identityMode {
+		app.All("/mcp", compress(web.RemoteMCP(false)))
+		app.All("/mcp/readonly", compress(web.RemoteMCP(true)))
+	}
 	app.All("/*", compress(web.Handler()))
 	done := make(chan error, 1)
 	go func() { done <- app.Listener(listener, fiber.ListenConfig{DisableStartupMessage: true}) }()
@@ -129,7 +136,13 @@ func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHa
 		_ = app.ShutdownWithContext(shutdown)
 		<-done
 	})
-	raw, session, err := ids.StartSession(ctx, user)
+	var raw string
+	var session identity.Session
+	if identityMode {
+		raw, session, err = ids.StartIdentitySession(ctx, user)
+	} else {
+		raw, session, err = ids.StartSession(ctx, user)
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

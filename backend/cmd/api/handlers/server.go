@@ -46,6 +46,7 @@ func parseTemplates() (*template.Template, error) {
 }
 
 type Config struct {
+	IdentityMode                   bool
 	PublicURL, SetupToken, Version string
 	// TailnetURL is a second browser origin; OAuth and share links keep using PublicURL.
 	TailnetURL string
@@ -207,7 +208,7 @@ func (h *Handler) Handler() http.Handler {
 	// The SPA reads its pages through tools; a render capture gets only the read-only toolset, so no tool can write.
 	readTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.readonly }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 1024 * 1024})
 	mux.Handle("POST /api/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, e := r.Cookie("moneybag_session"); e != nil {
+		if _, e := r.Cookie(h.sessionCookieName()); e != nil {
 			if _, session, ok := h.renderCookie(r); ok {
 				p := session.Principal
 				p.Scopes, p.Admin = []string{"ledger:read"}, false
@@ -266,7 +267,7 @@ func (h *Handler) Handler() http.Handler {
 	})
 }
 func (h *Handler) session(r *http.Request) (principal.Principal, identity.Session, error) {
-	c, e := r.Cookie("moneybag_session")
+	c, e := r.Cookie(h.sessionCookieName())
 	if e != nil {
 		if _, session, ok := h.renderCookie(r); ok && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
 			// Reads only, and only ledger:read: every POST, PUT and DELETE under /api and /settings fails here, before any handler or CSRF check.
@@ -275,6 +276,9 @@ func (h *Handler) session(r *http.Request) (principal.Principal, identity.Sessio
 			return p, identity.Session{UserID: p.UserID, CSRF: renderCSRF}, nil
 		}
 		return principal.Principal{}, identity.Session{}, principal.ErrForbidden
+	}
+	if h.cfg.IdentityMode {
+		return h.services.Identity.IdentitySession(r.Context(), c.Value)
 	}
 	return h.services.Identity.Session(r.Context(), c.Value)
 }
@@ -292,6 +296,9 @@ func (h *Handler) renderCookie(r *http.Request) (string, preview.Session, bool) 
 	return c.Value, session, e == nil && session.Target.Route != "" && session.GrantHash == ""
 }
 func (h *Handler) csrf(r *http.Request, session identity.Session) bool {
+	if h.cfg.IdentityMode && r.Header.Get("Origin") != h.cfg.PublicURL {
+		return false
+	}
 	if origin := r.Header.Get("Origin"); origin != "" && !h.browserOrigin(origin) {
 		return false
 	}
