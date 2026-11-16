@@ -174,7 +174,7 @@ func run() error {
 	dash.UseSnapshots(snapshots)
 	web := handlers.New(handlers.Config{PublicURL: cfg.PublicURL, TailnetURL: cfg.TailnetURL, SetupToken: cfg.SetupToken, Version: version, Toolsets: cfg.Toolsets}, services, auth, bookRepo, pool)
 	if e := web.ConfigureIdentity(ctx, cfg.Identity); e != nil {
-		return fmt.Errorf("configure Identity: %w", e)
+		return fmt.Errorf("configure Microapps ID: %w", e)
 	}
 	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log)
 	a.OnChange = onChange

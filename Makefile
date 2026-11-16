@@ -15,10 +15,10 @@ test-integration:
 	timeout 30s bash -c 'until docker exec moneybag-test-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 0.2; done'
 	cd backend && MONEYBAG_TEST_DATABASE_URL=postgres://postgres:test@127.0.0.1:55432/postgres go test -timeout 120s ./...; status=$$?; docker rm -f moneybag-test-pg >/dev/null; exit $$status
 
-# Requires a disposable PostgreSQL server and the sibling Identity owned e2e runner.
+# Requires a disposable PostgreSQL server and the sibling Microapps ID owned e2e runner.
 test-identity-provider: ui
 	@test -n "$$MONEYBAG_TEST_DATABASE_URL" || { echo 'Set MONEYBAG_TEST_DATABASE_URL to an owned disposable PostgreSQL server.' >&2; exit 1; }
-	@test -x ../identity/target/debug/identity || { echo 'Build the sibling Identity debug binary first.' >&2; exit 1; }
+	@test -x ../identity/target/debug/identity || { echo 'Build the sibling Microapps ID debug binary first.' >&2; exit 1; }
 	cd e2e && npm ci --ignore-scripts
 	ID_E2E_SCENARIO="$(CURDIR)/e2e/identity-provider-scenario.mjs" node ../identity/e2e/run.mjs
 

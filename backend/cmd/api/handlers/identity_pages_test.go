@@ -62,7 +62,7 @@ func TestIdentitySignInPages(t *testing.T) {
 			}
 		}
 		visit(doc)
-		if forms != 1 || passwords != 0 || inputs["return_to"] != tc.next || inputs["invitation_token"] != tc.token || !strings.Contains(w.Body.String(), "Continue with ID") {
+		if forms != 1 || passwords != 0 || inputs["return_to"] != tc.next || inputs["invitation_token"] != tc.token || !strings.Contains(w.Body.String(), "Continue with Microapps ID") {
 			t.Fatal("incorrect controls", tc.path, inputs)
 		}
 	}
@@ -83,7 +83,7 @@ func TestIdentitySignInPages(t *testing.T) {
 	h.cfg.IdentityMode = false
 	w := httptest.NewRecorder()
 	h.loginPage(w, httptest.NewRequest("GET", "https://moneybag.example.test/login", nil))
-	if w.Code != 200 || !strings.Contains(w.Body.String(), `name="password"`) || strings.Contains(w.Body.String(), "Continue with ID") {
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `name="password"`) || strings.Contains(w.Body.String(), "Continue with Microapps ID") {
 		t.Fatal("legacy sign-in changed")
 	}
 }

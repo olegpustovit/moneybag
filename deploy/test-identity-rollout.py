@@ -172,4 +172,4 @@ trap - ERR
         assert os.readlink(current) == 'releases/' + (new_release if mode == 'success' else old_release)
         assert restarts.read_text().splitlines() == ['restart'] * (1 if mode == 'success' else 2)
         assert (runtime / 'moneybag.env').read_bytes() == original
-print('Identity launcher, deployment preflight and activation/smoke rollback checks passed')
+print('Microapps ID launcher, deployment preflight and activation/smoke rollback checks passed')

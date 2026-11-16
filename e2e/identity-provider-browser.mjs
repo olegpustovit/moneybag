@@ -32,8 +32,8 @@ try {
  if(cfg.stage==='rollback') {
   await page.getByLabel('Email',{exact:true}).fill(cfg.email);await page.getByLabel('Password',{exact:true}).fill(password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
  } else {
-  await page.getByRole('button',{name:'Continue with ID',exact:true}).click();
-  try { await page.getByLabel('Email',{exact:true}).waitFor(); } catch { await page.screenshot({path:'/tmp/moneybag-provider-failure.png'});throw new Error(`ID sign-in missing at ${new URL(page.url()).origin}${new URL(page.url()).pathname}: ${(await page.locator('body').innerText()).slice(0,500)}`); }assert.equal(new URL(page.url()).origin,cfg.issuer);
+  await page.getByRole('button',{name:'Continue with Microapps ID',exact:true}).click();
+  try { await page.getByLabel('Email',{exact:true}).waitFor(); } catch { await page.screenshot({path:'/tmp/moneybag-provider-failure.png'});throw new Error(`Microapps ID sign-in missing at ${new URL(page.url()).origin}${new URL(page.url()).pathname}: ${(await page.locator('body').innerText()).slice(0,500)}`); }assert.equal(new URL(page.url()).origin,cfg.issuer);
   await page.getByLabel('Email',{exact:true}).fill(cfg.email);await page.getByRole('button',{name:'Next',exact:true}).click();
   await page.getByLabel('Password',{exact:true}).waitFor();assert.equal(new URL(page.url()).origin,cfg.issuer);
   await page.getByLabel('Password',{exact:true}).fill(password);
@@ -78,7 +78,7 @@ try {
   }
   await page.goto(cfg.origin+'/settings');await page.getByRole('heading',{name:'Account',exact:true}).waitFor();
   assert.equal(await page.getByText('Change password',{exact:true}).count(),enabled?0:2);
-  const manage=page.getByRole('link',{name:'Manage your account in ID',exact:true});assert.equal(await manage.count(),enabled?1:0);if(enabled)assert.equal(await manage.getAttribute('href'),cfg.issuer+'/account');
+  const manage=page.getByRole('link',{name:'Manage your account in Microapps ID',exact:true});assert.equal(await manage.count(),enabled?1:0);if(enabled)assert.equal(await manage.getAttribute('href'),cfg.issuer+'/account');
   await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.waitForURL(u=>u.origin===cfg.origin && ['/','/login'].includes(u.pathname));
   assert.equal((await context.request.get(cfg.origin+'/api/session')).status(),401);
   if(agentToken) {
@@ -88,7 +88,7 @@ try {
   }
  }
  if(cfg.stage!=='rollback') {
-  const account=await context.request.get(cfg.issuer+'/account',{maxRedirects:0});assert.equal(account.status(),200,'app logout removed global ID device');
+  const account=await context.request.get(cfg.issuer+'/account',{maxRedirects:0});assert.equal(account.status(),200,'app logout removed global Microapps ID device');
   const csrf=(await account.text()).match(/name="csrf" value="([A-Za-z0-9_-]+)"/)?.[1];assert(csrf);
   assert.equal((await context.request.post(cfg.issuer+'/signout',{headers:{Origin:cfg.issuer},form:{csrf},maxRedirects:0})).status(),303);
  }

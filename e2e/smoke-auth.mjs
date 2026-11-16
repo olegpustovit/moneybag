@@ -25,8 +25,8 @@ async function fillPassword(page,password) {
 // No account creation fallback and no financial writes.
 export async function signInSmoke(page,settings,identityEnabled) {
  if(identityEnabled) {
-  await page.getByRole('button',{name:'Continue with ID',exact:true}).click();
-  await page.getByLabel('Email',{exact:true}).waitFor();assert.equal(new URL(page.url()).origin,settings.identityOrigin,'Unexpected Identity email origin');
+  await page.getByRole('button',{name:'Continue with Microapps ID',exact:true}).click();
+  await page.getByLabel('Email',{exact:true}).waitFor();assert.equal(new URL(page.url()).origin,settings.identityOrigin,'Unexpected Microapps ID email origin');
   await page.getByLabel('Email',{exact:true}).fill(settings.email);await page.getByRole('button',{name:'Next',exact:true}).click();
   await page.getByLabel('Password',{exact:true}).waitFor();assert.equal(new URL(page.url()).origin,settings.identityOrigin,'Unexpected password entry origin');
   await fillPassword(page,settings.password);await page.getByRole('button',{name:'Sign in',exact:true}).click();
@@ -53,10 +53,10 @@ export async function signOutSmoke(page,settings,identityEnabled) {
  if(identityEnabled)try {
   const account=await request.get(settings.identityOrigin+'/account',{maxRedirects:0,timeout:10000});
   if(account.status()===200) {
-   const csrf=(await account.text()).match(/name="csrf" value="([A-Za-z0-9_-]+)"/)?.[1];assert(csrf,'Own ID device signout missing');
-   assert.equal((await request.post(settings.identityOrigin+'/signout',{headers:{Origin:settings.identityOrigin},form:{csrf},maxRedirects:0,timeout:10000})).status(),303,'Own ID device signout failed');
-  }else assert([302,303,401].includes(account.status()),'Own ID cleanup unavailable');
- }catch{failures.push('Own ID device cleanup failed');}
+   const csrf=(await account.text()).match(/name="csrf" value="([A-Za-z0-9_-]+)"/)?.[1];assert(csrf,'Own Microapps ID device signout missing');
+   assert.equal((await request.post(settings.identityOrigin+'/signout',{headers:{Origin:settings.identityOrigin},form:{csrf},maxRedirects:0,timeout:10000})).status(),303,'Own Microapps ID device signout failed');
+  }else assert([302,303,401].includes(account.status()),'Own Microapps ID cleanup unavailable');
+ }catch{failures.push('Own Microapps ID device cleanup failed');}
  assert.equal(failures.length,0,failures.join('; '));
 }
 if(process.argv[1] && import.meta.url===pathToFileURL(process.argv[1]).href && process.argv[2]==='--check-config') {

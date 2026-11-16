@@ -118,11 +118,11 @@ export async function lifecycle({browser, base, mail, setupCode, root}) {
     for(const stream of [child.stdout,child.stderr])stream.on("data",data=>{output=(output+data).slice(-16_384);});
     const result=await new Promise((ok,fail)=>{child.once("error",fail);child.once("exit",ok);});
     process.stdout.write(output);
-    assert.equal(result,0,"Moneybag against real Identity failed");
+    assert.equal(result,0,"Moneybag against real Microapps ID failed");
     const people=await tool("people_list",{});
     for (const email of ["eval-browser@example.test", "eval-new@example.test"]) {
       const evalUser=people.people.find(user=>user.email===email);
-      assert(evalUser && evalUser.devices===0,"eval browser left an ID device session behind");
+      assert(evalUser && evalUser.devices===0,"eval browser left a Microapps ID device session behind");
     }
     const app=await tool("app_get",{id:created.app.id});
     assert(app.last_signin_at && !app.disabled && app.trusted);
@@ -130,7 +130,7 @@ export async function lifecycle({browser, base, mail, setupCode, root}) {
     assert(activity.events.some(event=>event.text.includes("completed app_create")));
     assert(activity.events.some(event=>event.text.includes("completed invite_create")));
     assert.deepEqual(errors,[]);
-    console.log("Moneybag real Identity: MCP registration/invite, captured email proof, signed OIDC, existing/new/invited/uninvited browser flows, Moneybag OAuth PKCE/read-only/revocation, preserved finance/model data, persistent eval smokes in both modes, rollback and zero leftover ID devices passed");
+    console.log("Moneybag real Microapps ID: MCP registration/invite, captured email proof, signed OIDC, existing/new/invited/uninvited browser flows, Moneybag OAuth PKCE/read-only/revocation, preserved finance/model data, persistent eval smokes in both modes, rollback and zero leftover ID devices passed");
   } finally {
     if(child && child.exitCode===null && child.signalCode===null)child.kill("SIGTERM");
     if(reservation.listening)await new Promise(ok=>reservation.close(ok));

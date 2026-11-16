@@ -8,17 +8,17 @@ source ./moneybag.env
 set +a
 if [[ -e identity.env || -L identity.env ]]; then
  if [[ ! -f identity.env || -L identity.env || ! -O identity.env || $(stat -c %a identity.env) != 600 ]]; then
-  echo 'Identity settings must be an owned regular file with mode 0600' >&2
+  echo 'Microapps ID settings must be an owned regular file with mode 0600' >&2
   exit 1
  fi
  while IFS= read -r line || [[ -n "$line" ]]; do
   line="${line%$'\r'}"
   [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
-  [[ "$line" == *=* ]] || { echo 'Invalid Identity assignment' >&2; exit 1; }
+  [[ "$line" == *=* ]] || { echo 'Invalid Microapps ID assignment' >&2; exit 1; }
   key="${line%%=*}"
   case "$key" in
    MONEYBAG_ID_ENABLED|MONEYBAG_ID_ISSUER|MONEYBAG_ID_CLIENT_ID|MONEYBAG_ID_CLIENT_SECRET|MONEYBAG_ID_COOKIE_KEY) ;;
-   *) echo 'Unsupported Identity setting' >&2; exit 1 ;;
+   *) echo 'Unsupported Microapps ID setting' >&2; exit 1 ;;
   esac
   export "$key=${line#*=}"
  done < identity.env

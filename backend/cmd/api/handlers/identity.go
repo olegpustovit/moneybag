@@ -23,7 +23,7 @@ func (h *Handler) ConfigureIdentity(ctx context.Context, cfg IdentityConfig) err
 		return err
 	}
 	if h.services.Identity == nil || h.services.Model == nil || h.ledgerRepo == nil {
-		return errors.New("Identity requires account, ledger and model services")
+		return errors.New("Microapps ID requires account, ledger and model services")
 	}
 	clients := make(map[string]*idclient.Client)
 	origins := make(map[string]bool)
@@ -111,7 +111,7 @@ func (h *Handler) resolveIdentity(ctx context.Context, claims idclient.Claims) (
 	}
 	if err = h.initializeIdentityAccount(ctx, user); err != nil {
 		if h.services.Logger != nil {
-			h.services.Logger.Error("initialize ID account", "user_id", user.ID, "error", err)
+			h.services.Logger.Error("initialize Microapps ID account", "user_id", user.ID, "error", err)
 		}
 		return "", err
 	}
@@ -138,7 +138,7 @@ func (h *Handler) initializeIdentityAccount(ctx context.Context, user identity.U
 			return fmt.Errorf("initialize ID ledger: %w", err)
 		}
 		if err = h.services.Model.Initialize(ctx, p); err != nil {
-			return fmt.Errorf("initialize ID model: %w", err)
+			return fmt.Errorf("initialize Microapps ID model: %w", err)
 		}
 		return h.services.Identity.IdentityInitialized(ctx, user.ID)
 	})

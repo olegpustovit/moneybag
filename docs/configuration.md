@@ -13,7 +13,7 @@ Settings are read once at startup: typed defaults, optional Vault values, then e
 | `MONEYBAG_TAILNET_URL` | Empty; optional second browser origin such as `https://host.tailnet.ts.net:8443`. Sign-in and CSRF checks accept it. OAuth, connectors and share links always use `MONEYBAG_PUBLIC_URL` |
 | `MONEYBAG_CHROMIUM_BIN` | Chromium executable for `dashboard_render`, which opens the app on its own loopback listener; blank returns validation without an image |
 | `MONEYBAG_TOOLSETS` | Empty enables all; comma-separated `account,ledger,rates,budget,tables,model,dashboard,audit,classify,import,reconcile` |
-| `MONEYBAG_ID_ENABLED` | `false`; opt-in shared Identity SDK (draft rollout; UI/provider qualification still pending) |
+| `MONEYBAG_ID_ENABLED` | `false`; opt-in shared Microapps ID SDK (draft rollout; UI/provider qualification still pending) |
 | `MONEYBAG_ID_ISSUER` | `https://id.microapps.space`; HTTPS or exact loopback HTTP, no credentials/query/fragment |
 | `MONEYBAG_ID_CLIENT_ID` | Required when ID is enabled |
 | `MONEYBAG_ID_CLIENT_SECRET` | Optional confidential-client secret, never printed |
@@ -41,10 +41,10 @@ The ECB daily reference feed is built in. Manual historical quotes accept curren
 The API ignores legacy `MONEYBAG_MONGO_*` environment entries. Preserve them during the 30-day rollback window because the previous MongoDB release needs them. The isolated copy command uses `MONEYBAG_MIGRATE_MONGO_URI`; see [its runbook](../backend/cmd/migrate-mongo/README.md). Keep both database URLs in private mode-0600 environment files.
 
 
-## Identity callbacks
+## Microapps ID callbacks
 
-Enabled startup validates configuration and discovers the issuer before listening. Register each exact callback: `MONEYBAG_PUBLIC_URL` plus `/api/auth/id/callback`, and the optional `MONEYBAG_TAILNET_URL` plus that same path. Callback origins must be canonical (lowercase hosts, no default :443/:80 port, path, query or fragment), with distinct hosts/ports. The app selects only those hosts; unknown Host values cannot choose a callback. Each SDK client binds its flow cookie to its own callback origin. ID cookie mutations accept only the exact configured callback origins; logout additionally uses the selected SDK client's exact origin. Legacy mode retains its existing origin behavior.
+Enabled startup validates configuration and discovers the issuer before listening. Register each exact callback: `MONEYBAG_PUBLIC_URL` plus `/api/auth/id/callback`, and the optional `MONEYBAG_TAILNET_URL` plus that same path. Callback origins must be canonical (lowercase hosts, no default :443/:80 port, path, query or fragment), with distinct hosts/ports. The app selects only those hosts; unknown Host values cannot choose a callback. Each SDK client binds its flow cookie to its own callback origin. Microapps ID cookie mutations accept only the exact configured callback origins; logout additionally uses the selected SDK client's exact origin. Legacy mode retains its existing origin behavior.
 
-The backend mounts GET `/api/auth/id/login`, GET `/api/auth/id/callback` and POST `/api/auth/id/logout`. Local invitation intent is signed, HttpOnly and bound to SDK state. Existing users retain profiles and credentials; newly invited ID users stay pending until their default ledger/model setup succeeds. A failed partial setup can finish on a fresh normal ID sign-in without reusing the consumed invitation or resetting existing assumptions.
+The backend mounts GET `/api/auth/id/login`, GET `/api/auth/id/callback` and POST `/api/auth/id/logout`. Local invitation intent is signed, HttpOnly and bound to SDK state. Existing users retain profiles and credentials; newly invited Microapps ID users stay pending until their default ledger/model setup succeeds. A failed partial setup can finish on a fresh normal Microapps ID sign-in without reusing the consumed invitation or resetting existing assumptions.
 
-UI, real-provider and persistent eval smokes are qualified locally. Keep ID disabled until the published SDK pin and per-app production gate are complete. The draft uses a local sibling SDK replacement until the shared module has a reproducible published pin. No secrets belong in the repository or command arguments.
+UI, real-provider and persistent eval smokes are qualified locally. Keep Microapps ID disabled until the published SDK pin and per-app production gate are complete. The draft uses a local sibling SDK replacement until the shared module has a reproducible published pin. No secrets belong in the repository or command arguments.

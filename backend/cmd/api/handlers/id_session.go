@@ -18,7 +18,7 @@ func (h *Handler) localCredentialsUnavailable(w http.ResponseWriter) bool {
 	if !h.cfg.IdentityMode {
 		return false
 	}
-	http.Error(w, "Local credentials are unavailable while Identity sign-in is enabled.", http.StatusForbidden)
+	http.Error(w, "Local credentials are unavailable while Microapps ID sign-in is enabled.", http.StatusForbidden)
 	return true
 }
 
