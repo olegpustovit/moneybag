@@ -41,6 +41,8 @@ func (h *Handler) ConfigureIdentity(ctx context.Context, cfg IdentityConfig) err
 	}
 	h.identityClients, h.identityOrigins, h.identityFlowKey = clients, origins, cfg.CookieKey
 	h.identityAccountURL = strings.TrimRight(cfg.Issuer, "/") + "/account"
+	issuerURL, _ := url.Parse(cfg.Issuer)
+	h.identityFormOrigin = issuerURL.Scheme + "://" + issuerURL.Host
 	h.cfg.IdentityMode = true
 	return nil
 }

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 )
 
@@ -30,6 +31,18 @@ func TestIdentitySDKUsesRegisteredOriginAndStateBoundInvitations(t *testing.T) {
 	if err := h.ConfigureIdentity(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
+	security := httptest.NewRecorder()
+	h.security(security)
+	if !strings.Contains(security.Header().Get("Content-Security-Policy"), "form-action 'self' "+provider.URL+";") {
+		t.Fatal("configured issuer form redirects blocked")
+	}
+	h.cfg.IdentityMode = false
+	legacySecurity := httptest.NewRecorder()
+	h.security(legacySecurity)
+	if !strings.Contains(legacySecurity.Header().Get("Content-Security-Policy"), "form-action 'self';") {
+		t.Fatal("legacy form policy changed")
+	}
+	h.cfg.IdentityMode = true
 	if !h.cfg.IdentityMode || !h.identityOrigin(h.cfg.PublicURL) || !h.identityOrigin(h.cfg.TailnetURL) || h.identityOrigin("https://other.example.test") {
 		t.Fatal("configured origin set incorrect")
 	}

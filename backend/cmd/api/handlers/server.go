@@ -58,6 +58,7 @@ type Handler struct {
 	identityOrigins    map[string]bool
 	identityFlowKey    [32]byte
 	identityAccountURL string
+	identityFormOrigin string
 	authLimit          authLimiter
 	cfg                Config
 	services           mcpserver.Services
@@ -130,10 +131,14 @@ func (h *Handler) allowedOrigin(origin string) bool {
 	return false
 }
 func (h *Handler) security(w http.ResponseWriter) {
+	formAction := "'self'"
+	if h.cfg.IdentityMode && h.identityFormOrigin != "" {
+		formAction += " " + h.identityFormOrigin
+	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Referrer-Policy", "same-origin")
 	w.Header().Set("X-Frame-Options", "DENY")
-	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action "+formAction+"; object-src 'none'")
 }
 func (h *Handler) Handler() http.Handler {
 	mux := http.NewServeMux()

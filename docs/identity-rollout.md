@@ -1,6 +1,6 @@
 # Identity rollout preparation
 
-This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. Actual-provider/persistent smoke qualification remains unfinished, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
+This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. Persistent deployment-smoke qualification remains unfinished, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
 
 ## Persistence and account rules
 
@@ -58,3 +58,17 @@ Configured ID mode renders the existing sign-in and invitation page with a nativ
 Both session and bootstrap responses expose only the enabled flag and configured issuer account URL for this UI. Settings hides local password changes in ID mode, links to ID account management and submits sign-out to the SDK endpoint after clearing the cached ledger. Legacy sign-out keeps its original route and spacing.
 
 The complete owned-PostgreSQL backend suite passes (integration 23.77 s), focused SDK/page/metadata race checks pass, and API vet/build pass. UI tests pass (38 component cases plus existing utility checks); production build, type check and size budgets pass. Lint reports the existing unrelated no-useless-spread warning in ledger accounts. Twenty browser captures cover 1440/390 px and light/dark sign-in, invitation and settings in both modes, checking keyboard focus, hidden password controls, correct sign-out route and no overflow. Native auth renders use the real templates/built stylesheet; settings uses the built SPA with fixture API responses. These checks do not substitute for successful actual-provider sign-in or persistent eval deployment smokes, which remain pending.
+
+## Actual Identity provider qualification
+
+`e2e/identity-provider-scenario.mjs` runs inside the sibling Identity owned e2e runner. It claims only a disposable local owner, uses MCP OAuth to register the confidential Moneybag app and issue two invitations, and joins through captured email proof. An opt-in PostgreSQL integration fixture then serves the actual Fiber/SDK handlers and built SPA. Seven independent browser flows cover existing-account linking, Moneybag OAuth consent/PKCE, an invitation for an existing account, refusal of an unknown ID, creation through a new invitation, repeat sign-in for that new account, and flag-off password rollback for the original account.
+
+The fixture verifies stable local IDs/name/permissions, unchanged password material, exact financial JSON/precision, model rows and existing agent grant. New ID users have no local password and complete their pending initialization. It checks replay refusal, closed local credential routes, origin guards, account settings, real UI logout, scoped agent reads/write refusal/revocation and app/global session separation. MCP confirms app sign-in/audit activity and zero remaining member ID devices. The seven-flow race run passes (9.41 s browser fixture, 10.47 s integration package). All resources are owned temporary fixtures; no production records are used.
+
+This browser qualification exposed CSP redirect restrictions. ID mode now permits only the configured issuer origin in its form policy; the validated OAuth consent page additionally permits its selected registered callback origin (or registered native scheme). Normal pages retain their existing restrictions, and legacy sign-in policy remains unchanged. Unit tests cover HTTP/native callbacks, unsafe source rejection and mode-specific issuer policy.
+
+To reproduce, provide an owned disposable `MONEYBAG_TEST_DATABASE_URL`, build the sibling Identity debug binary, install its e2e prerequisites, then run `make test-identity-provider`. The target builds the UI and uses the existing locked Playwright dependency. Set `CHROMIUM` if the app browser needs an explicit executable. Never point this test at a production database: its migrated template is intentionally retained until the disposable PostgreSQL server is removed.
+
+Persistent eval deployment smoke conversion, a published SDK pin and production human gates remain pending. The flag remains disabled by default.
+
+After the CSP fixes, the complete backend suite passes on owned PostgreSQL 18 (integration 21.96 s), full vet and API build pass, and focused SDK/page/consent-policy race checks pass. No UI source changed in this qualification slice; the prior production UI build and browser layout checks remain applicable.

@@ -221,6 +221,7 @@ func (h *Handler) authorizePage(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login?next="+url.QueryEscape(r.URL.RequestURI()), 303)
 		return
 	}
+	h.allowConsentRedirect(w, in.RedirectURI)
 	h.authRender(w, 200, authPage{Title: "Connect " + client.Name, Action: "/oauth/authorize", Consent: true, ClientName: client.Name, Scopes: scopes, Authorization: in, CSRF: session.CSRF})
 }
 func (h *Handler) authorize(w http.ResponseWriter, r *http.Request) {
@@ -317,4 +318,21 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(200)
+}
+
+// The browser applies the consent document's form policy to the final redirect.
+func (h *Handler) allowConsentRedirect(w http.ResponseWriter, target string) {
+	if !oauth.AllowedRedirect(target) {
+		return
+	}
+	u, err := url.Parse(target)
+	if err != nil || strings.ContainsAny(u.Host, "*;\"' \t\r\n") {
+		return
+	}
+	source := u.Scheme + ":"
+	if u.Scheme == "http" || u.Scheme == "https" {
+		source += "//" + u.Host
+	}
+	policy := w.Header().Get("Content-Security-Policy")
+	w.Header().Set("Content-Security-Policy", strings.Replace(policy, "; object-src", " "+source+"; object-src", 1))
 }

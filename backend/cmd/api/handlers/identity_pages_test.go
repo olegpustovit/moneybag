@@ -98,3 +98,30 @@ func TestIdentitySessionMetadata(t *testing.T) {
 		t.Fatal("incorrect public metadata")
 	}
 }
+
+func TestConsentFormPolicyAllowsOnlySelectedRedirect(t *testing.T) {
+	h := &Handler{}
+	for _, tc := range []struct{ target, source string }{
+		{"https://client.example.test:8443/callback?state=private", "https://client.example.test:8443"},
+		{"http://127.0.0.1:8484/callback", "http://127.0.0.1:8484"},
+		{"cursor://anysphere.cursor-mcp/oauth/callback", "cursor:"},
+		{"com.example.app:/oauth2redirect", "com.example.app:"},
+	} {
+		w := httptest.NewRecorder()
+		h.security(w)
+		h.allowConsentRedirect(w, tc.target)
+		policy := w.Header().Get("Content-Security-Policy")
+		if !strings.Contains(policy, "form-action 'self' "+tc.source+";") || strings.Contains(policy, "private") {
+			t.Fatal("incorrect selected redirect policy", policy)
+		}
+	}
+	for _, target := range []string{"javascript:alert(1)", "https://*.example.test/callback", "https://client.example.test;script-src/callback", "https://user@client.example.test/callback"} {
+		w := httptest.NewRecorder()
+		h.security(w)
+		before := w.Header().Get("Content-Security-Policy")
+		h.allowConsentRedirect(w, target)
+		if w.Header().Get("Content-Security-Policy") != before {
+			t.Fatal("unsafe target changed policy")
+		}
+	}
+}
