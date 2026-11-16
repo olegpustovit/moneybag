@@ -1,5 +1,16 @@
 # Identity rollout preparation
 
+## Production cutover — 2026-11-16
+
+The owner authorized the production rollout for Checklists, Nudge and Moneybag. ID login is enabled at `https://id.microapps.space`; local password sign-in and account creation are disabled. The existing owner account uses `oleg@olegpustovit.com` and retains its original application ID and data. Local password hashes remain inactive for rollback.
+
+The shared Go SDK is pinned to Identity commit `9c0a96699ea8a766ced748691a127601ae128288` in `github.com/olegpustovit/identity`, without a local module replacement. The repository is private: developers need GitHub access, `GOPRIVATE=github.com/olegpustovit/identity`, and authenticated Git transport.
+
+The remote-owned `identity.env` is mode 0600 and holds the enabled flag, exact client registration and independent flow key. Protected application environment files were preserved. Database backups taken before cutover are under `~/backups/id-cutover-20261116/` on Oracle VM. The persistent eval account is `eval-smoke@microapps.space`; Nudge uses only its `eval-smoke` workspace. Deployment browser smokes passed through the real provider, authenticated reads and own-session cleanup. Checklists also passed priority and routine-skip feature smokes. Sign-in screens were checked at 390 and 1440 px in light/dark themes.
+
+For local deployment smokes, set the app's `*_SMOKE_PASSWORD_FILE` to a private credential file. Set `CHROMIUM_PATH` for Checklists and `CHROMIUM` for Nudge when the scripts' default browser is unavailable. Nudge tests run with host architecture even when the release artifact targets ARM64. Rollback preserves the sidecar; switching back to local authentication requires explicitly disabling the ID flag. The historical preparation notes below describe the earlier default-off state; the rollout and SDK-pinning prerequisites are now satisfied.
+
+
 This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. SDK publication/pinning and the production human gate remain pending, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
 
 ## Persistence and account rules
