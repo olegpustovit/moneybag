@@ -173,6 +173,26 @@ func TestIdentityActualProviderBrowser(t *testing.T) {
 		}
 		t.Log(strings.TrimSpace(string(output)))
 	}
+
+	runSmoke := func() {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+		defer cancel()
+		command := exec.CommandContext(ctx, "node", filepath.Join("..", "..", "e2e", "production-smoke.mjs"))
+		command.Env = append(os.Environ(), "MONEYBAG_SMOKE_ORIGIN="+origin, "MONEYBAG_SMOKE_ID_ORIGIN="+issuer, "MONEYBAG_SMOKE_EMAIL="+legacy.Email, "MONEYBAG_SMOKE_PASSWORD_FILE="+os.Getenv("MONEYBAG_ID_TEST_PASSWORD_FILE"), "MONEYBAG_SMOKE_VERSION=owned-provider")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("persistent eval smoke: %v\n%s", err, output)
+		}
+		t.Log(strings.TrimSpace(string(output)))
+		if snapshot() != before {
+			t.Fatal("persistent smoke changed existing account/finance/model/agent data")
+		}
+		var count int
+		if err := pool.QueryRow(t.Context(), `SELECT count(*) FROM sessions`).Scan(&count); err != nil || count != 0 {
+			t.Fatal("persistent smoke left app sessions")
+		}
+	}
 	func() {
 		stop := serve(true)
 		defer stop()
@@ -197,6 +217,7 @@ func TestIdentityActualProviderBrowser(t *testing.T) {
 			t.Fatal("new account initialization incomplete")
 		}
 		run("new-existing", created.Email, "", created.ID)
+		runSmoke()
 		if snapshot() != before {
 			t.Fatal("ID flow changed legacy profile, credentials, finance, model or existing agent grant")
 		}
@@ -204,7 +225,12 @@ func TestIdentityActualProviderBrowser(t *testing.T) {
 			t.Fatal("browser left app sessions")
 		}
 	}()
-	func() { stop := serve(false); defer stop(); run("rollback", legacy.Email, "", legacy.ID) }()
+	func() {
+		stop := serve(false)
+		defer stop()
+		run("rollback", legacy.Email, "", legacy.ID)
+		runSmoke()
+	}()
 	if snapshot() != before {
 		t.Fatal("rollback changed existing data")
 	}

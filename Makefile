@@ -1,4 +1,4 @@
-.PHONY: ui backend build check test-integration test-identity-provider
+.PHONY: ui backend build check test-integration test-identity-provider smoke smoke-check rollout-check
 ui:
 	cd ui && bun install --frozen-lockfile && bun run lint && bun run build
 	rsync -a --delete --exclude=.keep ui/dist/ backend/cmd/api/handlers/dist/
@@ -6,7 +6,7 @@ backend:
 	cd backend && go test ./... && go vet ./...
 build: ui
 	cd backend && go build -o bin/moneybag-local ./cmd/api
-check: ui backend
+check: ui backend smoke-check rollout-check
 	cd ui && bun run test
 # Disposable PostgreSQL with fast test-only durability settings. Needs Docker.
 test-integration:
@@ -21,3 +21,10 @@ test-identity-provider: ui
 	@test -x ../identity/target/debug/identity || { echo 'Build the sibling Identity debug binary first.' >&2; exit 1; }
 	cd e2e && npm ci --ignore-scripts
 	ID_E2E_SCENARIO="$(CURDIR)/e2e/identity-provider-scenario.mjs" node ../identity/e2e/run.mjs
+
+smoke-check:
+	node e2e/smoke-auth.test.mjs
+smoke:
+	node e2e/production-smoke.mjs
+rollout-check:
+	python3 deploy/test-identity-rollout.py

@@ -47,4 +47,4 @@ Enabled startup validates configuration and discovers the issuer before listenin
 
 The backend mounts GET `/api/auth/id/login`, GET `/api/auth/id/callback` and POST `/api/auth/id/logout`. Local invitation intent is signed, HttpOnly and bound to SDK state. Existing users retain profiles and credentials; newly invited ID users stay pending until their default ledger/model setup succeeds. A failed partial setup can finish on a fresh normal ID sign-in without reusing the consumed invitation or resetting existing assumptions.
 
-Keep ID disabled until UI, real-provider/persistent eval qualification and the per-app production gate are complete. The draft uses a local sibling SDK replacement until the shared module has a reproducible published pin. No secrets belong in the repository or command arguments.
+UI, real-provider and persistent eval smokes are qualified locally. Keep ID disabled until the published SDK pin and per-app production gate are complete. The draft uses a local sibling SDK replacement until the shared module has a reproducible published pin. No secrets belong in the repository or command arguments.

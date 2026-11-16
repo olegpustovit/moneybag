@@ -130,7 +130,7 @@ export async function lifecycle({browser, base, mail, setupCode, root}) {
     assert(activity.events.some(event=>event.text.includes("completed app_create")));
     assert(activity.events.some(event=>event.text.includes("completed invite_create")));
     assert.deepEqual(errors,[]);
-    console.log("Moneybag real Identity: MCP registration/invite, captured email proof, signed OIDC, existing/new/invited/uninvited browser flows, Moneybag OAuth PKCE/read-only/revocation, preserved finance/model data, rollback and zero leftover ID devices passed");
+    console.log("Moneybag real Identity: MCP registration/invite, captured email proof, signed OIDC, existing/new/invited/uninvited browser flows, Moneybag OAuth PKCE/read-only/revocation, preserved finance/model data, persistent eval smokes in both modes, rollback and zero leftover ID devices passed");
   } finally {
     if(child && child.exitCode===null && child.signalCode===null)child.kill("SIGTERM");
     if(reservation.listening)await new Promise(ok=>reservation.close(ok));

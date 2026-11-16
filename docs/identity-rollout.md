@@ -1,6 +1,6 @@
 # Identity rollout preparation
 
-This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. Persistent deployment-smoke qualification remains unfinished, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
+This branch prepares proposal T37 for Moneybag. It adds account linking, invite registration, browser-session isolation and default-off SDK configuration/handlers. SDK publication/pinning and the production human gate remain pending, so keep the flag disabled; production is unchanged. Moneybag remains PostgreSQL-only, and its existing human/agent principals and financial ownership stay authoritative.
 
 ## Persistence and account rules
 
@@ -17,8 +17,6 @@ Tests use Moneybag's pgtest helper against an owned disposable PostgreSQL 18 clu
 ## Remaining work
 
 - Pin the shared SDK reproducibly once its repository destination is confirmed; the draft currently uses the sibling Identity checkout.
-- Keep the existing visual design while adding Continue with ID and closing local credential/setup/signup paths only when enabled.
-- Add persistent eval smoke/rollback qualification against the actual Identity provider.
 - Preserve all protected production configuration, obtain the per-app production confirmation, and keep password rollback available for the proposal's week-long fallback period.
 
 GitHub Actions remain manual-only; no workflow is dispatched.
@@ -72,3 +70,11 @@ To reproduce, provide an owned disposable `MONEYBAG_TEST_DATABASE_URL`, build th
 Persistent eval deployment smoke conversion, a published SDK pin and production human gates remain pending. The flag remains disabled by default.
 
 After the CSP fixes, the complete backend suite passes on owned PostgreSQL 18 (integration 21.96 s), full vet and API build pass, and focused SDK/page/consent-policy race checks pass. No UI source changed in this qualification slice; the prior production UI build and browser layout checks remain applicable.
+
+## Persistent eval deployment gate
+
+The deployment smoke now uses a pre-existing dedicated `eval-` account and private mode-0600 password file, with no account-creation fallback. It detects the live auth form, completes email/password sign-in, checks its account and bootstrap/settings/saved-view reads, verifies the correct account controls and signs out through the actual UI. Cleanup revokes only the smoke's app session and own ID device; the financial/model fixture and existing agent grant remain unchanged. Both ID-enabled and flag-off smokes pass against the same linked legacy eval account inside the actual-provider race fixture (11.28 s fixture / 12.35 s package); MCP confirms zero leftover member devices. Full backend tests pass (integration 24.23 s), full vet/API build pass, and the stripped ARM64 build is statically linked.
+
+`deploy/deploy.sh` now requires clean `dev` and credential preflight before any build/SSH/upload, runs local checks, requires a known prior release, verifies the upload checksum and exact activated health version, then runs the browser smoke inside the rollback boundary. Failed health or smoke restores and checks the prior release while preserving the original failure code. The protected `moneybag.env` is never rewritten or uploaded. The launcher accepts only a private owned non-symlink Identity sidecar and exports its five ID keys literally; unrelated settings and shell evaluation are refused.
+
+`make smoke-check rollout-check` passes. Tests cover credential/origin/file guards, unsafe sidecars, protected-file preservation, preflight refusing all remote/build calls, dry-run, single rollback and original failure preservation. They also execute the actual remote activation/health/rollback script bodies against owned temporary releases with local command shims, verifying both symlink restoration and exact-version health behavior. Bash syntax and shellcheck 0.11 pass. No deployment command was executed against Oracle VM and no GitHub Actions run was started. Publication/pinning, production registration and per-app human confirmation remain open.
