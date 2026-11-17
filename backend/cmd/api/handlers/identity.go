@@ -39,7 +39,7 @@ func (h *Handler) ConfigureIdentity(ctx context.Context, cfg IdentityConfig) err
 		if origin == "" || origins[origin] {
 			continue
 		}
-		client, err := idclient.New(ctx, idclient.Config{Issuer: cfg.Issuer, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: origin + "/api/auth/id/callback", CookieKey: cfg.CookieKey, Sessions: identitySessions{h}, ResolveUser: h.resolveIdentity})
+		client, err := idclient.New(ctx, idclient.Config{Issuer: cfg.Issuer, ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, RedirectURL: origin + "/api/auth/id/callback", CookieKey: cfg.CookieKey, Sessions: identitySessions{h}, ResolveUser: h.resolveIdentity, ResolveUnverifiedUser: h.resolveBoundIdentity})
 		if err != nil {
 			return err
 		}
@@ -190,4 +190,9 @@ func (h *Handler) sessionData(user identity.User, session identity.Session) map[
 		data["identity_account_url"] = h.identityAccountURL
 	}
 	return data
+}
+
+func (h *Handler) resolveBoundIdentity(ctx context.Context, claims idclient.Claims) (string, error) {
+	user, err := h.services.Identity.ResolveBoundIdentity(ctx, claims.Subject, claims.Email)
+	return user.ID, err
 }

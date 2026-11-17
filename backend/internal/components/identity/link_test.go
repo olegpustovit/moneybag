@@ -403,3 +403,26 @@ func TestIdentityMappingConstraintsStayPrivateAndFollowUserDeletion(t *testing.T
 		t.Fatal("deleted user left a reusable subject mapping")
 	}
 }
+
+func TestBoundUnverifiedIdentityCannotCreateOrAttach(t *testing.T) {
+	pool := pgtest.New(t)
+	service := NewService(NewPostgresRepository(pool))
+	user := identityFixtureUser(t, pool, "eval-bound@example.test", false)
+	ctx := t.Context()
+	if _, err := service.ResolveBoundIdentity(ctx, "id-bound", user.Email); err == nil {
+		t.Fatal("unbound account attached")
+	}
+	if _, err := service.LinkIdentity(ctx, "id-bound", user.Email); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := service.ResolveBoundIdentity(ctx, "id-bound", user.Email); err != nil || got.ID != user.ID {
+		t.Fatal(got, err)
+	}
+	if _, err := service.ResolveBoundIdentity(ctx, "other-id", user.Email); err == nil {
+		t.Fatal("another subject accepted")
+	}
+	service.access = func(context.Context, string, bool) error { return ErrAccessDenied }
+	if _, err := service.ResolveBoundIdentity(ctx, "id-bound", user.Email); err == nil {
+		t.Fatal("blocked bound user accepted")
+	}
+}

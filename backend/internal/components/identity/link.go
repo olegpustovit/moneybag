@@ -158,3 +158,22 @@ func identityError(err error) error {
 	}
 	return err
 }
+
+// ResolveBoundIdentity never links an unverified email or creates a user.
+func (s *Service) ResolveBoundIdentity(ctx context.Context, subject, email string) (User, error) {
+	user, err := s.ByEmail(ctx, email)
+	if err != nil {
+		return User{}, err
+	}
+	bound, err := s.IdentitySubject(ctx, user.ID)
+	if err != nil {
+		return User{}, err
+	}
+	if subject == "" || bound != subject || user.Disabled {
+		return User{}, ErrAccessDenied
+	}
+	if err := s.CheckSubject(ctx, subject, true); err != nil {
+		return User{}, err
+	}
+	return user, nil
+}
