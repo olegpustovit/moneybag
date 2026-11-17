@@ -123,10 +123,16 @@ type Session struct {
 type Capture func(ctx context.Context, url string, width, height int) ([]byte, error)
 
 type Service struct {
+	watch    func(context.Context, string) (context.Context, context.CancelFunc, error)
 	mu       sync.Mutex
 	sessions map[string]*Session
 	base     string
 	capture  Capture
+}
+
+// WithAccessGuard is set before serving or starting background work.
+func (s *Service) WithAccessGuard(watch func(context.Context, string) (context.Context, context.CancelFunc, error)) {
+	s.watch = watch
 }
 
 // New takes the app's own loopback base URL; a nil capture means no renderer is configured.
@@ -216,6 +222,14 @@ type Result struct {
 
 // Render opens the SPA at /render/{token} and fails unless the page reported.
 func (s *Service) Render(ctx context.Context, p principal.Principal, grantHash string, t Target) (Result, error) {
+	if s != nil && s.watch != nil {
+		work, release, err := s.watch(ctx, p.UserID)
+		if err != nil {
+			return Result{}, err
+		}
+		defer release()
+		ctx = work
+	}
 	if !s.Available() {
 		return Result{}, fmt.Errorf("renderer not configured")
 	}

@@ -42,11 +42,21 @@ func daily(ctx context.Context, hour int, loc *time.Location, onStart bool, fn f
 func startJobs(parent context.Context, s mcpserver.Services, pool *pgxpool.Pool, log *slog.Logger) func() {
 	ctx, cancel := context.WithCancel(parent)
 	var wg sync.WaitGroup
-	users := func(name string, fn func(context.Context, principal.Principal) error) {
+	users := func(name string, guarded bool, fn func(context.Context, principal.Principal) error) {
 		job, stop := context.WithTimeout(ctx, 5*time.Minute)
 		defer stop()
 		e := s.Identity.EachUser(job, func(p principal.Principal) error {
-			if e := fn(job, p); e != nil {
+			work := job
+			if guarded {
+				next, release, err := s.Identity.WatchAccess(job, p.UserID)
+				if err != nil {
+					log.Info("owner maintenance paused", "job", name, "user_id", p.UserID)
+					return job.Err()
+				}
+				defer release()
+				work = next
+			}
+			if e := fn(work, p); e != nil {
 				log.Error("maintenance failed", "job", name, "user_id", p.UserID, "error", e)
 			}
 			return job.Err()
@@ -56,7 +66,7 @@ func startJobs(parent context.Context, s mcpserver.Services, pool *pgxpool.Pool,
 		}
 	}
 	daily(ctx, 3, time.UTC, false, func() {
-		users("invariants", func(ctx context.Context, p principal.Principal) error {
+		users("invariants", false, func(ctx context.Context, p principal.Principal) error {
 			if e := s.Reconcile.Verify(ctx, p); e != nil {
 				return e
 			}
@@ -70,7 +80,7 @@ func startJobs(parent context.Context, s mcpserver.Services, pool *pgxpool.Pool,
 		zagreb = time.UTC
 	}
 	daily(ctx, 17, zagreb, s.Identity != nil && s.Rates != nil, func() {
-		users("rates", func(ctx context.Context, p principal.Principal) error {
+		users("rates", true, func(ctx context.Context, p principal.Principal) error {
 			p.Actor = principal.Actor{Kind: "system", ID: "rate-sync"}
 			res, e := s.Rates.Sync(ctx, p, true, true)
 			for _, st := range res.Providers {

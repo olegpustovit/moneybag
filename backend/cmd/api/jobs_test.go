@@ -3,10 +3,14 @@ package main
 import (
 	"context"
 	"github.com/jackc/pgx/v5"
+	"github.com/olegpustovit/moneybag/backend/internal/components/identity"
+	"github.com/olegpustovit/moneybag/backend/internal/components/rates"
 	"github.com/olegpustovit/moneybag/backend/internal/infrastructure/postgres/pgtest"
 	"github.com/olegpustovit/moneybag/backend/internal/mcpserver"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -65,4 +69,36 @@ func TestExpirySweepKeepsUnexpiredRows(t *testing.T) {
 			t.Fatalf("%s remaining: %v %v", table, ids, err)
 		}
 	}
+}
+
+func TestStartupRatesDoNotRunForAnOwnerDeniedByID(t *testing.T) {
+	pool := pgtest.New(t)
+	ids := identity.NewService(identity.NewPostgresRepository(pool))
+	user, err := ids.Setup(t.Context(), "eval-rate-owner@example.test", "eval owner", "synthetic-test-password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = ids.LinkIdentity(t.Context(), "usr_eval_rates", user.Email); err != nil {
+		t.Fatal(err)
+	}
+	checked := make(chan struct{})
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(checked)
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"client_id":"app_eval_rates","subject":"usr_eval_rates","allowed":false,"reason_code":"user_block","policy_revision":1,"lease_seconds":60}`)
+	}))
+	defer provider.Close()
+	if err = ids.ConfigureAccess(provider.URL, "app_eval_rates", "eval-owned-secret"); err != nil {
+		t.Fatal(err)
+	}
+	// Any rate data access would fail on the intentionally absent repository.
+	services := mcpserver.Services{Identity: ids, Rates: rates.NewService(nil, nil)}
+	stop := startJobs(t.Context(), services, pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer stop()
+	select {
+	case <-checked:
+	case <-time.After(time.Second):
+		t.Fatal("startup rate dispatch skipped access checking")
+	}
+	stop()
 }

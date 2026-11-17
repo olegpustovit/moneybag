@@ -75,6 +75,16 @@ func loadConfig() (config, error) {
 		return c, fmt.Errorf("MONEYBAG_ID_ENABLED must be true or false")
 	}
 	c.Identity = handlers.IdentityConfig{Enabled: enabled, Issuer: env("ID_ISSUER", "https://id.microapps.space"), ClientID: env("ID_CLIENT_ID", ""), ClientSecret: env("ID_CLIENT_SECRET", "")}
+	switch env("ID_ACCESS_ENABLED", "false") {
+	case "false", "":
+	case "true":
+		c.Identity.AccessEnabled = true
+	default:
+		return c, fmt.Errorf("MONEYBAG_ID_ACCESS_ENABLED must be true or false")
+	}
+	if c.Identity.AccessEnabled && !enabled {
+		return c, fmt.Errorf("MONEYBAG_ID_ACCESS_ENABLED requires MONEYBAG_ID_ENABLED")
+	}
 	if enabled {
 		key, err := base64.StdEncoding.DecodeString(env("ID_COOKIE_KEY", ""))
 		if err != nil || len(key) != 32 {

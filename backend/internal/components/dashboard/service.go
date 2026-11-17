@@ -28,6 +28,7 @@ var ErrNotPublished = errors.New("dashboard has no published version")
 
 type PostgresRepository struct{ db *pgxpool.Pool }
 type Service struct {
+	watch     func(context.Context, string) (context.Context, context.CancelFunc, error)
 	repo      *PostgresRepository
 	engine    *Engine
 	audit     *audit.Service
@@ -37,6 +38,10 @@ type Service struct {
 	Lint func(context.Context, principal.Principal, Spec) ([]string, error)
 	// RenderCheck, when set, renders a version through the real page and fails the publish gate on bad checks.
 	RenderCheck func(ctx context.Context, p principal.Principal, id string, version int) error
+}
+
+func (s *Service) WithAccessGuard(watch func(context.Context, string) (context.Context, context.CancelFunc, error)) {
+	s.watch = watch
 }
 
 func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository { return &PostgresRepository{db} }

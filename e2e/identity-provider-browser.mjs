@@ -16,11 +16,13 @@ const browser=await chromium.launch({executablePath:process.env.CHROMIUM,args:['
 const context=await browser.newContext();const page=await context.newPage();const errors=[];
 page.on('pageerror',error=>errors.push(error.message));page.setDefaultTimeout(10000);
 try {
+ const health=await context.request.get(cfg.origin+'/healthz',{timeout:5000});assert.equal(health.status(),200);assert.equal((await health.json()).identityAccessEnforced,cfg.stage!=='rollback');
  let oauth;
  let destination=cfg.invitation?`/register?${new URLSearchParams({token:cfg.invitation})}`:`/login?${new URLSearchParams({next:'/settings?identity_eval=1'})}`;
  if(cfg.stage==='oauth') {
-  const redirect='http://127.0.0.1:8484/owned-callback';
-  await page.route(redirect+'**',route=>route.fulfill({contentType:'text/html',body:'<h1>Owned client callback</h1>'}));
+  const redirect=cfg.oauthCallback||'http://127.0.0.1:8484/owned-callback';
+  assert(new URL(redirect).hostname==='127.0.0.1');
+  if(!cfg.oauthCallback)await page.route(redirect+'**',route=>route.fulfill({contentType:'text/html',body:'<h1>Owned client callback</h1>'}));
   const registered=await context.request.post(cfg.origin+'/oauth/register',{data:{client_name:'Owned OAuth client',redirect_uris:[redirect],token_endpoint_auth_method:'none'}});
   assert.equal(registered.status(),201);const {client_id:clientID}=await registered.json();
   const verifier=randomBytes(32).toString('base64url'),state=randomBytes(24).toString('base64url');
@@ -40,7 +42,11 @@ try {
   const returned=page.waitForResponse(response=>new URL(response.url()).origin===cfg.origin && new URL(response.url()).pathname==='/api/auth/id/callback');
   await page.getByRole('button',{name:'Sign in',exact:true}).click();callback=await returned;
  }
- let agentToken;
+ let agentToken,refreshToken;
+ async function policy(action) {
+  assert(cfg.policyURL?.startsWith('http://127.0.0.1:'));
+  const result=await context.request.post(cfg.policyURL,{headers:{Authorization:'Bearer '+await privateFile(cfg.policyKeyFile)},data:{action},timeout:5000});assert.equal(result.status(),200,'owned policy action failed');
+ }
  async function mcp(name,args,token) {
   const response=await context.request.post(cfg.origin+'/mcp',{headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json',Accept:'application/json, text/event-stream','MCP-Protocol-Version':'2026-07-28','Mcp-Method':'tools/call','Mcp-Name':name},data:{jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args,_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientInfo':{name:'moneybag-owned-test',version:'1'},'io.modelcontextprotocol/clientCapabilities':{}}}}});
   return response;
@@ -72,15 +78,32 @@ try {
    await page.getByRole('button',{name:'Allow access',exact:true}).click();await page.waitForURL(oauth.redirect+'**');
    const returned=new URL(page.url());assert.equal(returned.searchParams.get('state'),oauth.state);assert(returned.searchParams.get('code'));
    const token=await context.request.post(cfg.origin+'/oauth/token',{form:{grant_type:'authorization_code',client_id:oauth.clientID,code:returned.searchParams.get('code'),redirect_uri:oauth.redirect,code_verifier:oauth.verifier,resource:cfg.origin+'/mcp'}});
-   assert.equal(token.status(),200);agentToken=(await token.json()).access_token;assert(agentToken);
+   assert.equal(token.status(),200);const issued=await token.json();agentToken=issued.access_token;refreshToken=issued.refresh_token;assert(agentToken&&refreshToken);
    const who=await mcp('whoami',{},agentToken);assert.equal(who.status(),200);const result=(await who.json()).result;assert(!result.isError);assert.equal(result.structuredContent.user.id,cfg.userID);assert.equal(result.structuredContent.user.is_admin,false);assert.equal(result.structuredContent.actor.kind,'agent');
    const write=await mcp('account_create',{id:'assets:must-refuse',name:'Must refuse'},agentToken);assert.equal(write.status(),200);const refusal=await write.json();assert(refusal.error || refusal.result?.isError,'read-only agent wrote data');
+  }
+  if(oauth&&cfg.policyURL) {
+   const refresh=()=>context.request.post(cfg.origin+'/oauth/token',{form:{grant_type:'refresh_token',client_id:oauth.clientID,refresh_token:refreshToken,resource:cfg.origin+'/mcp'},timeout:5000});
+   await policy('block');
+   assert.equal((await context.request.get(cfg.origin+'/api/session',{timeout:5000})).status(),403);
+   assert.equal((await mcp('whoami',{},agentToken)).status(),403);
+   assert.equal((await refresh()).status(),403);
+   await policy('restore');assert.equal((await context.request.get(cfg.origin+'/api/session',{timeout:5000})).status(),200);
+   await policy('outage');
+   assert.equal((await context.request.get(cfg.origin+'/api/session',{timeout:5000})).status(),503);
+   assert.equal((await mcp('whoami',{},agentToken)).status(),503);
+   assert.equal((await refresh()).status(),503);
+   await policy('recover');
+   assert.equal((await context.request.get(cfg.origin+'/api/session',{timeout:5000})).status(),200);
+   const restored=await refresh();assert.equal(restored.status(),200,'denial/outage consumed valid refresh');const rotated=await restored.json();agentToken=rotated.access_token;
   }
   await page.goto(cfg.origin+'/settings');await page.getByRole('heading',{name:'Account',exact:true}).waitFor();
   assert.equal(await page.getByText('Change password',{exact:true}).count(),enabled?0:2);
   const manage=page.getByRole('link',{name:'Manage your account in Microapps ID',exact:true});assert.equal(await manage.count(),enabled?1:0);if(enabled)assert.equal(await manage.getAttribute('href'),cfg.issuer+'/account');
+  if(oauth&&cfg.policyURL){await policy('block');assert.equal((await context.request.get(cfg.origin+'/api/session',{timeout:5000})).status(),403)}
   await page.getByRole('button',{name:'Sign out',exact:true}).click();await page.waitForURL(u=>u.origin===cfg.origin && ['/','/login'].includes(u.pathname));
   assert.equal((await context.request.get(cfg.origin+'/api/session')).status(),401);
+  if(oauth&&cfg.policyURL)await policy('restore');
   if(agentToken) {
    assert.equal((await mcp('whoami',{},agentToken)).status(),200,'browser logout revoked agent grant');
    assert.equal((await context.request.post(cfg.origin+'/oauth/revoke',{form:{client_id:oauth.clientID,token:agentToken}})).status(),200);

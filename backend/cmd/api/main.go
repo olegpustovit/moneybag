@@ -142,6 +142,8 @@ func run() error {
 		capture = screenshot.New(cfg.Chromium).Capture
 	}
 	services.Previews = preview.New(loopbackURL(cfg.Listen), capture)
+	services.Previews.WithAccessGuard(ids.WatchAccess)
+	dash.WithAccessGuard(ids.WatchAccess)
 	dash.RenderCheck = func(ctx context.Context, p principal.Principal, id string, version int) error {
 		failures, e := services.Previews.Gate(ctx, p, "", preview.Target{Dashboard: id, Version: strconv.Itoa(version)})
 		if e != nil {
@@ -176,7 +178,7 @@ func run() error {
 	if e := web.ConfigureIdentity(ctx, cfg.Identity); e != nil {
 		return fmt.Errorf("configure Microapps ID: %w", e)
 	}
-	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log)
+	onChange, stopPrewarm := prewarmer(ctx, snapshots, dash, log, ids.WatchAccess)
 	a.OnChange = onChange
 	defer stopPrewarm()
 	stopJobs := startJobs(ctx, services, pool, log)

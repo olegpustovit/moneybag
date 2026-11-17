@@ -274,6 +274,9 @@ func (s *Service) Validate(ctx context.Context, in Authorization) (Client, []str
 	return c, scopes, nil
 }
 func (s *Service) Authorize(ctx context.Context, in Authorization, p principal.Principal) (string, error) {
+	if err := s.identity.CheckAccess(ctx, p.UserID, true); err != nil {
+		return "", err
+	}
 	_, scopes, e := s.Validate(ctx, in)
 	if e != nil {
 		return "", e
@@ -316,6 +319,16 @@ func (s *Service) Exchange(ctx context.Context, c Client, raw, redirect, verifie
 	}
 	var result TokenResponse
 	e := postgres.Workflow(ctx, func(tx context.Context) error {
+		if s.identity.AccessEnforced() {
+			const ownerSQL = `SELECT user_id FROM oauth_codes WHERE id=@id AND client_id=@client AND redirect_uri=@redirect AND challenge=@challenge AND expires_at>@now AND (@resource='' OR resource=@resource)`
+			var userID string
+			if err := s.repo.db.QueryRow(tx, ownerSQL, pgx.NamedArgs{"id": identity.Hash(raw), "client": c.ID, "redirect": redirect, "challenge": Challenge(verifier), "now": time.Now().UTC().Truncate(time.Millisecond), "resource": resource}).Scan(&userID); err != nil {
+				return ErrInvalidGrant
+			}
+			if err := s.identity.CheckAccess(tx, userID, true); err != nil {
+				return err
+			}
+		}
 		const exchangeSQL = `DELETE FROM oauth_codes WHERE id=@id AND client_id=@client AND redirect_uri=@redirect AND challenge=@challenge
  AND expires_at>@now AND (@resource='' OR resource=@resource) RETURNING *`
 		rows, e := s.repo.db.Query(tx, exchangeSQL, pgx.NamedArgs{"id": identity.Hash(raw), "client": c.ID, "redirect": redirect, "challenge": Challenge(verifier), "now": time.Now().UTC().Truncate(time.Millisecond), "resource": resource})
@@ -377,6 +390,9 @@ func (s *Service) Refresh(ctx context.Context, c Client, raw, resource, scope st
 			_, e = s.repo.db.Exec(tx, `UPDATE oauth_grants SET revoked=true WHERE id=@id`, pgx.NamedArgs{"id": g.ID})
 			return e
 		}
+		if err := s.identity.CheckAccess(tx, g.UserID, true); err != nil {
+			return err
+		}
 		if scope != "" {
 			for _, x := range strings.Fields(scope) {
 				if !slices.Contains(g.Scopes, x) {
@@ -434,6 +450,9 @@ func (s *Service) Bearer(ctx context.Context, raw, resource string) (principal.P
 	}
 	if suspended {
 		return principal.Principal{}, ErrAgentsSuspended
+	}
+	if err := s.identity.CheckAccess(ctx, result.Grant.UserID, false); err != nil {
+		return principal.Principal{}, err
 	}
 	scopes := result.Grant.Scopes
 	admin := slices.Contains(scopes, principal.ScopeAdminUsers)

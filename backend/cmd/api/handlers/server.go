@@ -82,7 +82,7 @@ func (h *Handler) RemoteMCP(readOnly bool) http.Handler {
 		server = h.readonly
 		path += "/readonly"
 	}
-	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
+	transport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.security(w)
 		w.Header().Set("Cache-Control", "no-store")
@@ -101,10 +101,15 @@ func (h *Handler) RemoteMCP(readOnly bool) http.Handler {
 			return
 		}
 		if e != nil {
+			if accessFailure(w, e) {
+				return
+			}
 			h.unauthorized(w, path)
 			return
 		}
-		transport.ServeHTTP(w, r.WithContext(principal.With(r.Context(), p)))
+		h.serveAccess(w, r, p, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			transport.ServeHTTP(w, r.WithContext(principal.With(r.Context(), p)))
+		}))
 	})
 }
 func (h *Handler) unauthorized(w http.ResponseWriter, path string) {
@@ -154,7 +159,7 @@ func (h *Handler) Handler() http.Handler {
 			respond(w, 503, map[string]string{"status": "unhealthy"})
 			return
 		}
-		respond(w, 200, map[string]string{"status": "ok", "version": h.cfg.Version})
+		respond(w, 200, map[string]any{"status": "ok", "version": h.cfg.Version, "identityAccessEnforced": h.services.Identity.AccessEnforced()})
 	})
 	mux.HandleFunc("GET /assets/{file}", func(w http.ResponseWriter, r *http.Request) {
 		if serveUIAsset(w, r) {
@@ -191,8 +196,8 @@ func (h *Handler) Handler() http.Handler {
 		respond(w, 200, h.oauth.ProtectedResource("/mcp/readonly"))
 	})
 	mux.HandleFunc("POST /oauth/register", h.registerClient)
-	mux.HandleFunc("GET /oauth/authorize", h.authorizePage)
-	mux.HandleFunc("POST /oauth/authorize", h.authorize)
+	mux.HandleFunc("GET /oauth/authorize", h.accessHandler(h.authorizePage))
+	mux.HandleFunc("POST /oauth/authorize", h.accessHandler(h.authorize))
 	mux.HandleFunc("POST /oauth/token", h.token)
 	mux.HandleFunc("POST /oauth/revoke", h.revoke)
 	mux.HandleFunc("GET /login", h.loginPage)
@@ -202,27 +207,27 @@ func (h *Handler) Handler() http.Handler {
 	mux.HandleFunc("GET /register", h.registerPage)
 	mux.HandleFunc("POST /register", h.registerUser)
 	mux.HandleFunc("POST /logout", h.logout)
-	mux.HandleFunc("POST /settings/invite", h.settingsInvite)
-	mux.HandleFunc("POST /settings/revoke", h.settingsRevoke)
-	mux.HandleFunc("POST /settings/password", h.settingsPassword)
-	mux.HandleFunc("POST /settings/feed", h.settingsFeed)
-	mux.HandleFunc("POST /settings/agents/stop", h.settingsAgentsStop)
-	mux.HandleFunc("POST /settings/agents/resume", h.settingsAgentsResume)
-	mux.HandleFunc("GET /confirm/{token}", h.confirmPage)
-	mux.HandleFunc("POST /confirm/{token}", h.confirmDecide)
-	mux.HandleFunc("GET /secure/feed/{id}", h.feedSecretPage)
-	mux.HandleFunc("POST /secure/feed/{id}", h.feedSecretSave)
-	mux.HandleFunc("GET /api/cube", h.apiCube)
-	mux.HandleFunc("GET /api/changes", h.apiChanges)
-	mux.Handle("POST /api/feedback", h.browser(http.HandlerFunc(h.apiFeedback)))
-	mux.Handle("POST /api/usage", h.browser(http.HandlerFunc(h.apiUsage)))
-	mux.HandleFunc("GET /api/saved-views", h.apiSavedViews)
-	mux.Handle("PUT /api/saved-views", h.browserMethods(http.HandlerFunc(h.apiSavedViewPut)))
-	mux.Handle("DELETE /api/saved-views", h.browserMethods(http.HandlerFunc(h.apiSavedViewDelete)))
-	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
+	mux.HandleFunc("POST /settings/invite", h.accessHandler(h.settingsInvite))
+	mux.HandleFunc("POST /settings/revoke", h.accessHandler(h.settingsRevoke))
+	mux.HandleFunc("POST /settings/password", h.accessHandler(h.settingsPassword))
+	mux.HandleFunc("POST /settings/feed", h.accessHandler(h.settingsFeed))
+	mux.HandleFunc("POST /settings/agents/stop", h.accessHandler(h.settingsAgentsStop))
+	mux.HandleFunc("POST /settings/agents/resume", h.accessHandler(h.settingsAgentsResume))
+	mux.HandleFunc("GET /confirm/{token}", h.accessHandler(h.confirmPage))
+	mux.HandleFunc("POST /confirm/{token}", h.accessHandler(h.confirmDecide))
+	mux.HandleFunc("GET /secure/feed/{id}", h.accessHandler(h.feedSecretPage))
+	mux.HandleFunc("POST /secure/feed/{id}", h.accessHandler(h.feedSecretSave))
+	mux.HandleFunc("GET /api/cube", h.accessHandler(h.apiCube))
+	mux.HandleFunc("GET /api/changes", h.accessHandler(h.apiChanges))
+	mux.Handle("POST /api/feedback", h.accessRequest(h.browser(http.HandlerFunc(h.apiFeedback))))
+	mux.Handle("POST /api/usage", h.accessRequest(h.browser(http.HandlerFunc(h.apiUsage))))
+	mux.HandleFunc("GET /api/saved-views", h.accessHandler(h.apiSavedViews))
+	mux.Handle("PUT /api/saved-views", h.accessRequest(h.browserMethods(http.HandlerFunc(h.apiSavedViewPut))))
+	mux.Handle("DELETE /api/saved-views", h.accessRequest(h.browserMethods(http.HandlerFunc(h.apiSavedViewDelete))))
+	browserTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.full }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true, MaxRequestBodyBytes: 12 * 1024 * 1024})
 	// The SPA reads its pages through tools; a render capture gets only the read-only toolset, so no tool can write.
-	readTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.readonly }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, MaxRequestBodyBytes: 1024 * 1024})
-	mux.Handle("POST /api/mcp", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	readTransport := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return h.readonly }, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true, PropagateRequestCancellation: true, MaxRequestBodyBytes: 1024 * 1024})
+	mux.Handle("POST /api/mcp", h.accessRequest(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, e := r.Cookie(h.sessionCookieName()); e != nil {
 			if _, session, ok := h.renderCookie(r); ok {
 				p := session.Principal
@@ -236,32 +241,32 @@ func (h *Handler) Handler() http.Handler {
 			}
 		}
 		h.browser(browserTransport).ServeHTTP(w, r)
-	}))
-	mux.Handle("POST /api/expr/check", h.browser(http.HandlerFunc(h.apiExpressionCheck)))
-	mux.Handle("POST /api/dashboards/{id}/validate", h.browser(http.HandlerFunc(h.apiDashboardValidate)))
-	mux.HandleFunc("GET /api/expr/catalog", h.apiExpressionCatalog)
-	mux.HandleFunc("GET /api/session", h.apiSession)
-	mux.HandleFunc("GET /api/bootstrap", h.apiBootstrap)
-	mux.HandleFunc("GET /api/dashboards/{id}/view", h.apiDashboardView)
-	mux.HandleFunc("GET /render/{token}", h.renderShell)
-	mux.HandleFunc("GET /render/{token}/page", h.renderPage)
-	mux.HandleFunc("GET /api/render/{token}/view", h.apiRenderView)
-	mux.HandleFunc("GET /api/render/{token}/cube", h.apiRenderCube)
-	mux.HandleFunc("POST /api/render/{token}/report", h.apiRenderReport)
-	mux.HandleFunc("GET /api/imports", h.apiImports)
-	mux.HandleFunc("GET /api/imports/count", h.apiImportCount)
-	mux.HandleFunc("GET /api/reconcile/count", h.apiReconcileCount)
-	mux.HandleFunc("GET /api/settings", h.apiSettings)
-	mux.HandleFunc("GET /api/activity/agents", h.apiActivityAgents)
-	mux.HandleFunc("GET /api/shared/{id}", h.apiShared)
-	mux.HandleFunc("GET /api/shared/{id}/draft", h.apiSharedDraft)
-	mux.HandleFunc("GET /api/shared/{id}/catalog", h.apiSharedCatalog)
-	mux.Handle("POST /api/shared/{id}/patch", h.browser(http.HandlerFunc(h.apiSharedPatch)))
-	mux.Handle("POST /api/shared/{id}/publish", h.browser(http.HandlerFunc(h.apiSharedPublish)))
-	mux.Handle("POST /api/shared/{id}/undo", h.browser(http.HandlerFunc(h.apiSharedUndo)))
-	mux.Handle("POST /api/shared/{id}/evaluate", h.browser(http.HandlerFunc(h.apiSharedEvaluate)))
-	mux.Handle("POST /api/shared/{id}/validate", h.browser(http.HandlerFunc(h.apiSharedValidate)))
-	mux.HandleFunc("GET /api/consistency", h.consistency)
+	})))
+	mux.Handle("POST /api/expr/check", h.accessRequest(h.browser(http.HandlerFunc(h.apiExpressionCheck))))
+	mux.Handle("POST /api/dashboards/{id}/validate", h.accessRequest(h.browser(http.HandlerFunc(h.apiDashboardValidate))))
+	mux.HandleFunc("GET /api/expr/catalog", h.accessHandler(h.apiExpressionCatalog))
+	mux.HandleFunc("GET /api/session", h.accessHandler(h.apiSession))
+	mux.HandleFunc("GET /api/bootstrap", h.accessHandler(h.apiBootstrap))
+	mux.HandleFunc("GET /api/dashboards/{id}/view", h.accessHandler(h.apiDashboardView))
+	mux.HandleFunc("GET /render/{token}", h.accessHandler(h.renderShell))
+	mux.HandleFunc("GET /render/{token}/page", h.accessHandler(h.renderPage))
+	mux.HandleFunc("GET /api/render/{token}/view", h.accessHandler(h.apiRenderView))
+	mux.HandleFunc("GET /api/render/{token}/cube", h.accessHandler(h.apiRenderCube))
+	mux.HandleFunc("POST /api/render/{token}/report", h.accessHandler(h.apiRenderReport))
+	mux.HandleFunc("GET /api/imports", h.accessHandler(h.apiImports))
+	mux.HandleFunc("GET /api/imports/count", h.accessHandler(h.apiImportCount))
+	mux.HandleFunc("GET /api/reconcile/count", h.accessHandler(h.apiReconcileCount))
+	mux.HandleFunc("GET /api/settings", h.accessHandler(h.apiSettings))
+	mux.HandleFunc("GET /api/activity/agents", h.accessHandler(h.apiActivityAgents))
+	mux.HandleFunc("GET /api/shared/{id}", h.accessHandler(h.apiShared))
+	mux.HandleFunc("GET /api/shared/{id}/draft", h.accessHandler(h.apiSharedDraft))
+	mux.HandleFunc("GET /api/shared/{id}/catalog", h.accessHandler(h.apiSharedCatalog))
+	mux.Handle("POST /api/shared/{id}/patch", h.accessRequest(h.browser(http.HandlerFunc(h.apiSharedPatch))))
+	mux.Handle("POST /api/shared/{id}/publish", h.accessRequest(h.browser(http.HandlerFunc(h.apiSharedPublish))))
+	mux.Handle("POST /api/shared/{id}/undo", h.accessRequest(h.browser(http.HandlerFunc(h.apiSharedUndo))))
+	mux.Handle("POST /api/shared/{id}/evaluate", h.accessRequest(h.browser(http.HandlerFunc(h.apiSharedEvaluate))))
+	mux.Handle("POST /api/shared/{id}/validate", h.accessRequest(h.browser(http.HandlerFunc(h.apiSharedValidate))))
+	mux.HandleFunc("GET /api/consistency", h.accessHandler(h.consistency))
 	for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 		mux.HandleFunc(method+" /api/", func(w http.ResponseWriter, _ *http.Request) {
 			respond(w, http.StatusNotFound, map[string]string{"error": "not_found"})
@@ -288,7 +293,7 @@ func (h *Handler) session(r *http.Request) (principal.Principal, identity.Sessio
 			// Reads only, and only ledger:read: every POST, PUT and DELETE under /api and /settings fails here, before any handler or CSRF check.
 			p := session.Principal
 			p.Scopes, p.Admin = []string{"ledger:read"}, false
-			return p, identity.Session{UserID: p.UserID, CSRF: renderCSRF}, nil
+			return p, identity.Session{UserID: p.UserID, CSRF: renderCSRF}, h.services.Identity.CheckAccess(r.Context(), p.UserID, false)
 		}
 		return principal.Principal{}, identity.Session{}, principal.ErrForbidden
 	}

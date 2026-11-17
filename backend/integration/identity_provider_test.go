@@ -99,7 +99,7 @@ func TestIdentityActualProviderBrowser(t *testing.T) {
 		return value
 	}
 	before := snapshot()
-	cfg := handlers.IdentityConfig{Enabled: true, Issuer: issuer, ClientID: os.Getenv("MONEYBAG_ID_TEST_CLIENT_ID"), ClientSecret: providerPrivateFile(t, os.Getenv("MONEYBAG_ID_TEST_SECRET_FILE"))}
+	cfg := handlers.IdentityConfig{Enabled: true, AccessEnabled: true, Issuer: issuer, ClientID: os.Getenv("MONEYBAG_ID_TEST_CLIENT_ID"), ClientSecret: providerPrivateFile(t, os.Getenv("MONEYBAG_ID_TEST_SECRET_FILE"))}
 	if _, err := rand.Read(cfg.CookieKey[:]); err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,12 @@ func TestIdentityActualProviderBrowser(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		web := handlers.New(handlers.Config{PublicURL: origin, Version: "owned-provider"}, services, oauth.NewService(oauth.NewPostgresRepository(pool), ids, origin), repo, pool)
+		// A restarted mode gets fresh composition while all persisted finance,
+		// credentials and subject bindings remain in the same owned database.
+		currentServices := services
+		currentIDs := identity.NewService(identity.NewPostgresRepository(pool))
+		currentServices.Identity = currentIDs
+		web := handlers.New(handlers.Config{PublicURL: origin, Version: "owned-provider"}, currentServices, oauth.NewService(oauth.NewPostgresRepository(pool), currentIDs, origin), repo, pool)
 		if enabled {
 			if err := web.ConfigureIdentity(t.Context(), cfg); err != nil {
 				_ = listener.Close()
@@ -156,7 +161,7 @@ func TestIdentityActualProviderBrowser(t *testing.T) {
 	run := func(stage, email, invitation, userID string) {
 		t.Helper()
 		fixture := filepath.Join(t.TempDir(), "browser.json")
-		data, err := json.Marshal(map[string]string{"origin": origin, "issuer": issuer, "passwordFile": os.Getenv("MONEYBAG_ID_TEST_PASSWORD_FILE"), "stage": stage, "email": email, "invitation": invitation, "userID": userID})
+		data, err := json.Marshal(map[string]string{"origin": origin, "issuer": issuer, "passwordFile": os.Getenv("MONEYBAG_ID_TEST_PASSWORD_FILE"), "stage": stage, "email": email, "invitation": invitation, "userID": userID, "oauthCallback": os.Getenv("MONEYBAG_ID_TEST_OAUTH_CALLBACK"), "policyURL": os.Getenv("MONEYBAG_ID_TEST_POLICY_URL"), "policyKeyFile": os.Getenv("MONEYBAG_ID_TEST_POLICY_KEY_FILE")})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,9 +1,13 @@
-.PHONY: ui backend build check test-integration test-identity-provider smoke smoke-check rollout-check
+.PHONY: ui backend build check test-integration test-identity-provider smoke smoke-check rollout-check access-check access-rehearsal
 ui:
 	cd ui && bun install --frozen-lockfile && bun run lint && bun run build
 	rsync -a --delete --exclude=.keep ui/dist/ backend/cmd/api/handlers/dist/
 backend:
 	cd backend && go test ./... && go vet ./...
+access-check:
+	bash deploy/test-owned-postgres.sh bash -c 'cd backend && go test -race -p 4 ./...'
+access-rehearsal:
+	MONEYBAG_ACCESS_REHEARSAL=1 bash deploy/test-owned-postgres.sh bash -c 'cd backend && go test -race ./integration -run "^TestAccessActiveWorkRehearsal$$" -count=1 -v'
 build: ui
 	cd backend && go build -o bin/moneybag-local ./cmd/api
 check: ui backend smoke-check rollout-check

@@ -1,0 +1,35 @@
+{
+  "active_recheck_seconds": 25,
+  "interval_ms": 100,
+  "maximum_removal_ms": 60000,
+  "per_check_timeout_seconds": 2,
+  "policy_unavailable_ms": 24998,
+  "removal_ms": 24997,
+  "responses": {
+    "allowed": 4,
+    "denied": 980,
+    "unavailable": 980
+  },
+  "restoration": "pass",
+  "scope": "Owned PostgreSQL 18, actual Fiber/compression/MCP and published SDK; simulated policy endpoint and capture",
+  "workers": 4,
+  "app_source_base": "7ed4fdc",
+  "app_source_note": "Base plus the central-access implementation and fixtures retained in this checkpoint",
+  "sdk_pin": "v0.0.0-20261117021458-a8a6d8068d30",
+  "full_make_check": "pass",
+  "full_race": "pass",
+  "actual_provider_scenario": "pass",
+  "arm64_build": "pass",
+  "enforced_release_rollback": "pass",
+  "watcher_release": "joins its checker before Fiber can recycle the parent request context",
+  "previous_full_capture_guard_run": {
+    "removal_ms": 25001,
+    "policy_unavailable_ms": 24999,
+    "responses": {
+      "allowed": 5,
+      "denied": 979,
+      "unavailable": 978
+    }
+  },
+  "cancellation_layers": "Browser capture retains production guard; agent capture isolates HTTP/MCP cancellation by delegating only its caller context"
+}

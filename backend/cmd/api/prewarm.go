@@ -23,7 +23,9 @@ type warmTask struct {
 // prewarmDebounce is a var so tests need not wait for it.
 var prewarmDebounce = 2 * time.Second
 
-func prewarmer(parent context.Context, snapshots *dashboard.Snapshots, service warmDashboard, log *slog.Logger) (func(string, bool), func()) {
+type ownerAccess func(context.Context, string) (context.Context, context.CancelFunc, error)
+
+func prewarmer(parent context.Context, snapshots *dashboard.Snapshots, service warmDashboard, log *slog.Logger, guards ...ownerAccess) (func(string, bool), func()) {
 	var mu sync.Mutex
 	var workers sync.WaitGroup
 	stopped := false
@@ -51,14 +53,32 @@ func prewarmer(parent context.Context, snapshots *dashboard.Snapshots, service w
 			workers.Add(1)
 			mu.Unlock()
 			defer workers.Done()
+			defer func() {
+				mu.Lock()
+				if tasks[user] == task {
+					delete(tasks, user)
+				}
+				mu.Unlock()
+				cancel()
+			}()
+			work := ctx
+			if len(guards) > 0 {
+				next, release, err := guards[0](ctx, user)
+				if err != nil {
+					cancel()
+					return
+				}
+				defer release()
+				work = next
+			}
 			p := principal.Principal{UserID: user, Scopes: []string{"ledger:read"}, Actor: principal.Actor{Kind: "system", ID: "prewarm"}}
-			heads, err := service.List(ctx, p)
+			heads, err := service.List(work, p)
 			if err == nil {
 				for _, head := range heads {
-					if head.PublishedVersion == 0 || ctx.Err() != nil {
+					if head.PublishedVersion == 0 || work.Err() != nil {
 						continue
 					}
-					if _, previewErr := service.Preview(ctx, p, head.ID, "published", nil); previewErr != nil && ctx.Err() == nil {
+					if _, previewErr := service.Preview(work, p, head.ID, "published", nil); previewErr != nil && work.Err() == nil {
 						log.Warn("dashboard prewarm failed", "dashboard", head.ID, "error", previewErr)
 					}
 				}
@@ -66,12 +86,6 @@ func prewarmer(parent context.Context, snapshots *dashboard.Snapshots, service w
 			if err != nil && ctx.Err() == nil {
 				log.Warn("dashboard prewarm failed", "error", err)
 			}
-			mu.Lock()
-			if tasks[user] == task {
-				delete(tasks, user)
-			}
-			mu.Unlock()
-			cancel()
 		})
 		tasks[user] = task
 	}

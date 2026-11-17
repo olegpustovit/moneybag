@@ -67,7 +67,7 @@ func testDatabase(t *testing.T) (*pgxpool.Pool, context.Context) {
 func newReadHarness(t *testing.T, suffix string, extra dashboard.Reader) *readHarness {
 	return newReadHarnessMode(t, suffix, extra, false)
 }
-func newReadHarnessMode(t *testing.T, suffix string, extra dashboard.Reader, identityMode bool) *readHarness {
+func newReadHarnessMode(t *testing.T, suffix string, extra dashboard.Reader, identityMode bool, configure ...func(*readHarness)) *readHarness {
 	t.Helper()
 	db, ctx := testDatabase(t)
 	ids := identity.NewService(identity.NewPostgresRepository(pgtest.New(t)))
@@ -117,6 +117,9 @@ func newReadHarnessMode(t *testing.T, suffix string, extra dashboard.Reader, ide
 	h.services.Previews = preview.New(h.endpoint, func(ctx context.Context, target string, width, height int) ([]byte, error) {
 		return (*h.capture.Load())(ctx, target, width, height)
 	})
+	for _, setup := range configure {
+		setup(h)
+	}
 	web := handlers.New(handlers.Config{IdentityMode: identityMode, PublicURL: "https://public.example.test", TailnetURL: tailnetOrigin, Version: "integration"}, h.services, oauth.NewService(oauth.NewPostgresRepository(pgtest.New(t)), ids, "https://public.example.test"), repo, db)
 	compress, err := handlers.Compression()
 	if err != nil {

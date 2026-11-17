@@ -163,12 +163,16 @@ func (h *Handler) registerUser(w http.ResponseWriter, r *http.Request) {
 	h.startSession(w, r, u, "/")
 }
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	_, session, e := h.session(r)
+	cookie, e := r.Cookie(h.sessionCookieName())
+	if e != nil {
+		http.Error(w, "reload and retry", 403)
+		return
+	}
+	session, e := h.services.Identity.SessionForLogout(r.Context(), cookie.Value, h.cfg.IdentityMode)
 	if e != nil || !h.csrf(r, session) {
 		http.Error(w, "reload and retry", 403)
 		return
 	}
-	cookie, _ := r.Cookie(h.sessionCookieName())
 	if h.cfg.IdentityMode {
 		e = h.services.Identity.LogoutIdentity(r.Context(), cookie.Value)
 	} else {
@@ -291,6 +295,9 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		e = fmt.Errorf("unsupported_grant_type")
 	}
 	if e != nil {
+		if accessFailure(w, e) {
+			return
+		}
 		if e == oauth.ErrAgentsSuspended {
 			respond(w, 403, map[string]string{"error": "agents_suspended", "error_description": e.Error()})
 			return

@@ -12,7 +12,7 @@ require (
 	github.com/klauspost/compress v1.20.4
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/olegpustovit/identity/idclient-go v0.0.0-20261116080624-9c0a96699ea8
+	github.com/olegpustovit/identity/idclient-go v0.0.0-20261117021458-a8a6d8068d30
 	github.com/pressly/goose/v3 v3.30.1
 	github.com/tiendc/go-deepcopy v1.7.2
 	github.com/xuri/excelize/v2 v2.11.1-0.20260930021559-01a9ff32fb3c

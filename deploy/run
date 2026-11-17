@@ -2,6 +2,7 @@
 set -Eeuo pipefail
 cd -- "$(dirname "${BASH_SOURCE[0]}")"
 # The application environment remains operator-owned.
+export MONEYBAG_ID_ACCESS_ENABLED=false
 set -a
 # shellcheck source=/dev/null
 source ./moneybag.env
@@ -17,10 +18,19 @@ if [[ -e identity.env || -L identity.env ]]; then
   [[ "$line" == *=* ]] || { echo 'Invalid Microapps ID assignment' >&2; exit 1; }
   key="${line%%=*}"
   case "$key" in
-   MONEYBAG_ID_ENABLED|MONEYBAG_ID_ISSUER|MONEYBAG_ID_CLIENT_ID|MONEYBAG_ID_CLIENT_SECRET|MONEYBAG_ID_COOKIE_KEY) ;;
+   MONEYBAG_ID_ACCESS_ENABLED|MONEYBAG_ID_ENABLED|MONEYBAG_ID_ISSUER|MONEYBAG_ID_CLIENT_ID|MONEYBAG_ID_CLIENT_SECRET|MONEYBAG_ID_COOKIE_KEY) ;;
    *) echo 'Unsupported Microapps ID setting' >&2; exit 1 ;;
   esac
   export "$key=${line#*=}"
  done < identity.env
+fi
+# The enforcement mode is frozen with the binary. It takes precedence over
+# inherited or newly staged configuration, including flag-off during rollback.
+access_file=./current/access.flag
+if [[ -e "$access_file" || -L "$access_file" ]]; then
+ [[ -f "$access_file" && ! -L "$access_file" && -O "$access_file" && $(stat -c %a "$access_file") == 600 ]] || { echo 'Access mode must be a private owned regular file' >&2; exit 1; }
+ access_mode=$(<"$access_file")
+ [[ "$access_mode" == true || "$access_mode" == false ]] || { echo 'Invalid frozen access mode' >&2; exit 1; }
+ export MONEYBAG_ID_ACCESS_ENABLED=$access_mode
 fi
 exec ./current/moneybag "$@"

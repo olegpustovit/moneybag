@@ -13,10 +13,11 @@ Settings are read once at startup: typed defaults, optional Vault values, then e
 | `MONEYBAG_TAILNET_URL` | Empty; optional second browser origin such as `https://host.tailnet.ts.net:8443`. Sign-in and CSRF checks accept it. OAuth, connectors and share links always use `MONEYBAG_PUBLIC_URL` |
 | `MONEYBAG_CHROMIUM_BIN` | Chromium executable for `dashboard_render`, which opens the app on its own loopback listener; blank returns validation without an image |
 | `MONEYBAG_TOOLSETS` | Empty enables all; comma-separated `account,ledger,rates,budget,tables,model,dashboard,audit,classify,import,reconcile` |
-| `MONEYBAG_ID_ENABLED` | `false`; opt-in shared Microapps ID SDK (draft rollout; UI/provider qualification still pending) |
+| `MONEYBAG_ID_ENABLED` | `false`; opt-in shared Microapps ID sign-in |
 | `MONEYBAG_ID_ISSUER` | `https://id.microapps.space`; HTTPS or exact loopback HTTP, no credentials/query/fragment |
 | `MONEYBAG_ID_CLIENT_ID` | Required when ID is enabled |
 | `MONEYBAG_ID_CLIENT_SECRET` | Optional confidential-client secret, never printed |
+| `MONEYBAG_ID_ACCESS_ENABLED` | Default `false`; literal `true` requires ID mode and confidential credentials. Central stable-subject eligibility protects existing credentials and owner jobs. Production cutover remains gated by the provider migration and reviewed grants; see [access integration](access-groups.md). |
 | `MONEYBAG_ID_COOKIE_KEY` | Independent nonzero 32-byte base64 flow key, required when enabled; cannot equal the feed secret key |
 
 `bootstrap` is an optional noninteractive first-owner command using `MONEYBAG_OWNER_EMAIL`, `MONEYBAG_OWNER_NAME` and `MONEYBAG_OWNER_PASSWORD`. It refuses a second owner bootstrap. Never put passwords in command arguments or commit an environment file.

@@ -268,6 +268,9 @@ func (s *Service) Resolve(ctx context.Context, p principal.Principal, id string)
 	return g, e
 }
 func (s *Service) Access(ctx context.Context, p principal.Principal, id string, write bool) (Access, error) {
+	if err := s.identity.CheckAccess(ctx, p.UserID, false); err != nil {
+		return Access{}, err
+	}
 	if _, e := s.dashboard.Get(ctx, p, id, ""); e == nil {
 		return Access{s.dashboard, p, id, nil}, nil
 	} else if !errors.Is(e, principal.ErrNotFound) {
@@ -527,6 +530,12 @@ func (s *Service) RefreshDue(ctx context.Context) error {
 	return errors.Join(append(failures, rows.Err())...)
 }
 func (s *Service) refreshDueGrant(ctx context.Context, g Grant) error {
+	work, release, err := s.identity.WatchAccess(ctx, g.OwnerUser)
+	if err != nil {
+		return err
+	}
+	defer release()
+	ctx = work
 	actor := principal.Actor{Kind: "system", ID: "snapshot-refresh"}
 	owner := ownerPrincipal(g, actor)
 	published, err := s.dashboard.Published(ctx, owner, g.DashboardID)

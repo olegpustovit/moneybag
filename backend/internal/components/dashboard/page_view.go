@@ -192,6 +192,14 @@ func (s *Service) refreshView(p principal.Principal, id, version string, params 
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 2*evalBudget)
 		defer cancel()
+		if s.watch != nil {
+			work, release, err := s.watch(ctx, p.UserID)
+			if err != nil {
+				return
+			}
+			defer release()
+			ctx = work
+		}
 		ctx = expressions.WithVolatility(reqcache.With(ctx))
 		entry, err := s.cachedView(ctx, p, id, version, params, key)
 		if err != nil {

@@ -1,0 +1,21 @@
+{
+  "scope": "Actual Identity binary and Moneybag HTTP implementation in an owned native test process; two owned PostgreSQL 18 clusters",
+  "verified_invitation": "captured email",
+  "policy": "explicit protected admin API review",
+  "policy_actions": [
+    "block",
+    "restore",
+    "outage",
+    "recover",
+    "block",
+    "restore"
+  ],
+  "callback_and_local_invitation": "pass",
+  "cookie_oauth_mcp": "pass",
+  "removal_and_real_policy_storage_outage": "fail closed",
+  "refresh_restoration": "pass",
+  "blocked_cookie_logout": "pass",
+  "id_legacy_smokes_and_rollback": "pass",
+  "financial_model_permission_and_existing_grant_snapshot": "preserved",
+  "leftover_eval_devices": 0
+}

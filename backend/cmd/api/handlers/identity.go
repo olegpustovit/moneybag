@@ -16,6 +16,9 @@ import (
 
 // ConfigureIdentity runs during composition, before serving any requests.
 func (h *Handler) ConfigureIdentity(ctx context.Context, cfg IdentityConfig) error {
+	if err := cfg.Validate(h.cfg.PublicURL, h.cfg.TailnetURL); err != nil {
+		return err
+	}
 	if !cfg.Enabled {
 		return nil
 	}
@@ -24,6 +27,11 @@ func (h *Handler) ConfigureIdentity(ctx context.Context, cfg IdentityConfig) err
 	}
 	if h.services.Identity == nil || h.services.Model == nil || h.ledgerRepo == nil {
 		return errors.New("Microapps ID requires account, ledger and model services")
+	}
+	if cfg.AccessEnabled {
+		if err := h.services.Identity.ConfigureAccess(cfg.Issuer, cfg.ClientID, cfg.ClientSecret); err != nil {
+			return err
+		}
 	}
 	clients := make(map[string]*idclient.Client)
 	origins := make(map[string]bool)
@@ -91,6 +99,9 @@ func (h *Handler) identityLogout(w http.ResponseWriter, r *http.Request) {
 	client.Logout(&invitationResponseWriter{ResponseWriter: w}, r)
 }
 func (h *Handler) resolveIdentity(ctx context.Context, claims idclient.Claims) (string, error) {
+	if err := h.services.Identity.CheckSubject(ctx, claims.Subject, true); err != nil {
+		return "", err
+	}
 	flow, _ := ctx.Value(invitationContextKey{}).(identityFlowContext)
 	if flow.Invalid {
 		return "", errors.New("invalid invitation context")

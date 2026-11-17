@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -50,3 +51,34 @@ func TestPrewarmDebouncesAndSkipsDrafts(t *testing.T) {
 }
 
 func init() { prewarmDebounce = 100 * time.Millisecond }
+
+func TestPrewarmDeniedOwnerNeverReadsOrRenders(t *testing.T) {
+	cache, err := dashboard.NewSnapshots(audit.NewService(audit.NewPostgresRepository(nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	called, checked := make(chan string, 1), make(chan struct{})
+	guard := func(ctx context.Context, user string) (context.Context, context.CancelFunc, error) {
+		if user != "eval-paused" {
+			t.Error("wrong owner")
+		}
+		next, release := context.WithCancel(ctx)
+		release()
+		close(checked)
+		return next, release, errors.New("owned denial")
+	}
+	change, stop := prewarmer(t.Context(), cache, warmFixture{called}, slog.New(slog.NewTextHandler(io.Discard, nil)), guard)
+	defer stop()
+	change("eval-paused", true)
+	select {
+	case <-checked:
+	case <-time.After(time.Second):
+		t.Fatal("delayed owner work was not checked")
+	}
+	stop()
+	select {
+	case <-called:
+		t.Fatal("paused prewarm read/rendered owner data")
+	default:
+	}
+}

@@ -51,12 +51,15 @@ type Invite struct {
 type PostgresRepository struct {
 	db *pgxpool.Pool
 }
-type Service struct{ repo *PostgresRepository }
+type Service struct {
+	repo   *PostgresRepository
+	access func(context.Context, string, bool) error
+}
 
 func NewPostgresRepository(db *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{db}
 }
-func NewService(r *PostgresRepository) *Service { return &Service{r} }
+func NewService(r *PostgresRepository) *Service { return &Service{repo: r} }
 func Random() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
@@ -191,6 +194,31 @@ func (s *Service) Session(ctx context.Context, raw string) (principal.Principal,
 	return s.session(ctx, Hash(raw))
 }
 func (s *Service) session(ctx context.Context, hash string) (principal.Principal, Session, error) {
+	session, e := s.sessionRecord(ctx, hash)
+	if e != nil {
+		return principal.Principal{}, session, e
+	}
+	u, e := s.User(ctx, session.UserID)
+	if e == nil && u.Disabled {
+		e = principal.ErrForbidden
+	}
+	if e == nil {
+		e = s.CheckAccess(ctx, u.ID, false)
+	}
+	return Principal(u), session, e
+}
+
+// SessionForLogout proves the original cookie/CSRF binding without requiring an
+// app grant. Its only caller revokes that same session; it grants no read access.
+func (s *Service) SessionForLogout(ctx context.Context, raw string, identityMode bool) (Session, error) {
+	hash := Hash(raw)
+	if identityMode {
+		hash = identitySessionHash(raw)
+	}
+	return s.sessionRecord(ctx, hash)
+}
+
+func (s *Service) sessionRecord(ctx context.Context, hash string) (Session, error) {
 	var session Session
 	const sessionSQL = `SELECT id,user_id,csrf,expires_at FROM sessions WHERE id=@id AND expires_at>@now`
 	e := s.repo.db.QueryRow(ctx, sessionSQL, pgx.NamedArgs{"id": hash, "now": time.Now().UTC().Truncate(time.Millisecond)}).Scan(&session.Hash, &session.UserID, &session.CSRF, &session.ExpiresAt)
@@ -198,13 +226,9 @@ func (s *Service) session(ctx context.Context, hash string) (principal.Principal
 		if errors.Is(e, pgx.ErrNoRows) {
 			e = principal.ErrForbidden
 		}
-		return principal.Principal{}, session, e
+		return session, e
 	}
-	u, e := s.User(ctx, session.UserID)
-	if e == nil && u.Disabled {
-		e = principal.ErrForbidden
-	}
-	return Principal(u), session, e
+	return session, nil
 }
 func Principal(u User) principal.Principal {
 	scopes := append([]string{}, principal.Scopes...)

@@ -9,11 +9,15 @@ import (
 
 type IdentityConfig struct {
 	Enabled                        bool
+	AccessEnabled                  bool
 	Issuer, ClientID, ClientSecret string
 	CookieKey                      [32]byte
 }
 
 func (c IdentityConfig) Validate(publicURL, tailnetURL string) error {
+	if c.AccessEnabled && (!c.Enabled || strings.TrimSpace(c.ClientSecret) == "") {
+		return errors.New("central access enforcement requires enabled confidential Microapps ID sign-in")
+	}
 	if !c.Enabled {
 		return nil
 	}

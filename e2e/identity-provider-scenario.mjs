@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 // Loaded by Identity's owned e2e runner; never use a production issuer or account.
-export async function lifecycle({browser, base, mail, setupCode, root}) {
+export async function lifecycle({browser, base, mail, setupCode, root,fixtureSql}) {
   assert(["localhost","127.0.0.1"].includes(new URL(base).hostname));
   assert(process.env.MONEYBAG_TEST_DATABASE_URL, "explicit owned PostgreSQL server required");
   const owner=await browser.newContext();
@@ -20,8 +20,16 @@ export async function lifecycle({browser, base, mail, setupCode, root}) {
   const verifier=randomBytes(32).toString("base64url");
   const challenge=createHash("sha256").update(verifier).digest("base64url");
   let code;
+  const policyKey=randomBytes(24).toString('base64url');
+  let accessAction,missingPolicy=false;const policyActions=[];
   const callback=createServer((request,response)=>{
+    if(request.url==='/eval-access' && request.method==='POST' && request.headers.authorization==='Bearer '+policyKey) {
+      let input='';request.on('data',part=>{input+=part;if(input.length>1000)request.destroy()});request.on('end',async()=>{
+        try{await accessAction(JSON.parse(input).action);response.writeHead(200);response.end('{}')}catch{response.writeHead(500);response.end('owned fixture action failed')}
+      });return;
+    }
     const url=new URL(request.url,"http://localhost");
+    if(url.pathname==="/oauth-callback") {response.writeHead(200,{"content-type":"text/html"});response.end("<!doctype html><h1>Owned OAuth callback</h1>");return;}
     if(url.pathname==="/mcp-callback" && url.searchParams.get("state")===state && url.searchParams.has("code")) {
       code=url.searchParams.get("code");response.writeHead(200,{"content-type":"text/html"});response.end("<!doctype html><h1>Owned MCP callback</h1>");
     } else {response.writeHead(404);response.end();}
@@ -107,18 +115,35 @@ export async function lifecycle({browser, base, mail, setupCode, root}) {
       const csrf=await person.locator('form[action="/signout"] [name=csrf]').inputValue();
       assert.equal((await member.request.post(`${base}/signout`,{form:{csrf},maxRedirects:0})).status(),303);
     }
+    assert.equal(typeof fixtureSql,'function');
+    const ids=JSON.parse(fixtureSql('COPY (SELECT json_object_agg(email::text,id) FROM users) TO STDOUT').trim());
+    await admin.goto(base+'/access');const accessCSRF=await admin.locator('#access-page').getAttribute('data-csrf');assert(accessCSRF);
+    async function policy(groups,overrides) {
+      const summary=await owner.request.get(base+'/admin/access/summary',{timeout:5000});assert.equal(summary.status(),200);
+      const response=await owner.request.post(base+'/admin/access/changes',{headers:{Origin:base,'X-CSRF-Token':accessCSRF},data:{changes:{expected_revision:(await summary.json()).revision,groups,overrides},reason:'eval reviewed native Moneybag access policy',idempotency_key:randomBytes(20).toString('hex'),acknowledge_broad_masks:false},timeout:5000});assert.equal(response.status(),200,'owned policy failed');
+    }
+    await policy([{id:'eval-moneybag-native',name:'eval Moneybag native',description:'Owned captured-email fixture',archived:false,selectors:['eval-browser@example.test','eval-new@example.test'],members:[],apps:[created.app.id]}],[]);
+    accessAction=async action=>{
+      policyActions.push(action);
+      if(action==='block'||action==='restore')await policy([],[{user_id:ids['eval-browser@example.test'],client_id:created.app.id,decision:action==='block'?'block':null}]);
+      else if(action==='outage'){assert(!missingPolicy);fixtureSql('ALTER TABLE access_policy_state RENAME TO eval_moneybag_policy_unavailable');missingPolicy=true}
+      else if(action==='recover'){assert(missingPolicy);fixtureSql('ALTER TABLE eval_moneybag_policy_unavailable RENAME TO access_policy_state');missingPolicy=false}
+      else throw Error('invalid fixture action');
+    };
+    const policyKeyFile=join(root,'moneybag-policy-key');await writeFile(policyKeyFile,policyKey,{mode:0o600});
     const secretFile=join(root,"moneybag-client-secret");
     const passwordFile=join(root,"moneybag-eval-password");
     await writeFile(secretFile,created.client_secret,{mode:0o600});
     await writeFile(passwordFile,password,{mode:0o600});
     await new Promise((ok,fail)=>reservation.close(error=>error?fail(error):ok()));
     const moneybag=resolve(import.meta.dirname,"..");
-    child=spawn("go",["test","-race","-timeout","3m","./integration","-run","TestIdentityActualProviderBrowser","-v"],{cwd:join(moneybag,"backend"),stdio:["ignore","pipe","pipe"],env:{...process.env,MONEYBAG_ID_TEST_ISSUER:base,MONEYBAG_ID_TEST_CLIENT_ID:created.app.id,MONEYBAG_ID_TEST_SECRET_FILE:secretFile,MONEYBAG_ID_TEST_PASSWORD_FILE:passwordFile,MONEYBAG_ID_TEST_APP_PORT:String(appPort)}});
+    child=spawn("go",["test","-race","-timeout","3m","./integration","-run","TestIdentityActualProviderBrowser","-v"],{cwd:join(moneybag,"backend"),stdio:["ignore","pipe","pipe"],env:{...process.env,MONEYBAG_ID_TEST_ISSUER:base,MONEYBAG_ID_TEST_CLIENT_ID:created.app.id,MONEYBAG_ID_TEST_SECRET_FILE:secretFile,MONEYBAG_ID_TEST_PASSWORD_FILE:passwordFile,MONEYBAG_ID_TEST_APP_PORT:String(appPort),MONEYBAG_ID_TEST_OAUTH_CALLBACK:`http://127.0.0.1:${callback.address().port}/oauth-callback`,MONEYBAG_ID_TEST_POLICY_URL:`http://127.0.0.1:${callback.address().port}/eval-access`,MONEYBAG_ID_TEST_POLICY_KEY_FILE:policyKeyFile}});
     let output="";
     for(const stream of [child.stdout,child.stderr])stream.on("data",data=>{output=(output+data).slice(-16_384);});
     const result=await new Promise((ok,fail)=>{child.once("error",fail);child.once("exit",ok);});
     process.stdout.write(output);
     assert.equal(result,0,"Moneybag against real Microapps ID failed");
+    assert.deepEqual(policyActions,['block','restore','outage','recover','block','restore'],'actual access checks were skipped');
     const people=await tool("people_list",{});
     for (const email of ["eval-browser@example.test", "eval-new@example.test"]) {
       const evalUser=people.people.find(user=>user.email===email);
@@ -130,8 +155,10 @@ export async function lifecycle({browser, base, mail, setupCode, root}) {
     assert(activity.events.some(event=>event.text.includes("completed app_create")));
     assert(activity.events.some(event=>event.text.includes("completed invite_create")));
     assert.deepEqual(errors,[]);
-    console.log("Moneybag real Microapps ID: MCP registration/invite, captured email proof, signed OIDC, existing/new/invited/uninvited browser flows, Moneybag OAuth PKCE/read-only/revocation, preserved finance/model data, persistent eval smokes in both modes, rollback and zero leftover ID devices passed");
+    if(process.env.MONEYBAG_ID_REHEARSAL_REPORT)await writeFile(process.env.MONEYBAG_ID_REHEARSAL_REPORT,JSON.stringify({scope:'Actual Identity binary and Moneybag HTTP implementation in an owned native test process; two owned PostgreSQL 18 clusters',verified_invitation:'captured email',policy:'explicit protected admin API review',policy_actions:policyActions,callback_and_local_invitation:'pass',cookie_oauth_mcp:'pass',removal_and_real_policy_storage_outage:'fail closed',refresh_restoration:'pass',blocked_cookie_logout:'pass',id_legacy_smokes_and_rollback:'pass',financial_model_permission_and_existing_grant_snapshot:'preserved',leftover_eval_devices:0},null,2)+'\n',{mode:0o600});
+    console.log("Moneybag real Microapps ID: enforced Block/storage outage/refresh restoration/blocked logout, MCP registration/invite, captured email proof, signed OIDC, existing/new/invited/uninvited browser flows, Moneybag OAuth PKCE/read-only/revocation, preserved finance/model data, persistent eval smokes in both modes, rollback and zero leftover ID devices passed");
   } finally {
+    if(missingPolicy)fixtureSql('ALTER TABLE eval_moneybag_policy_unavailable RENAME TO access_policy_state');
     if(child && child.exitCode===null && child.signalCode===null)child.kill("SIGTERM");
     if(reservation.listening)await new Promise(ok=>reservation.close(ok));
     await new Promise(ok=>callback.close(ok));

@@ -30,6 +30,7 @@ import os
 assert os.environ['MONEYBAG_DATABASE_URL']=='postgres://owned-fixture/test'
 assert os.environ['MONEYBAG_SECRET_KEY']=='keep-feed-key'
 assert os.environ['MONEYBAG_ID_ENABLED']==os.environ['MONEYBAG_TEST_ENABLED']
+if 'MONEYBAG_TEST_ACCESS_EXPECTED' in os.environ:assert os.environ['MONEYBAG_ID_ACCESS_ENABLED']==os.environ['MONEYBAG_TEST_ACCESS_EXPECTED']
 if os.environ['MONEYBAG_ID_ENABLED']=='true':
  assert os.environ['MONEYBAG_ID_CLIENT_SECRET']=='$(touch "$MONEYBAG_TEST_INJECTION")'
 open(os.environ['MONEYBAG_TEST_EXECUTED'],'w').close()
@@ -58,6 +59,15 @@ open(os.environ['MONEYBAG_TEST_EXECUTED'],'w').close()
     assert (root / 'moneybag.env').read_bytes() == original
     assert (root / 'moneybag.env').stat().st_mode & 0o777 == 0o600
 
+    identity.unlink()
+    mode_file=root/'current/access.flag'
+    mode_file.write_text('true\n');mode_file.chmod(0o600)
+    env.update(MONEYBAG_TEST_ENABLED='false',MONEYBAG_TEST_ACCESS_EXPECTED='true',MONEYBAG_ID_ACCESS_ENABLED='false')
+    run(['bash',str(root/'run')],env)
+    mode_file.chmod(0o644);run(['bash',str(root/'run')],env,False);mode_file.chmod(0o600)
+    mode_file.write_text('invalid\n');run(['bash',str(root/'run')],env,False)
+    mode_file.unlink();mode_file.symlink_to(root/'moneybag.env');run(['bash',str(root/'run')],env,False)
+    mode_file.unlink()
     tools = root / 'tools'
     tools.mkdir()
     executable(tools / 'git', '''#!/usr/bin/env bash
@@ -131,6 +141,8 @@ main
         directory = runtime / 'releases' / name
         directory.mkdir(parents=True)
         executable(directory / 'moneybag', '#!/usr/bin/env bash\nexit 0\n')
+    (runtime/'releases'/new_release/'access.flag').write_text('false\n')
+    (runtime/'releases'/new_release/'access.flag').chmod(0o600)
     current = runtime / 'current'
     current.symlink_to('releases/' + old_release)
     home = root / 'home'
@@ -145,7 +157,10 @@ from pathlib import Path
 version=(Path(os.environ['MONEYBAG_TEST_RUNTIME'])/'current').resolve().name
 if os.environ['MONEYBAG_TEST_RUNTIME_MODE']=='health-fail' and version.startswith('aabb'):
  version='wrong-release'
-print(json.dumps({'version':version}))
+mode=(Path(os.environ['MONEYBAG_TEST_RUNTIME'])/'current/access.flag')
+enabled=mode.exists() and mode.read_text().strip()=='true'
+if os.environ['MONEYBAG_TEST_RUNTIME_MODE']=='access-fail' and version.startswith('aabb'):enabled=not enabled
+print(json.dumps({'version':version,'identityAccessEnforced':enabled}))
 ''')
     actual = root / 'actual-activation.sh'
     actual.write_text('''#!/usr/bin/env bash
@@ -157,6 +172,7 @@ release=aabbccddeeff-20260102000000
 capture_previous
 trap activation_failed ERR
 activate
+if [[ "$MONEYBAG_TEST_RUNTIME_MODE" == snapshot-drift ]]; then printf 'false\n' >"$target/$previous/access.flag"; bash -c 'exit 78'; fi
 if [[ "$MONEYBAG_TEST_RUNTIME_MODE" == smoke-fail ]]; then bash -c 'exit 78'; fi
 trap - ERR
 ''')
@@ -172,4 +188,22 @@ trap - ERR
         assert os.readlink(current) == 'releases/' + (new_release if mode == 'success' else old_release)
         assert restarts.read_text().splitlines() == ['restart'] * (1 if mode == 'success' else 2)
         assert (runtime / 'moneybag.env').read_bytes() == original
-print('Microapps ID launcher, deployment preflight and activation/smoke rollback checks passed')
+    # Both the new release and rollback target keep enforcement on.
+    for mode,expected_status in [('success',0),('access-fail',1),('smoke-fail',78)]:
+        for name in [old_release,new_release]:
+            flag=runtime/'releases'/name/'access.flag';flag.write_text('true\n');flag.chmod(0o600)
+        current.unlink();current.symlink_to('releases/'+old_release)
+        restarts.unlink(missing_ok=True)
+        result=run(['bash',str(actual)],{**runtime_env,'MONEYBAG_TEST_RUNTIME_MODE':mode},mode=='success')
+        assert result.returncode==expected_status
+        assert os.readlink(current)=='releases/'+(new_release if mode=='success' else old_release)
+        assert (current/'access.flag').read_text().strip()=='true'
+        assert restarts.read_text().splitlines()==['restart']*(1 if mode=='success' else 2)
+    for name in [old_release,new_release]:
+        flag=runtime/'releases'/name/'access.flag';flag.write_text('true\n');flag.chmod(0o600)
+    current.unlink();current.symlink_to('releases/'+old_release)
+    result=run(['bash',str(actual)],{**runtime_env,'MONEYBAG_TEST_RUNTIME_MODE':'snapshot-drift'},False)
+    assert result.returncode==78
+    assert os.readlink(current)=='releases/'+new_release, 'rollback bypassed enforcement through a changed previous flag'
+    assert (current/'access.flag').read_text().strip()=='true'
+print('Microapps ID/access launcher, deployment preflight and mode-preserving activation/smoke rollback checks passed')

@@ -23,6 +23,9 @@ func (s *Service) StartIdentitySession(ctx context.Context, user User) (string, 
 	if current.Disabled || pending {
 		return "", Session{}, principal.ErrForbidden
 	}
+	if err := s.CheckAccess(ctx, current.ID, true); err != nil {
+		return "", Session{}, err
+	}
 	return s.startSession(ctx, current, true)
 }
 func (s *Service) IdentitySession(ctx context.Context, raw string) (principal.Principal, Session, error) {
