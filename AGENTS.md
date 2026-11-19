@@ -12,3 +12,11 @@
 ## Verification
 
 - Run checks locally or over SSH. Do not start GitHub Actions runs. Automatic push and pull-request CI is disabled; preserve that choice.
+
+## Deploy (Aquifer)
+
+Production runs on `oracle-vm` as the Aquifer app `moneybag`. Use the `aquifer-deploy` skill:
+build locally, `scp` the artifact to `oracle-vm:/tmp/`, then `ssh oracle-vm aq deploy moneybag /tmp/<file>`.
+Env vars: `printf %s "$VALUE" | ssh oracle-vm aq secret set moneybag NAME`. Logs, status and rollback:
+`ssh oracle-vm aq logs|status|rollback moneybag`. Writable state lives in `/home/apps/data/`.
+smdctl, its units and `/home/snowbear/ci/...` are retired: do not deploy there.
